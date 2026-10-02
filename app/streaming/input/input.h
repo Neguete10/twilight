@@ -3,6 +3,7 @@
 #include "settings/streamingpreferences.h"
 #include "backend/computermanager.h"
 #include "dualsense_hid.h"
+#include "streaming/input/corehid_mouse.h"
 
 #include <SDL.h>
 
@@ -176,6 +177,24 @@ private:
     static
     Uint32 dragTimerCallback(Uint32 interval, void* param);
 
+    bool tryStartCoreHidCapture();
+
+    bool stopCoreHidCapture();
+
+    bool coreHidSuppressesRelativeMotion() const;
+
+    bool coreHidSuppressesScroll() const;
+
+#ifdef Q_OS_DARWIN
+    static void coreHidMotionThunk(const CoreHidMouseDelta& delta, void* context);
+
+    static void coreHidButtonThunk(const CoreHidButtonUpdate& update, void* context);
+
+    void sendCoreHidMotion(const CoreHidMouseDelta& delta);
+
+    void sendCoreHidButtons(const CoreHidButtonUpdate& update);
+#endif
+
     SDL_Window* m_Window;
     bool m_MultiController;
     bool m_GamepadMouse;
@@ -232,6 +251,14 @@ private:
     void clearAdaptiveTriggers();
 
     bool sendDualSenseReport(SDL_GameController* controller, const DualSenseOutputReport& report);
+
+#ifdef Q_OS_DARWIN
+    bool m_CoreHidRequested;
+    bool m_CoreHidActive;
+    float m_CoreHidScale;
+    CoreHidBackendRequest m_CoreHidBackend;
+    CoreHidMouseCapture* m_CoreHid;
+#endif
 
     static const int k_ButtonMap[];
 };

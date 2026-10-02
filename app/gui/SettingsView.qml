@@ -1619,6 +1619,24 @@ Flickable {
                                   qsTr("NOTE: Due to a bug in GeForce Experience, this option may not work properly if your host PC has multiple monitors.")
                 }
 
+                CheckBox {
+                    id: coreHidMouseCheck
+                    hoverEnabled: true
+                    width: parent.width
+                    visible: Qt.platform.os == "osx"
+                    text: qsTr("Use CoreHID raw mouse (macOS games)")
+                    font.pointSize: 12
+                    checked: StreamingPreferences.coreHidMouse
+                    onCheckedChanged: {
+                        StreamingPreferences.coreHidMouse = checked
+                    }
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 10000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Reads the mouse with IOHID instead of warping the macOS cursor. Off by default. Requires Input Monitoring, and it does nothing in remote-desktop mouse mode. Trackpads stay on SDL. See docs/COREHID_MAC.md.")
+                }
+
                 Row {
                     spacing: 5
                     width: parent.width

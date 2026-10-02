@@ -30,6 +30,10 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Ignore button presses outside the video region, but allow button releases
         return;
     }
+    else if (coreHidSuppressesRelativeMotion()) {
+        // The HID callback already sent this click. SDL would send it again.
+        return;
+    }
 
     switch (event->button)
     {
@@ -149,6 +153,11 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
 
         m_MouseWasInVideoRegion = mouseInVideoRegion;
     }
+    else if (coreHidSuppressesRelativeMotion()) {
+        // IOHID (or GCMouse, if IOHID was denied) already sent this delta.
+        // SDL's xrel comes from the warped cursor and would double-count.
+        return;
+    }
     else {
         LiSendMouseMoveEvent(xrel, yrel);
     }
@@ -162,6 +171,11 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
     }
     else if (event->which == SDL_TOUCH_MOUSEID) {
         // Ignore synthetic mouse events
+        return;
+    }
+    else if (coreHidSuppressesScroll()) {
+        // A relative HID wheel is already on the host. Gesture scrolls from
+        // devices with no wheel element still fall through to SDL.
         return;
     }
 
