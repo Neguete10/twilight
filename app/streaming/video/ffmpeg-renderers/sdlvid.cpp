@@ -247,6 +247,11 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
                 m_OverlayRects[type].x = viewportRect.w - newSurface->w;
                 m_OverlayRects[type].y = 0;
             }
+            else if (type == Overlay::OverlayGamepad) {
+                // Bottom right
+                m_OverlayRects[type].x = SDL_max(0, viewportRect.w - newSurface->w);
+                m_OverlayRects[type].y = SDL_max(0, viewportRect.h - newSurface->h);
+            }
 
             m_OverlayRects[type].w = newSurface->w;
             m_OverlayRects[type].h = newSurface->h;

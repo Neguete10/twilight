@@ -246,6 +246,11 @@ void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, in
             // Top right
             overlayRect.x = viewportWidth - newSurface->w;
             overlayRect.y = viewportHeight - newSurface->h;
+        }
+        else if (type == Overlay::OverlayGamepad) {
+            // Bottom right. OpenGL's origin is the lower-left.
+            overlayRect.x = SDL_max(0, viewportWidth - newSurface->w);
+            overlayRect.y = 0;
         } else {
             SDL_assert(false);
         }

@@ -608,6 +608,11 @@ public:
                     renderRect.x = m_LastDrawableWidth - overlayTexture.width;
                     renderRect.y = m_LastDrawableHeight - overlayTexture.height;
                 }
+                else if (i == Overlay::OverlayGamepad) {
+                    // Bottom right. y=0 is the bottom on this path.
+                    renderRect.x = SDL_max(0, m_LastDrawableWidth - (int)overlayTexture.width);
+                    renderRect.y = 0;
+                }
 
                 renderRect.w = overlayTexture.width;
                 renderRect.h = overlayTexture.height;

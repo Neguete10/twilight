@@ -727,6 +727,11 @@ void VAAPIRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
             overlayRect.x = -newSurface->w;
             overlayRect.y = 0;
         }
+        else if (type == Overlay::OverlayGamepad) {
+            // Bottom right (negative origins are the right and bottom edges)
+            overlayRect.x = -newSurface->w;
+            overlayRect.y = -newSurface->h;
+        }
 
         overlayRect.w = newSurface->w;
         overlayRect.h = newSurface->h;

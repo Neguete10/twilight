@@ -6,6 +6,9 @@ CONFIG += c++11
 !system(python3 $$PWD/../scripts/apply_pyrowave_protocol.py) {
     error("Failed to apply the PyroWave protocol patch to moonlight-common-c")
 }
+!system(python3 $$PWD/../scripts/apply_adaptive_triggers_protocol.py) {
+    error("Failed to apply the adaptive-trigger protocol patch to moonlight-common-c")
+}
 
 unix:!macx {
     TARGET = moonlight
@@ -185,7 +188,9 @@ macx {
         -framework CoreWLAN \
         -framework Metal \
         -framework QuartzCore \
-        -framework VideoToolbox
+        -framework VideoToolbox \
+        -framework IOKit \
+        -framework CoreFoundation
 
     CONFIG += ffmpeg soundio
 }
@@ -214,7 +219,9 @@ SOURCES += \
     settings/network_profile_logic.cpp \
     settings/network_identity.cpp \
     streaming/input/abstouch.cpp \
+    streaming/input/dualsense_effects.cpp \
     streaming/input/gamepad.cpp \
+    streaming/input/gamepad_overlay.cpp \
     streaming/input/input.cpp \
     streaming/input/keyboard.cpp \
     streaming/input/mouse.cpp \
@@ -475,6 +482,9 @@ win32:!winrt {
         streaming/video/ffmpeg-renderers/d3d11va.h \
         streaming/video/ffmpeg-renderers/pacer/dxvsyncsource.h
 }
+macx: SOURCES += streaming/input/dualsense_hid_mac.mm
+!macx: SOURCES += streaming/input/dualsense_hid.cpp
+
 macx {
     message(CoreAudio + VideoToolbox renderers selected)
 

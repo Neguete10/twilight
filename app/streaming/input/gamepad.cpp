@@ -1,8 +1,12 @@
 #include "streaming/session.h"
+#include "streaming/input/gamepad_overlay.h"
 
 #include <Limelight.h>
 #include <SDL.h>
 #include "settings/mappingmanager.h"
+
+static_assert(kDualSenseEffectParamSize == DS_EFFECT_PAYLOAD_SIZE,
+              "client effect payload must match the 0x5503 packet");
 
 #include <QtMath>
 
@@ -392,6 +396,31 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
                                                             !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebugAudio));
 
         // Clear buttons down on this gamepad
+        LiSendMultiControllerEvent(state->index, m_GamepadMask,
+                                   0, 0, 0, 0, 0, 0, 0);
+        return;
+    }
+
+    // Select+L1+R1+Y toggles the on-stream gamepad overlay.
+    if (state->buttons == (BACK_FLAG | LB_FLAG | RB_FLAG | Y_FLAG)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected gamepad viz toggle combo");
+        Session::get()->getOverlayManager().setOverlayState(
+            Overlay::OverlayGamepad,
+            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayGamepad));
+        refreshGamepadOverlay(true);
+
+        LiSendMultiControllerEvent(state->index, m_GamepadMask,
+                                   0, 0, 0, 0, 0, 0, 0);
+        return;
+    }
+
+    // Select+L1+R1+A cycles the local adaptive-trigger preview.
+    if (state->buttons == (BACK_FLAG | LB_FLAG | RB_FLAG | A_FLAG)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected adaptive trigger preview gamepad combo");
+        cycleAdaptiveTriggerPreview();
+
         LiSendMultiControllerEvent(state->index, m_GamepadMask,
                                    0, 0, 0, 0, 0, 0, 0);
         return;
@@ -886,6 +915,159 @@ void SdlInputHandler::setMotionEventState(uint16_t controllerNumber, uint8_t mot
         }
     }
 #endif
+}
+
+static bool isPlayStation5(SDL_GameController* controller)
+{
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    return controller != nullptr &&
+            SDL_GameControllerGetType(controller) == SDL_CONTROLLER_TYPE_PS5;
+#else
+    Q_UNUSED(controller);
+    return false;
+#endif
+}
+
+bool SdlInputHandler::sendDualSenseReport(SDL_GameController* controller, const DualSenseOutputReport& report)
+{
+    if (!isPlayStation5(controller)) {
+        return false;
+    }
+
+#if SDL_VERSION_ATLEAST(2, 0, 16)
+    if (SDL_GameControllerSendEffect(controller, &report, (int)sizeof(report)) == 0) {
+        return true;
+    }
+    if (!m_LoggedAdaptiveSendFailure) {
+        m_LoggedAdaptiveSendFailure = true;
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "SDL_GameControllerSendEffect failed: %s",
+                    SDL_GetError());
+    }
+#endif
+
+    const char* serial = nullptr;
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    serial = SDL_GameControllerGetSerial(controller);
+#endif
+    return m_DualSenseHid.send(report, serial);
+}
+
+void SdlInputHandler::clearAdaptiveTriggers()
+{
+    DualSenseOutputReport report;
+    if (!dualSenseFillPreviewReport(DualSensePreviewOff, &report)) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_GAMEPADS; i++) {
+        if (isPlayStation5(m_GamepadState[i].controller)) {
+            sendDualSenseReport(m_GamepadState[i].controller, report);
+        }
+    }
+}
+
+void SdlInputHandler::setAdaptiveTriggers(uint16_t controllerNumber, DualSenseOutputReport* report)
+{
+    if (report == nullptr) {
+        return;
+    }
+
+    m_SawHostAdaptiveTriggers = true;
+    m_LastHostTypeLeft = report->leftTriggerEffectType;
+    m_LastHostTypeRight = report->rightTriggerEffectType;
+
+    if (m_TriggerPreview != DualSensePreviewFollowHost) {
+        SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
+                     "Ignoring host adaptive trigger while local preview is active");
+        refreshGamepadOverlay(true);
+        SDL_free(report);
+        return;
+    }
+
+    if (controllerNumber < MAX_GAMEPADS &&
+            isPlayStation5(m_GamepadState[controllerNumber].controller)) {
+        if (!sendDualSenseReport(m_GamepadState[controllerNumber].controller, *report) &&
+                !m_LoggedAdaptiveSendFailure) {
+            m_LoggedAdaptiveSendFailure = true;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Host adaptive trigger was not applied to gamepad %u",
+                        controllerNumber);
+        }
+        refreshGamepadOverlay(true);
+    }
+
+    SDL_free(report);
+}
+
+void SdlInputHandler::cycleAdaptiveTriggerPreview()
+{
+    int applied = 0;
+    DualSenseOutputReport report;
+
+    m_TriggerPreview = dualSenseNextTriggerPreview(m_TriggerPreview);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Adaptive trigger preview: %s",
+                dualSenseTriggerPreviewLabel(m_TriggerPreview));
+
+    if (m_TriggerPreview == DualSensePreviewFollowHost) {
+        // Drop the local effect. The next host packet, if any, replaces it.
+        dualSenseFillPreviewReport(DualSensePreviewOff, &report);
+    }
+    else if (!dualSenseFillPreviewReport(m_TriggerPreview, &report)) {
+        refreshGamepadOverlay(true);
+        return;
+    }
+
+    for (int i = 0; i < MAX_GAMEPADS; i++) {
+        if (sendDualSenseReport(m_GamepadState[i].controller, report)) {
+            applied++;
+        }
+    }
+    if (applied == 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "No DualSense accepted the trigger preview. Pair the pad in macOS and confirm SDL is using the HIDAPI PS5 driver.");
+    }
+    refreshGamepadOverlay(true);
+}
+
+void SdlInputHandler::refreshGamepadOverlay(bool force)
+{
+    GamepadVizPad pads[MAX_GAMEPADS];
+    char text[1024];
+    char triggerLine[128];
+    uint32_t now;
+
+    if (Session::get() == nullptr ||
+            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayGamepad)) {
+        return;
+    }
+
+    now = SDL_GetTicks();
+    if (!force && m_LastGamepadOverlayTicks != 0 &&
+            !SDL_TICKS_PASSED(now, m_LastGamepadOverlayTicks + 50)) {
+        return;
+    }
+    m_LastGamepadOverlayTicks = now;
+
+    for (int i = 0; i < MAX_GAMEPADS; i++) {
+        pads[i].present = m_GamepadState[i].controller != nullptr;
+        pads[i].playerIndex = m_GamepadState[i].index;
+        pads[i].buttons = m_GamepadState[i].buttons;
+        pads[i].lsX = m_GamepadState[i].lsX;
+        pads[i].lsY = m_GamepadState[i].lsY;
+        pads[i].rsX = m_GamepadState[i].rsX;
+        pads[i].rsY = m_GamepadState[i].rsY;
+        pads[i].lt = m_GamepadState[i].lt;
+        pads[i].rt = m_GamepadState[i].rt;
+    }
+
+    dualSenseFormatTriggerLine(triggerLine, (int)sizeof(triggerLine), m_TriggerPreview,
+                               m_SawHostAdaptiveTriggers, m_LastHostTypeLeft, m_LastHostTypeRight);
+    if (!formatGamepadOverlay(text, (int)sizeof(text), pads, MAX_GAMEPADS, triggerLine)) {
+        return;
+    }
+    Session::get()->getOverlayManager().updateOverlayText(Overlay::OverlayGamepad, text);
 }
 
 void SdlInputHandler::setControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b)
