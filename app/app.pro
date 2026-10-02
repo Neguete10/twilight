@@ -639,9 +639,35 @@ win32 {
     QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/Moonlight.exe.manifest
 }
 macx {
-    # Create Info.plist in object dir with the correct version string
+    # Create Info.plist in object dir with the correct version string.
+    # BUNDLE_ID / DISPLAY_NAME default to the upstream Moonlight identity.
+    # Opt in to Twilight Mac App Store scaffolding with CONFIG+=twilight-mas
+    # (see app/deploy/macos/Twilight-MAS.entitlements and docs/TWILIGHT_MAS.md).
+    # Hardened Runtime signing is: codesign --options runtime
     system(cp $$PWD/Info.plist $$OUT_PWD/Info.plist)
     system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$OUT_PWD/Info.plist)
+
+    TWILIGHT_BUNDLE_ID = com.moonlight-stream.Moonlight
+    TWILIGHT_DISPLAY_NAME = Moonlight
+    twilight-mas {
+        TWILIGHT_BUNDLE_ID = com.henrique.twilight
+        TWILIGHT_DISPLAY_NAME = Twilight
+
+        # Xcode generator only. Makefile builds sign in scripts/generate-dmg.sh.
+        CODE_SIGN_ENTITLEMENTS.name = CODE_SIGN_ENTITLEMENTS
+        CODE_SIGN_ENTITLEMENTS.value = $$PWD/deploy/macos/Twilight-MAS.entitlements
+        ENABLE_HARDENED_RUNTIME.name = ENABLE_HARDENED_RUNTIME
+        ENABLE_HARDENED_RUNTIME.value = YES
+        QMAKE_MAC_XCODE_SETTINGS += CODE_SIGN_ENTITLEMENTS ENABLE_HARDENED_RUNTIME
+
+        system(sed -i -e 's/Moonlight uses the local network/Twilight uses the local network/g' $$OUT_PWD/Info.plist)
+        message("twilight-mas: bundle id $$TWILIGHT_BUNDLE_ID")
+        message("twilight-mas: display name $$TWILIGHT_DISPLAY_NAME")
+        message("twilight-mas: entitlements $$PWD/deploy/macos/Twilight-MAS.entitlements")
+        message("twilight-mas: codesign --options runtime --timestamp --entitlements $$PWD/deploy/macos/Twilight-MAS.entitlements")
+    }
+    system(sed -i -e 's/BUNDLE_ID/$$TWILIGHT_BUNDLE_ID/g' $$OUT_PWD/Info.plist)
+    system(sed -i -e 's/DISPLAY_NAME/$$TWILIGHT_DISPLAY_NAME/g' $$OUT_PWD/Info.plist)
 
     QMAKE_INFO_PLIST = $$OUT_PWD/Info.plist
 
