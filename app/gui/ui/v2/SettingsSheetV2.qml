@@ -461,6 +461,18 @@ Item {
                         SettingRowV2 {
                             width: parent.width
                             theme: sheet.theme
+                            visible: Qt.platform.os == "osx"
+                            title: qsTr("Use CoreHID raw mouse (macOS games)")
+                            subtitle: qsTr("Needs Input Monitoring permission. Restart the stream, or grab the mouse again, for it to take effect.")
+                            SwitchV2 {
+                                theme: sheet.theme
+                                checked: StreamingPreferences.coreHidMouse
+                                onToggled: StreamingPreferences.coreHidMouse = next
+                            }
+                        }
+                        SettingRowV2 {
+                            width: parent.width
+                            theme: sheet.theme
                             title: qsTr("Touchscreen as a trackpad")
                             subtitle: qsTr("When off, touches map to absolute screen positions.")
                             SwitchV2 {
