@@ -156,7 +156,7 @@ public:
     Q_PROPERTY(bool detectNetworkBlocking MEMBER detectNetworkBlocking NOTIFY detectNetworkBlockingChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     // Twilight's glass HUD. Independent of the classic yellow overlay.
-    // Stored under the QSettings key "showTwilightHud". Missing key is on.
+    // Stored under the QSettings key "showTwilightHud". Missing key is off.
     Q_PROPERTY(bool showTwilightHud READ showTwilightHud WRITE setShowTwilightHud NOTIFY showTwilightHudChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
     Q_PROPERTY(SpatialAudioConfig spatialAudioConfig MEMBER spatialAudioConfig NOTIFY spatialAudioConfigChanged)

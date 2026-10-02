@@ -68,7 +68,7 @@ static StreamingPreferences* s_GlobalPrefs;
 static QReadWriteLock s_GlobalPrefsLock;
 
 StreamingPreferences::StreamingPreferences(QQmlEngine *qmlEngine)
-    : m_ShowTwilightHud(true),
+    : m_ShowTwilightHud(false),
       m_QmlEngine(qmlEngine)
 {
     reload();
@@ -195,7 +195,7 @@ void StreamingPreferences::reload()
         m_UiVersion = (version == QLatin1String("v1")) ? QStringLiteral("v1") : QStringLiteral("v2");
     }
     m_LastSelectedHostUuid = settings.value(SER_LASTHOSTUUID).toString();
-    m_ShowTwilightHud = settings.value(SER_TWILIGHTHUD, true).toBool();
+    m_ShowTwilightHud = settings.value(SER_TWILIGHTHUD, false).toBool();
     publishHudSamplingFlag();
 
 
