@@ -570,7 +570,7 @@ Item {
                     id: addButton
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.bottom: credit.top
+                    anchors.bottom: parent.bottom
                     anchors.margins: 12
                     height: 40
                     radius: 12
@@ -603,19 +603,6 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: shell.addOpen = true
                     }
-                }
-
-                TwTextV2 {
-                    id: credit
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    anchors.margins: 14
-                    theme: shell.theme
-                    color: theme.tertiary
-                    font.pixelSize: 10
-                    wrapMode: Text.WordWrap
-                    text: qsTr("Moonlight · spatial audio by Andy Grundman")
                 }
             }
 

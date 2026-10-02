@@ -280,8 +280,8 @@ Item {
                             width: parent.width
                             theme: sheet.theme
                             from: 500
-                            to: StreamingPreferences.unlockBitrate ? 500000 : 150000
-                            value: Math.min(StreamingPreferences.bitrateKbps, StreamingPreferences.unlockBitrate ? 500000 : 150000)
+                            to: 500000
+                            value: Math.min(StreamingPreferences.bitrateKbps, 500000)
                             onMoved: StreamingPreferences.bitrateKbps = value
                         }
 
@@ -340,29 +340,13 @@ Item {
                         SettingRowV2 {
                             width: parent.width
                             theme: sheet.theme
+                            divider: false
                             title: qsTr("YUV 4:4:4")
                             subtitle: qsTr("Sharper text and desktop. Not ideal for fast games.")
                             SwitchV2 {
                                 theme: sheet.theme
                                 checked: StreamingPreferences.enableYUV444
                                 onToggled: sheet.applyYuv(next)
-                            }
-                        }
-                        SettingRowV2 {
-                            width: parent.width
-                            theme: sheet.theme
-                            divider: false
-                            title: qsTr("Unlock bitrate limit")
-                            subtitle: qsTr("For Sunshine on a wired LAN. The slider then goes to 500 Mb/s.")
-                            SwitchV2 {
-                                theme: sheet.theme
-                                checked: StreamingPreferences.unlockBitrate
-                                onToggled: {
-                                    StreamingPreferences.unlockBitrate = next
-                                    var cap = next ? 500000 : 150000
-                                    if (StreamingPreferences.bitrateKbps > cap)
-                                        StreamingPreferences.bitrateKbps = cap
-                                }
                             }
                         }
                     }
