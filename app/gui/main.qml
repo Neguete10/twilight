@@ -18,7 +18,8 @@ ApplicationWindow {
     // a retranslate() because AppView breaks for some reason.
     property bool clearOnBack: false
 
-    // Twilight (V2) is opt-in. streamActive blocks a shell swap during a stream.
+    // Twilight (V2) is the starting shell. Classic stays available.
+    // streamActive blocks a shell swap during a stream.
     property bool v2Active: false
     property bool streamActive: false
     property string classicTitle: ""

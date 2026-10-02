@@ -163,8 +163,8 @@ public:
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
-    // "v1" (classic Moonlight shell, the default) or "v2" (Twilight).
-    // Stored under the QSettings key "uiVersion".
+    // "v2" (Twilight, the starting shell) or "v1" (Classic).
+    // Stored under the QSettings key "uiVersion". A missing key is v2.
     Q_PROPERTY(QString uiVersion READ uiVersion WRITE setUiVersion NOTIFY uiVersionChanged)
 
     Q_INVOKABLE bool retranslate();

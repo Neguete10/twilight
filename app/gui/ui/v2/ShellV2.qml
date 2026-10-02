@@ -836,6 +836,8 @@ Item {
                                     anchors.bottom: parent.bottom
                                     width: 220
                                     fillMode: Image.PreserveAspectCrop
+                                    horizontalAlignment: Image.AlignHCenter
+                                    verticalAlignment: Image.AlignVCenter
                                     asynchronous: true
                                     source: {
                                         var rev = shell.appRevision

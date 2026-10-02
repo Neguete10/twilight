@@ -181,8 +181,9 @@ void StreamingPreferences::reload()
     language = static_cast<Language>(settings.value(SER_LANGUAGE,
                                                     static_cast<int>(Language::LANG_AUTO)).toInt());
     {
-        const QString version = settings.value(SER_UIVERSION, QStringLiteral("v1")).toString().trimmed().toLower();
-        m_UiVersion = (version == QLatin1String("v2")) ? QStringLiteral("v2") : QStringLiteral("v1");
+        // Missing key starts on Twilight. An explicit "v1" still restores Classic.
+        const QString version = settings.value(SER_UIVERSION).toString().trimmed().toLower();
+        m_UiVersion = (version == QLatin1String("v1")) ? QStringLiteral("v1") : QStringLiteral("v2");
         publishHudSamplingFlag();
     }
 

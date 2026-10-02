@@ -28,8 +28,14 @@ QImage twilightRenderSfSymbol(const QString& name, int pointSize, const QColor& 
                 symbolSize = NSMakeSize(static_cast<CGFloat>(pointSize), static_cast<CGFloat>(pointSize));
             }
             const CGFloat scale = 2.0;
-            const int width = qMax(1, static_cast<int>(qRound(symbolSize.width * scale)));
-            const int height = qMax(1, static_cast<int>(qRound(symbolSize.height * scale)));
+            NSRect proposed = NSMakeRect(0, 0, symbolSize.width * scale, symbolSize.height * scale);
+            CGImageRef cgImage = [image CGImageForProposedRect:&proposed context:nil hints:nil];
+            if (cgImage == nil) {
+                return QImage();
+            }
+
+            const int width = qMax(1, static_cast<int>(CGImageGetWidth(cgImage)));
+            const int height = qMax(1, static_cast<int>(CGImageGetHeight(cgImage)));
 
             QImage bitmap(width, height, QImage::Format_ARGB32_Premultiplied);
             bitmap.fill(Qt::transparent);
@@ -42,15 +48,20 @@ QImage twilightRenderSfSymbol(const QString& name, int pointSize, const QColor& 
                                                       static_cast<size_t>(bitmap.bytesPerLine()),
                                                       space,
                                                       kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
-            if (ctx != nullptr) {
-                NSGraphicsContext* gc = [NSGraphicsContext graphicsContextWithCGContext:ctx flipped:YES];
-                [NSGraphicsContext saveGraphicsState];
-                [NSGraphicsContext setCurrentContext:gc];
-                [image drawInRect:NSMakeRect(0, 0, width, height)];
-                [NSGraphicsContext restoreGraphicsState];
-                CGContextRelease(ctx);
-            }
             CGColorSpaceRelease(space);
+            if (ctx == nullptr) {
+                return QImage();
+            }
+
+            // A CGBitmapContext treats the first QImage row as the bottom.
+            // Flip the context once so every SF Symbol lands right-side up.
+            // drawInRect: ignored NSGraphicsContext's flipped flag, which is
+            // why wifi, pencil, trash, display, gamecontroller, and network
+            // (and the other glyphs) were inverted together.
+            CGContextTranslateCTM(ctx, 0, height);
+            CGContextScaleCTM(ctx, 1, -1);
+            CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), cgImage);
+            CGContextRelease(ctx);
 
             QPainter painter(&bitmap);
             painter.setCompositionMode(QPainter::CompositionMode_SourceIn);

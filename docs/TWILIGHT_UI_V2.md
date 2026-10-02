@@ -1,13 +1,13 @@
 # Twilight UI V2
 
-Twilight keeps the classic Moonlight shell and adds a second one. The default is Classic, so existing users see the same window until they switch.
+Twilight keeps the classic Moonlight shell and adds a second one. The starting shell is Twilight. Classic is still one click away, and that choice is remembered.
 
 ## Toggle
 
-The main window toolbar has a **Classic / Twilight** control.
+The main window toolbar has a **Twilight / Classic** control. Twilight is the left segment.
 
-- Classic is `uiVersion=v1` (the default when the key is missing).
-- Twilight is `uiVersion=v2`.
+- Twilight is `uiVersion=v2` (the value used when the key is missing).
+- Classic is `uiVersion=v1`.
 - The key is `uiVersion` in the normal Moonlight `QSettings` store.
 - Switching saves immediately and reloads only the main shell. It does nothing while `streamActive` is set, and the toolbar is not available once a stream has hidden the window.
 - Command-line pair, quit, and stream windows stay on the classic path.
@@ -26,7 +26,7 @@ Pin on an app tile is Moonlight's existing direct-launch flag (one app per host)
 
 ## Icons and type
 
-On macOS 11 and later, `image://sfsymbol/<name>/<pointSize>/<hex>` draws a real SF Symbol with `NSImage imageWithSystemSymbolName` (`app/gui/sfsymbol_mac.mm`). Other platforms, and unknown names, use a small geometric stand-in from `twilightDrawFallbackSymbol`.
+On macOS 11 and later, `image://sfsymbol/<name>/<pointSize>/<hex>` draws a real SF Symbol with `NSImage imageWithSystemSymbolName` (`app/gui/sfsymbol_mac.mm`). The bitmap context is flipped once so the glyph matches `QImage`'s top-left origin. Other platforms, and unknown names, use a small geometric stand-in from `twilightDrawFallbackSymbol`.
 
 Type uses `.AppleSystemUIFont` on Darwin, which is SF Pro on current macOS. The font is not bundled. Windows uses Segoe UI. Elsewhere the application font is left alone.
 

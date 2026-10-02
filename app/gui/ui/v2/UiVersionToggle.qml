@@ -3,7 +3,7 @@ import QtQuick 2.9
 Item {
     id: root
     property bool darkChrome: true
-    property string currentVersion: "v1"
+    property string currentVersion: "v2"
     signal requestVersion(string version)
 
     implicitWidth: 208
@@ -31,7 +31,7 @@ Item {
             color: root.pill
             border.width: root.darkChrome ? 0 : 1
             border.color: root.edge
-            x: root.currentVersion === "v2" ? parent.width - width - 3 : 3
+            x: root.currentVersion === "v2" ? 3 : parent.width - width - 3
             Behavior on x {
                 NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
             }
@@ -47,23 +47,6 @@ Item {
             height: parent.height
             TwTextV2 {
                 anchors.centerIn: parent
-                text: qsTr("Classic")
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                color: root.currentVersion === "v1" ? root.ink : root.mute
-            }
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.requestVersion("v1")
-            }
-        }
-
-        Item {
-            width: parent.width / 2
-            height: parent.height
-            TwTextV2 {
-                anchors.centerIn: parent
                 text: qsTr("Twilight")
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
@@ -73,6 +56,23 @@ Item {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.requestVersion("v2")
+            }
+        }
+
+        Item {
+            width: parent.width / 2
+            height: parent.height
+            TwTextV2 {
+                anchors.centerIn: parent
+                text: qsTr("Classic")
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                color: root.currentVersion === "v1" ? root.ink : root.mute
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.requestVersion("v1")
             }
         }
     }
