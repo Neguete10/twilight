@@ -112,6 +112,13 @@ public:
 
     Q_INVOKABLE void exec(QWindow* qtWindow);
 
+#ifdef Q_OS_DARWIN
+    // Shrinks the SDL stream window into a floating mini player that stays
+    // visible across Spaces and Stage Manager. Same call exits. The stream
+    // hotkey is Ctrl+Alt+Shift+P; the Window menu calls this too.
+    void togglePictureInPicture();
+#endif
+
     static
     void getDecoderInfo(SDL_Window* window,
                         bool& isHardwareAccelerated, bool& isFullScreenOnly,
@@ -172,6 +179,21 @@ private:
                              int& width, int& height);
 
     void toggleFullscreen();
+
+#ifdef Q_OS_DARWIN
+    void enterPictureInPicture();
+
+    void exitPictureInPicture();
+
+    void releaseVideoDecoder();
+
+    // Re-applies floating chrome after SDL or AppKit resets it. For a short
+    // window after leaving fullscreen, a display-sized frame is pulled back
+    // to the mini player (macOS animates that transition).
+    void reapplyPictureInPictureChrome(bool orderFront);
+
+    bool displayCoversWindow(int width, int height) const;
+#endif
 
     void notifyMouseEmulationMode(bool enabled);
 
@@ -285,6 +307,26 @@ private:
     // this session is not using PyroWave. Vulkan needs SDL_WINDOW_VULKAN;
     // Metal and every other codec keep SDL_WINDOW_METAL.
     PyroWaveGpuBackend m_PyroWaveBackend;
+
+#ifdef Q_OS_DARWIN
+    bool m_PipActive;
+    bool m_PipRestoreFullscreen;
+    int m_PipRestoreX;
+    int m_PipRestoreY;
+    int m_PipRestoreW;
+    int m_PipRestoreH;
+    int m_PipFrameX;
+    int m_PipFrameY;
+    int m_PipFrameW;
+    int m_PipFrameH;
+    // SDL_GetTicks() deadline. Zero means "do not snap a fullscreen-sized
+    // window back to the mini frame".
+    Uint32 m_PipSnapBackUntil;
+    // Set while reapply is changing the window, so a synchronous SDL
+    // event watch cannot re-enter that path.
+    bool m_PipReapplying;
+    QString m_PipRestoreTitle;
+#endif
 
     Overlay::OverlayManager m_OverlayManager;
 

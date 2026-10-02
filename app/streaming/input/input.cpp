@@ -111,6 +111,17 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].scanCode = SDL_SCANCODE_L;
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].enabled = true;
 
+    // macOS stream picture-in-picture. Disabled elsewhere so the combo
+    // cannot match. P is not used by the other Ctrl+Alt+Shift shortcuts.
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].keyCombo = KeyComboTogglePictureInPicture;
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].keyCode = SDLK_p;
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].scanCode = SDL_SCANCODE_P;
+#ifdef Q_OS_DARWIN
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].enabled = true;
+#else
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].enabled = false;
+#endif
+
     m_OldIgnoreDevices = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES);
     m_OldIgnoreDevicesExcept = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT);
 

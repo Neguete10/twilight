@@ -476,6 +476,7 @@ macx {
         streaming/audio/renderers/coreaudio/au_spatial_renderer.mm \
         streaming/audio/renderers/coreaudio/coreaudio.cpp \
         streaming/audio/renderers/coreaudio/TPCircularBuffer.c \
+        streaming/mac/pip_window.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
         streaming/video/ffmpeg-renderers/vt_avsamplelayer.mm \
         streaming/video/ffmpeg-renderers/vt_metal.mm
@@ -485,6 +486,8 @@ macx {
         streaming/audio/renderers/coreaudio/coreaudio.h \
         streaming/audio/renderers/coreaudio/coreaudio_helpers.h \
         streaming/audio/renderers/coreaudio/TPCircularBuffer.h \
+        streaming/mac/pip_frame.h \
+        streaming/mac/pip_window.h \
         streaming/video/ffmpeg-renderers/vt.h
 }
 soundio {

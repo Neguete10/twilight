@@ -22,6 +22,11 @@
 #include "video/slvid.h"
 #endif
 
+#ifdef Q_OS_DARWIN
+#include "streaming/mac/pip_frame.h"
+#include "streaming/mac/pip_window.h"
+#endif
+
 #ifdef Q_OS_WIN32
 // Scaling the icon down on Win32 looks dreadful, so render at lower res
 #define ICON_SIZE 32
@@ -677,6 +682,20 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_AudioSampleCount(0),
       m_DropAudioEndTime(0),
       m_PyroWaveBackend(PyroWaveGpuBackend::None)
+#ifdef Q_OS_DARWIN
+      , m_PipActive(false),
+      m_PipRestoreFullscreen(false),
+      m_PipRestoreX(0),
+      m_PipRestoreY(0),
+      m_PipRestoreW(0),
+      m_PipRestoreH(0),
+      m_PipFrameX(0),
+      m_PipFrameY(0),
+      m_PipFrameW(0),
+      m_PipFrameH(0),
+      m_PipSnapBackUntil(0),
+      m_PipReapplying(false)
+#endif
 {
 }
 
@@ -1632,6 +1651,18 @@ void Session::updateOptimalWindowDisplayMode()
 
 void Session::toggleFullscreen()
 {
+#ifdef Q_OS_DARWIN
+    // Ctrl+Alt+Shift+X while the mini player is up restores the window
+    // picture-in-picture was entered from, including fullscreen. It does
+    // not also toggle fullscreen; press X again after leaving PiP for that.
+    if (m_PipActive) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Picture-in-picture is active; restoring the previous window");
+        exitPictureInPicture();
+        return;
+    }
+#endif
+
     bool fullScreen = !(SDL_GetWindowFlags(m_Window) & m_FullScreenFlag);
 
 #if defined(Q_OS_WIN32) || defined(Q_OS_DARWIN)
@@ -1670,6 +1701,220 @@ void Session::toggleFullscreen()
     // Input handler might need stop/stop mouse grab after changing modes
     m_InputHandler->updatePointerRegionLock();
 }
+
+#ifdef Q_OS_DARWIN
+static void macPipMenuToggle()
+{
+    if (Session::get() != nullptr) {
+        Session::get()->togglePictureInPicture();
+    }
+}
+
+void Session::releaseVideoDecoder()
+{
+    // Same teardown as toggleFullscreen(). On Apple Silicon the
+    // AVSampleBufferDisplayLayer path can deadlock WindowServer if the
+    // decoder is alive across a fullscreen transition (moonlight-qt #973).
+    SDL_AtomicLock(&m_DecoderLock);
+    delete m_VideoDecoder;
+    m_VideoDecoder = nullptr;
+    SDL_AtomicUnlock(&m_DecoderLock);
+}
+
+static bool usableBoundsForPictureInPicture(SDL_Window* window, SDL_Rect* bounds)
+{
+    int displayIndex = SDL_GetWindowDisplayIndex(window);
+    if (displayIndex < 0) {
+        displayIndex = 0;
+    }
+    if (SDL_GetDisplayUsableBounds(displayIndex, bounds) == 0) {
+        return true;
+    }
+    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "SDL_GetDisplayUsableBounds() failed: %s",
+                SDL_GetError());
+    return SDL_GetDisplayBounds(displayIndex, bounds) == 0;
+}
+
+bool Session::displayCoversWindow(int width, int height) const
+{
+    int displayIndex = SDL_GetWindowDisplayIndex(m_Window);
+    SDL_Rect bounds;
+    if (displayIndex < 0 || SDL_GetDisplayBounds(displayIndex, &bounds) != 0) {
+        return false;
+    }
+    return width >= bounds.w - 2 && height >= bounds.h - 2;
+}
+
+void Session::reapplyPictureInPictureChrome(bool orderFront)
+{
+    if (!m_PipActive || m_Window == nullptr || m_PipReapplying) {
+        return;
+    }
+    m_PipReapplying = true;
+
+    if (m_PipSnapBackUntil != 0 && SDL_TICKS_PASSED(SDL_GetTicks(), m_PipSnapBackUntil)) {
+        m_PipSnapBackUntil = 0;
+    }
+
+    if (m_PipSnapBackUntil != 0 && m_PipFrameW > 0 && m_PipFrameH > 0) {
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowSize(m_Window, &width, &height);
+        const bool fullscreen = (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN) != 0;
+        if (fullscreen || displayCoversWindow(width, height)) {
+            if (fullscreen) {
+                SDL_SetWindowFullscreen(m_Window, 0);
+            }
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+            SDL_SetWindowBordered(m_Window, SDL_TRUE);
+#endif
+            SDL_SetWindowSize(m_Window, m_PipFrameW, m_PipFrameH);
+            SDL_SetWindowPosition(m_Window, m_PipFrameX, m_PipFrameY);
+        }
+    }
+
+    // Floating chrome first, then SDL's always-on-top flag. The flag setter
+    // only changes the level; doing it first would let the snapshot below
+    // record NSFloatingWindowLevel as the window's original level.
+    MacPipApplyFloating(m_Window, orderFront);
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+    SDL_SetWindowAlwaysOnTop(m_Window, SDL_TRUE);
+#endif
+    m_PipReapplying = false;
+}
+
+void Session::enterPictureInPicture()
+{
+    if (m_Window == nullptr || m_PipActive) {
+        return;
+    }
+
+    const int videoW = m_ActiveVideoWidth > 0 ? m_ActiveVideoWidth : m_StreamConfig.width;
+    const int videoH = m_ActiveVideoHeight > 0 ? m_ActiveVideoHeight : m_StreamConfig.height;
+
+    SDL_Rect usable;
+    if (!usableBoundsForPictureInPicture(m_Window, &usable)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Picture-in-picture could not read the display bounds");
+        return;
+    }
+
+    const PipFrame frame = suggestPictureInPictureFrame(
+        {usable.x, usable.y, usable.w, usable.h}, videoW, videoH);
+    if (frame.w <= 0 || frame.h <= 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Picture-in-picture frame was empty");
+        return;
+    }
+
+    const bool wasFullscreen = (SDL_GetWindowFlags(m_Window) & m_FullScreenFlag) != 0;
+    m_PipRestoreFullscreen = wasFullscreen;
+    if (!wasFullscreen) {
+        SDL_GetWindowPosition(m_Window, &m_PipRestoreX, &m_PipRestoreY);
+        SDL_GetWindowSize(m_Window, &m_PipRestoreW, &m_PipRestoreH);
+    }
+    else {
+        // The live fullscreen size is not the window to restore. This is
+        // the same windowed rect the session uses at startup.
+        getWindowDimensions(m_PipRestoreX, m_PipRestoreY, m_PipRestoreW, m_PipRestoreH);
+        releaseVideoDecoder();
+        SDL_SetWindowFullscreen(m_Window, 0);
+    }
+
+    const char* currentTitle = SDL_GetWindowTitle(m_Window);
+    m_PipRestoreTitle = QString::fromUtf8(currentTitle != nullptr ? currentTitle : "");
+    m_PipFrameX = frame.x;
+    m_PipFrameY = frame.y;
+    m_PipFrameW = frame.w;
+    m_PipFrameH = frame.h;
+    // macOS fullscreen Spaces animate out. Keep correcting a display-sized
+    // window for a bit longer than that animation.
+    m_PipSnapBackUntil = wasFullscreen ? SDL_GetTicks() + 1500 : 0;
+
+    // Snapshot the current level before raising it. Fullscreen has already
+    // been left, so this is the windowed chrome SDL restored.
+    MacPipApplyFloating(m_Window, false);
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+    SDL_SetWindowBordered(m_Window, SDL_TRUE);
+#endif
+    SDL_SetWindowMinimumSize(m_Window, 160, 90);
+    SDL_SetWindowSize(m_Window, frame.w, frame.h);
+    SDL_SetWindowPosition(m_Window, frame.x, frame.y);
+    MacPipApplyFloating(m_Window, true);
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+    SDL_SetWindowAlwaysOnTop(m_Window, SDL_TRUE);
+#endif
+
+    const QString pipTitle = m_PipRestoreTitle + QStringLiteral(" - Picture in Picture");
+    SDL_SetWindowTitle(m_Window, pipTitle.toUtf8().constData());
+
+    m_PipActive = true;
+    MacPipUpdateMenu(true);
+
+    // Leave the cursor free so the mini player can sit beside another app.
+    // A click in the video captures again, same as a windowed stream.
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->setCaptureActive(false);
+    }
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Entered picture-in-picture at %d,%d %dx%d",
+                frame.x, frame.y, frame.w, frame.h);
+}
+
+void Session::exitPictureInPicture()
+{
+    if (m_Window == nullptr || !m_PipActive) {
+        return;
+    }
+
+    const bool restoreFullscreen = m_PipRestoreFullscreen;
+    m_PipActive = false;
+    m_PipSnapBackUntil = 0;
+    m_PipRestoreFullscreen = false;
+    MacPipUpdateMenu(false);
+
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+    SDL_SetWindowAlwaysOnTop(m_Window, SDL_FALSE);
+#endif
+    MacPipClearFloating(m_Window);
+    SDL_SetWindowMinimumSize(m_Window, 0, 0);
+
+    if (!m_PipRestoreTitle.isNull()) {
+        SDL_SetWindowTitle(m_Window, m_PipRestoreTitle.toUtf8().constData());
+        m_PipRestoreTitle.clear();
+    }
+
+    if (m_PipRestoreW > 0 && m_PipRestoreH > 0) {
+        SDL_SetWindowSize(m_Window, m_PipRestoreW, m_PipRestoreH);
+        SDL_SetWindowPosition(m_Window, m_PipRestoreX, m_PipRestoreY);
+    }
+
+    if (restoreFullscreen) {
+        releaseVideoDecoder();
+        SDL_SetWindowFullscreen(m_Window, m_FullScreenFlag);
+    }
+
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->updateKeyboardGrabState();
+        m_InputHandler->updatePointerRegionLock();
+    }
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Exited picture-in-picture");
+}
+
+void Session::togglePictureInPicture()
+{
+    if (m_PipActive) {
+        exitPictureInPicture();
+    }
+    else {
+        enterPictureInPicture();
+    }
+}
+#endif
 
 void Session::notifyMouseEmulationMode(bool enabled)
 {
@@ -2208,6 +2453,10 @@ void Session::execInternal()
     m_OverlayManager.setOverlayState(Overlay::OverlayDebug, m_Preferences->showPerformanceOverlay);
     m_OverlayManager.setOverlayState(Overlay::OverlayDebugAudio, m_Preferences->showPerformanceOverlay);
 
+#ifdef Q_OS_DARWIN
+    MacPipInstallMenu(macPipMenuToggle);
+#endif
+
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
     SDL_Event event;
@@ -2286,6 +2535,15 @@ void Session::execInternal()
             break;
 
         case SDL_WINDOWEVENT:
+#ifdef Q_OS_DARWIN
+            // SDL and AppKit can drop the floating level when the window
+            // is resized or the app deactivates. Put it back. orderFront
+            // only on focus loss, so a resize does not cover the app the
+            // user is typing into beyond the corner the player already occupies.
+            if (m_PipActive) {
+                reapplyPictureInPictureChrome(event.window.event == SDL_WINDOWEVENT_FOCUS_LOST);
+            }
+#endif
             // Early handling of some events
             switch (event.window.event) {
             case SDL_WINDOWEVENT_FOCUS_LOST:
@@ -2544,6 +2802,15 @@ void Session::execInternal()
     }
 
 DispatchDeferredCleanup:
+#ifdef Q_OS_DARWIN
+    // Drop the menu before the window goes away so a click cannot call
+    // back into this session. Skipping the geometry restore avoids a
+    // fullscreen animation on the way out.
+    m_PipActive = false;
+    m_PipSnapBackUntil = 0;
+    MacPipRemoveMenu();
+#endif
+
     // Uncapture the mouse and hide the window immediately,
     // so we can return to the Qt GUI ASAP.
     m_InputHandler->setCaptureActive(false);
