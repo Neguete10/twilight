@@ -10,8 +10,10 @@ session picked:
   Metal is unavailable
 - PyroWave Metal or Vulkan (MoltenVK) when that codec is selected
 
-Qt's window is the setup UI. It is not the video surface. This change
-does not touch `app/gui/ui/v2`.
+Qt's window is the setup UI. It is not the video surface. Picture in
+Picture does not restyle the Twilight shell. The Twilight performance
+overlay follows this same SDL window, including into and out of the
+mini player.
 
 ## Why this is not `AVPictureInPictureController`
 
@@ -40,8 +42,9 @@ Build Twilight on a Mac the way this branch already builds (qmake on
   item has no key equivalent, so it cannot fire twice with the hotkey.
 
 The window moves to the bottom-right of the current display's work area
-(menu bar and Dock excluded), 480 points wide for 16:9, with the stream
-aspect preserved. Stage Manager's thumbnail strip is on the left, so the
+(menu bar and Dock excluded), 640 points wide for 16:9, with the stream
+aspect preserved. Narrower displays still cap it at two fifths of the
+usable width. Stage Manager's thumbnail strip is on the left, so the
 player sits on the opposite corner. Drag the title bar to move it. The
 title gains " - Picture in Picture".
 

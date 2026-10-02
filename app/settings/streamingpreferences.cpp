@@ -549,8 +549,16 @@ int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool
             break;
         }
         else if (resTable[i].pixels == -1) {
-            // Never go above the highest resolution entry
-            resolutionFactor = resTable[i-1].factor;
+            // Above the last table row, continue the 1440p-to-4K slope using the
+            // width*height the caller passed (the display's reported mode).
+            // Exact 1080p, 1440p, and 4K rows are unchanged. No multi-monitor branch.
+            const int prevPixels = resTable[i - 2].pixels;
+            const int prevFactor = resTable[i - 2].factor;
+            const int lastPixels = resTable[i - 1].pixels;
+            const int lastFactor = resTable[i - 1].factor;
+            const double extra = (double)(pixels - lastPixels) * (double)(lastFactor - prevFactor)
+                    / (double)(lastPixels - prevPixels);
+            resolutionFactor = (float)((double)lastFactor + extra);
             break;
         }
     }

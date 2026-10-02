@@ -38,7 +38,7 @@ Light and dark follow `SystemPalette`. Classic still forces the Material dark th
 
 When `uiVersion` is `v2` and **Twilight performance overlay** is on (`showTwilightHud`, default on), the decoders still build the usual overlay string, but they do not enable the yellow SDL overlay unless **Classic performance overlay** is on. The HUD parses FPS, bitrate, and `Average network latency` and drops FEC lines. PyroWave's string has no FEC fields; the parser does not add any. Turning Twilight's overlay off hides the chips and stops that sampling. The classic yellow overlay stays on its own switch.
 
-The HUD is a separate frameless window, not a tool panel. On macOS the stream loop raises it to the floating window level and lets it draw over fullscreen spaces, then keeps draining Qt events so the chips and End stay live. End asks once, then posts the same `SDL_QUIT` as Ctrl+Alt+Shift+Q.
+The HUD is a separate frameless window, not a tool panel. On macOS the stream loop places it on the SDL stream window's frame — fullscreen, windowed, and picture-in-picture — raises it to the floating window level, and lets it draw over fullscreen spaces. It keeps draining Qt events so the chips and End stay live. End asks once, then posts the same `SDL_QUIT` as Ctrl+Alt+Shift+Q.
 
 ## Extending
 
@@ -48,7 +48,7 @@ Add pages under `app/gui/ui/v2/` and list them in `app/qml.qrc`. The shell is `S
 
 - SF Symbols are real only on macOS 11+. Other platforms get the geometric stand-ins.
 - No backdrop blur.
-- The HUD is not parented to the SDL stream. It anchors to the primary screen's available width and, on macOS, is ordered in front of the stream window.
+- The HUD is not parented to the SDL stream. On macOS it is placed from that window's frame so it follows picture-in-picture. Elsewhere it sits at the top of the primary screen.
 - Gamepad grid navigation stays on Classic. Twilight is pointer-first, with preferences, New, and Escape shortcuts.
 - Custom resolution, custom frame rate, and packet size stay in Classic. Twilight can show a custom size that was already saved, and offers 720p, 1080p, 1440p, 4K, and the current display mode.
 - Language list in Twilight is the set Classic exposes, not every enum value that is commented out upstream.

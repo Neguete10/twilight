@@ -17,6 +17,12 @@ Window {
     height: column.implicitHeight
 
     function place() {
+        // On macOS the stream loop owns the frame. Setting x/y here uses the
+        // desktop, which leaves the chips behind when the stream becomes PiP.
+        if (Qt.platform.os === "osx") {
+            StreamHudStats.followStream()
+            return
+        }
         var avail = Screen.desktopAvailableWidth
         if (avail <= 0)
             avail = width

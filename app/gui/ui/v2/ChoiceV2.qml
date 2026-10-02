@@ -11,12 +11,34 @@ Flow {
     spacing: 8
     opacity: enabled ? 1 : 0.45
 
+    // Copy each option into its own row. Reading options[index] from a
+    // delegate after the array is replaced makes every chip see the last
+    // entry, and the last resolution preset is 4K.
+    ListModel { id: rows }
+
+    function reloadRows() {
+        rows.clear()
+        if (!root.options)
+            return
+        for (var i = 0; i < root.options.length; i++) {
+            var row = root.options[i]
+            if (!row)
+                continue
+            rows.append({
+                label: row.text ? row.text : "",
+                choice: row.value
+            })
+        }
+    }
+
+    onOptionsChanged: reloadRows()
+    Component.onCompleted: reloadRows()
+
     Repeater {
-        model: root.options ? root.options.length : 0
+        model: rows
 
         Rectangle {
-            property var spec: root.options[index]
-            property bool selected: spec && spec.value === root.current
+            property bool selected: model.choice == root.current
 
             width: label.implicitWidth + 28
             height: 34
@@ -29,7 +51,7 @@ Flow {
                 id: label
                 anchors.centerIn: parent
                 theme: root.theme
-                text: spec ? spec.text : ""
+                text: model.label
                 font.pixelSize: 13
                 font.weight: selected ? Font.DemiBold : Font.Normal
                 color: selected ? root.theme.accentInk : root.theme.ink
@@ -39,7 +61,7 @@ Flow {
                 anchors.fill: parent
                 enabled: root.enabled
                 cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                onClicked: if (spec) root.picked(spec.value)
+                onClicked: root.picked(model.choice)
             }
         }
     }

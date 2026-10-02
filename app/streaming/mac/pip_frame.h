@@ -10,7 +10,7 @@
 //
 // The result is a bottom-right mini player. Bottom-right stays clear of
 // Stage Manager's thumbnail strip, which sits on the left. The target is
-// 480 points wide, capped at two fifths of the usable width and 45% of
+// 640 points wide, capped at two fifths of the usable width and 45% of
 // the usable height so the window the user is actually working in keeps
 // the screen.
 
@@ -41,7 +41,7 @@ inline PipFrame suggestPictureInPictureFrame(PipDisplayBounds usable, int videoW
     }
 
     const int kMargin = 20;
-    const int kTargetWidth = 480;
+    const int kTargetWidth = 640;
 
     int padX = kMargin;
     int padY = kMargin;

@@ -9,14 +9,17 @@
 #include <QPointer>
 #include <QWindow>
 
-void twilightHudOrderFront(QWindow* window);
+// raise: also order the window in front. Passing false only moves it.
+void twilightHudSync(QWindow* window, void* sdlWindow, bool raise);
 
 static QPointer<QWindow> s_HudWindow;
+static void* s_StreamWindow = nullptr;
 
 #ifndef Q_OS_DARWIN
-void twilightHudOrderFront(QWindow* window)
+void twilightHudSync(QWindow* window, void* sdlWindow, bool raise)
 {
-    if (window == nullptr) {
+    (void)sdlWindow;
+    if (!raise || window == nullptr) {
         return;
     }
     window->show();
@@ -141,16 +144,34 @@ void StreamHudStats::attachWindow(QObject* window)
     orderFront();
 }
 
+void StreamHudStats::noteStreamWindow(void* sdlWindow)
+{
+    s_StreamWindow = sdlWindow;
+}
+
+static bool hudShouldSync()
+{
+    StreamHudStats* self = StreamHudStats::instance();
+    if (self == nullptr || !self->streaming() || s_HudWindow.isNull()) {
+        return false;
+    }
+    return StreamingPreferences::hudWantsSamples();
+}
+
+void StreamHudStats::followStream()
+{
+    if (!hudShouldSync()) {
+        return;
+    }
+    twilightHudSync(s_HudWindow.data(), s_StreamWindow, false);
+}
+
 void StreamHudStats::orderFront()
 {
-    StreamHudStats* self = instance();
-    if (self == nullptr || !self->m_Streaming || s_HudWindow.isNull()) {
+    if (!hudShouldSync()) {
         return;
     }
-    if (!StreamingPreferences::hudWantsSamples()) {
-        return;
-    }
-    twilightHudOrderFront(s_HudWindow.data());
+    twilightHudSync(s_HudWindow.data(), s_StreamWindow, true);
 }
 
 void StreamHudStats::requestDisconnect()

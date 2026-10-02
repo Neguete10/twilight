@@ -25,25 +25,27 @@ Item {
     onOpenChanged: if (!open) hideTimer.start()
     Timer { id: hideTimer; interval: 180 }
 
-    function resKey(w, h) { return w * 100000 + h }
+    function resKey(w, h) { return w + "x" + h }
 
     function rebuildChoices() {
+        // Labels only. This must not write StreamingPreferences width or
+        // height — the native mode on a 4K panel is the 4K preset, and
+        // applying it here snaps a chosen size back to 4K.
         var resolutions = [
-            { text: "720p", value: resKey(1280, 720) },
-            { text: "1080p", value: resKey(1920, 1080) },
-            { text: "1440p", value: resKey(2560, 1440) },
-            { text: "4K", value: resKey(3840, 2160) }
+            { text: "720p", value: resKey(1280, 720), w: 1280, h: 720 },
+            { text: "1080p", value: resKey(1920, 1080), w: 1920, h: 1080 },
+            { text: "1440p", value: resKey(2560, 1440), w: 2560, h: 1440 },
+            { text: "4K", value: resKey(3840, 2160), w: 3840, h: 2160 }
         ]
         var native = SystemProperties.getNativeResolution(0)
         if (native && native.width > 0 && native.height > 0) {
-            var nativeKey = resKey(native.width, native.height)
             var known = false
             for (var i = 0; i < resolutions.length; i++) {
-                if (resolutions[i].value === nativeKey)
+                if (resolutions[i].w === native.width && resolutions[i].h === native.height)
                     known = true
             }
             if (!known)
-                resolutions.unshift({ text: qsTr("This display"), value: nativeKey })
+                resolutions.unshift({ text: qsTr("This display"), value: resKey(native.width, native.height), w: native.width, h: native.height })
         }
         resolutionOptions = resolutions
 
@@ -59,18 +61,26 @@ Item {
 
     function optionSelected(options, value) {
         for (var i = 0; i < options.length; i++) {
-            if (options[i].value === value)
+            if (options[i].value == value)
                 return true
         }
         return false
     }
 
     function applyResolution(key) {
-        var w = Math.floor(key / 100000)
-        var h = key % 100000
+        var parts = ("" + key).split("x")
+        if (parts.length !== 2)
+            return
+        var w = parseInt(parts[0], 10)
+        var h = parseInt(parts[1], 10)
+        if (!(w > 0) || !(h > 0))
+            return
+        if (StreamingPreferences.width === w && StreamingPreferences.height === h)
+            return
         StreamingPreferences.width = w
         StreamingPreferences.height = h
         StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(w, h, StreamingPreferences.fps, StreamingPreferences.enableYUV444)
+        StreamingPreferences.save()
     }
 
     function applyFps(fps) {

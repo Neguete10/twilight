@@ -39,9 +39,18 @@ public:
     // creates the fullscreen window. Parent stays null.
     Q_INVOKABLE void attachWindow(QObject* window);
 
-    // Show the attached window above the stream when this HUD is enabled.
+    // The SDL stream window. The HUD is placed on that window's frame,
+    // including after picture-in-picture moves it. Pass null once the
+    // window is about to be destroyed.
+    static void noteStreamWindow(void* sdlWindow);
+
+    // Move the HUD onto the stream window without raising it.
     // Safe to call from the main thread during Session::execInternal().
-    static void orderFront();
+    Q_INVOKABLE static void followStream();
+
+    // Place the HUD and raise it above the stream when this HUD is enabled.
+    // Safe to call from the main thread during Session::execInternal().
+    Q_INVOKABLE static void orderFront();
 
 signals:
     void streamingChanged();

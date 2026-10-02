@@ -18,27 +18,27 @@ static void expectFrame(PipFrame actual, PipFrame expected, const char* label)
 
 int main()
 {
-    // 16:9 on a 1080p work area. 480x270 sits in the bottom-right with a
-    // 20pt margin. 480 is under the width cap (768) and 270 is under the
+    // 16:9 on a 1080p work area. 640x360 sits in the bottom-right with a
+    // 20pt margin. 640 is under the width cap (768) and 360 is under the
     // height cap (486).
     expectFrame(suggestPictureInPictureFrame({0, 0, 1920, 1080}, 1920, 1080),
-                {1420, 790, 480, 270},
+                {1260, 700, 640, 360},
                 "16:9 1080p");
 
     // Same aspect when the stream size is unknown.
     expectFrame(suggestPictureInPictureFrame({0, 0, 1920, 1080}, 0, 0),
-                {1420, 790, 480, 270},
+                {1260, 700, 640, 360},
                 "unknown aspect");
 
     // Second display: the usable origin is not the global origin.
     expectFrame(suggestPictureInPictureFrame({1920, 0, 1920, 1080}, 16, 9),
-                {3340, 790, 480, 270},
+                {3180, 700, 640, 360},
                 "second display");
 
-    // Ultrawide stream. Height follows the aspect; width stays 480.
-    // 480 * 1440 / 3440 = 200.
+    // Ultrawide stream on a 1512-wide work area. The two-fifths cap is
+    // 604, so the 640 target shrinks. 604 * 1440 / 3440 = 252.
     expectFrame(suggestPictureInPictureFrame({0, 0, 1512, 982}, 3440, 1440),
-                {1012, 762, 480, 200},
+                {888, 710, 604, 252},
                 "ultrawide");
 
     // Portrait stream hits the 45% height cap (486) and the width shrinks.
