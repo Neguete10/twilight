@@ -1,4 +1,5 @@
 #include "streamingpreferences.h"
+#include "streaming/audio/microphone/mic_permission.h"
 #include "utils.h"
 
 #include <QSettings>
@@ -21,6 +22,7 @@
 #define SER_GAMEOPTS "gameopts"
 #define SER_HEADTRACKING "headtracking"
 #define SER_HOSTAUDIO "hostaudio"
+#define SER_MICROPHONE "microphone"
 #define SER_MULTICONT "multicontroller"
 #define SER_AUDIOCFG "audiocfg"
 #define SER_SPATIALAUDIOCFG "spatialaudiocfg"
@@ -130,6 +132,8 @@ void StreamingPreferences::reload()
     gameOptimizations = settings.value(SER_GAMEOPTS, true).toBool();
     spatialHeadTracking = settings.value(SER_HEADTRACKING, false).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
+    enableMicrophone = settings.value(SER_MICROPHONE, false).toBool();
+    refreshMicrophoneStatus();
     multiController = settings.value(SER_MULTICONT, true).toBool();
     enableMdns = settings.value(SER_MDNS, true).toBool();
     quitAppAfter = settings.value(SER_QUITAPPAFTER, false).toBool();
@@ -333,6 +337,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_GAMEOPTS, gameOptimizations);
     settings.setValue(SER_HEADTRACKING, spatialHeadTracking);
     settings.setValue(SER_HOSTAUDIO, playAudioOnHost);
+    settings.setValue(SER_MICROPHONE, enableMicrophone);
     settings.setValue(SER_MULTICONT, multiController);
     settings.setValue(SER_MDNS, enableMdns);
     settings.setValue(SER_QUITAPPAFTER, quitAppAfter);
@@ -364,6 +369,69 @@ void StreamingPreferences::save()
     settings.setValue(SER_SWAPFACEBUTTONS, swapFaceButtons);
     settings.setValue(SER_CAPTURESYSKEYS, captureSysKeysMode);
     settings.setValue(SER_KEEPAWAKE, keepAwake);
+}
+
+QString StreamingPreferences::microphoneStatusText() const
+{
+    return m_MicrophoneStatusText;
+}
+
+void StreamingPreferences::refreshMicrophoneStatus()
+{
+    QString text;
+    switch (MacMicrophonePermission::status()) {
+    case MacMicrophonePermission::Status::Granted:
+        text = tr("Microphone access granted. Ctrl+Alt+Shift+N mutes it during a stream.");
+        break;
+    case MacMicrophonePermission::Status::Denied:
+        text = tr("Microphone access is off for this app. Turn it on in System Settings > Privacy & Security > Microphone.");
+        break;
+    case MacMicrophonePermission::Status::Restricted:
+        text = tr("Microphone access is restricted on this Mac.");
+        break;
+    case MacMicrophonePermission::Status::NotDetermined:
+    default:
+        text = tr("Checking this box asks macOS for microphone access.");
+        break;
+    }
+
+    if (text == m_MicrophoneStatusText) {
+        return;
+    }
+    m_MicrophoneStatusText = text;
+    emit microphoneStatusTextChanged();
+}
+
+void StreamingPreferences::setMicrophoneEnabled(bool enabled)
+{
+    if (!enabled) {
+        ++m_MicRequestSerial;
+        enableMicrophone = false;
+        refreshMicrophoneStatus();
+        save();
+        return;
+    }
+
+    const int serial = ++m_MicRequestSerial;
+    MacMicrophonePermission::request([this, serial](bool granted) {
+        QMetaObject::invokeMethod(this,
+                                  "completeMicrophoneRequest",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(int, serial),
+                                  Q_ARG(bool, granted));
+    });
+}
+
+void StreamingPreferences::completeMicrophoneRequest(int serial, bool granted)
+{
+    if (serial != m_MicRequestSerial) {
+        return;
+    }
+
+    enableMicrophone = granted;
+    refreshMicrophoneStatus();
+    save();
+    emit microphoneAccessFinished(granted);
 }
 
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)

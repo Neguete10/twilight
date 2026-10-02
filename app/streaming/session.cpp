@@ -1491,6 +1491,10 @@ private:
         // LiStartConnection() and LiStopConnection().
         SDL_assert(m_Session->m_VideoDecoder == nullptr);
 
+        // Stop the microphone before LiStopConnection() so the encoder
+        // thread is not inside a control-stream send when ENet is torn down.
+        m_Session->stopMicrophone();
+
         // Finish cleanup of the connection state
         LiStopConnection();
 
@@ -2128,8 +2132,53 @@ bool Session::startConnectionAsync()
         return false;
     }
 
+    startMicrophone();
+
     emit connectionStarted();
     return true;
+}
+
+void Session::startMicrophone()
+{
+    if (!m_Preferences->enableMicrophone) {
+        return;
+    }
+
+#ifdef Q_OS_DARWIN
+    // GeForce Experience has no client-microphone receiver. Sending an
+    // unknown control packet there is not useful and is avoided.
+    if (m_Computer->isNvidiaServerSoftware) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Microphone forwarding stays off for GeForce Experience hosts");
+        return;
+    }
+    if (!m_Microphone.start()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Microphone capture did not start; continuing the stream without it");
+    }
+#else
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Microphone forwarding is only implemented on macOS");
+#endif
+}
+
+void Session::stopMicrophone()
+{
+    m_Microphone.stop();
+}
+
+void Session::toggleMicrophoneMute()
+{
+    if (!m_Microphone.isRunning()) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Microphone capture is not active");
+        return;
+    }
+
+    const bool muted = !m_Microphone.isMuted();
+    m_Microphone.setMuted(muted);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                muted ? "Microphone muted" : "Microphone live");
 }
 
 void Session::flushWindowEvents()

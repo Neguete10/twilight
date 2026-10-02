@@ -142,6 +142,7 @@ private:
         KeyComboTogglePictureInPicture,
         KeyComboToggleGamepadOverlay,
         KeyComboCycleTriggerPreview,
+        KeyComboToggleMicrophoneMute,
         KeyComboMax
     };
 
