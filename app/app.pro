@@ -180,7 +180,9 @@ macx {
         -framework CoreAudio \
         -framework CoreVideo \
         -framework CoreGraphics \
+        -framework CoreLocation \
         -framework CoreMedia \
+        -framework CoreWLAN \
         -framework Metal \
         -framework QuartzCore \
         -framework VideoToolbox
@@ -208,6 +210,9 @@ SOURCES += \
     settings/compatfetcher.cpp \
     settings/mappingfetcher.cpp \
     settings/streamingpreferences.cpp \
+    settings/network_profile.cpp \
+    settings/network_profile_logic.cpp \
+    settings/network_identity.cpp \
     streaming/input/abstouch.cpp \
     streaming/input/gamepad.cpp \
     streaming/input/input.cpp \
@@ -249,6 +254,9 @@ HEADERS += \
     cli/quitstream.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
+    settings/network_profile.h \
+    settings/network_profile_logic.h \
+    settings/network_identity.h \
     streaming/input/input.h \
     streaming/session.h \
     streaming/audio/renderers/renderer.h \
@@ -473,6 +481,7 @@ macx {
     DEFINES += HAVE_COREAUDIO
 
     SOURCES += \
+        settings/network_identity_mac.mm \
         streaming/audio/renderers/coreaudio/au_spatial_renderer.mm \
         streaming/audio/renderers/coreaudio/coreaudio.cpp \
         streaming/audio/renderers/coreaudio/TPCircularBuffer.c \

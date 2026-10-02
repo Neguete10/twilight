@@ -1,5 +1,7 @@
 #pragma once
 
+#include "network_profile_logic.h"
+
 #include <QObject>
 #include <QRect>
 #include <QQmlEngine>
@@ -15,6 +17,11 @@ public:
     getDefaultBitrate(int width, int height, int fps, bool yuv444);
 
     Q_INVOKABLE void save();
+
+    // Copies or replaces the stream picture a network profile owns.
+    // Other preferences (language, mouse, mDNS, and so on) stay as they are.
+    void applyNetworkProfileSettings(const NetworkProfiles::StreamPreset& preset);
+    NetworkProfiles::StreamPreset captureNetworkProfileSettings() const;
 
     void reload();
 
