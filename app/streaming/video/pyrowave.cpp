@@ -966,10 +966,10 @@ void PyroWaveVideoDecoder::logSteadyState(const char* reason) {
         std::lock_guard<std::mutex> lock(m_StatsLock);
         copy = m_Steady;
     }
-    auto emit = [](const char* line) {
+    auto logLine = [](const char* line) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "%s", line);
     };
-    pyroWaveEmitMetrics("Vulkan", copy, currentRates(), emit);
+    pyroWaveEmitMetrics("Vulkan", copy, currentRates(), logLine);
 }
 
 void PyroWaveVideoDecoder::addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
@@ -1278,12 +1278,13 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
     case PyroWaveMatrix::Bt709:
         csp.primaries = PL_COLOR_PRIM_BT_709;
         repr.sys = PL_COLOR_SYSTEM_BT_709;
-        csp.transfer = PL_COLOR_TRC_BT_709;
+        // libplacebo has no PL_COLOR_TRC_BT_709; BT.1886 is the Rec.709 OETF/EOTF.
+        csp.transfer = PL_COLOR_TRC_BT_1886;
         break;
     case PyroWaveMatrix::Bt2020:
         csp.primaries = PL_COLOR_PRIM_BT_2020;
         repr.sys = PL_COLOR_SYSTEM_BT_2020_NC;
-        csp.transfer = PL_COLOR_TRC_BT_709;
+        csp.transfer = PL_COLOR_TRC_BT_1886;
         break;
     case PyroWaveMatrix::Bt601:
     default:
@@ -1294,7 +1295,7 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
         break;
     }
     // Transfer is independent of the matrix. A PQ bit without BT.2020 is still PQ;
-    // the matrix switch above would otherwise leave it as BT.709 or sRGB.
+    // the matrix switch above would otherwise leave it as BT.1886 or sRGB.
     if (present.transfer == PyroWaveTransfer::Pq) {
         csp.transfer = PL_COLOR_TRC_PQ;
     }

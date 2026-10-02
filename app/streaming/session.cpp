@@ -345,11 +345,20 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
         static_assert(static_cast<int>(StreamingPreferences::PWBC_VULKAN) == static_cast<int>(PyroWaveBackendRequest::Vulkan),
                       "PyroWave backend enums diverged");
 
+        // chooseDecoder is static; preferences and the chosen backend live on the active session.
+        Session* session = s_ActiveSession;
+        if (session == nullptr || session->m_Preferences == nullptr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "PyroWave: no active session for backend selection");
+            chosenDecoder = nullptr;
+            return false;
+        }
+
         PyroWaveBackendAvailability availability{};
 #ifdef HAVE_PYROWAVE
         availability.vulkan = true;
 #endif
-        const auto request = static_cast<PyroWaveBackendRequest>(m_Preferences->pyroWaveBackend);
+        const auto request = static_cast<PyroWaveBackendRequest>(session->m_Preferences->pyroWaveBackend);
 #ifdef HAVE_PYROWAVE_METAL
         // Skip the dlopen when the user asked for Vulkan so a missing Metal
         // dylib does not log on the MoltenVK path.
@@ -360,9 +369,9 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
         // The stream window is created from the backend this probe records.
         // Once that is set, stay on it: Vulkan present needs SDL_WINDOW_VULKAN
         // and Metal present needs SDL_WINDOW_METAL.
-        const bool alreadyProbed = m_PyroWaveBackend != PyroWaveGpuBackend::None;
+        const bool alreadyProbed = session->m_PyroWaveBackend != PyroWaveGpuBackend::None;
         const PyroWaveGpuBackend primary = alreadyProbed
-                ? m_PyroWaveBackend
+                ? session->m_PyroWaveBackend
                 : selectPyroWaveBackend(request, availability);
         if (!alreadyProbed) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -400,7 +409,7 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
             }
             if (decoder != nullptr && decoder->initialize(&params)) {
                 chosenDecoder = decoder;
-                m_PyroWaveBackend = which;
+                session->m_PyroWaveBackend = which;
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "PyroWave backend selected: %s (%s)",
                             pyroWaveBackendName(which),

@@ -33,8 +33,10 @@ public:
 
     void notifyOverlayUpdated(Overlay::OverlayType type) override;
 
-private:
+    // Opaque pimpl. Public so the .mm free helpers can take Impl*.
     struct Impl;
+
+private:
     Impl* m_Impl;
     bool m_TestOnly;
 };
