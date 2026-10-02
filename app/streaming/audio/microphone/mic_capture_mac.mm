@@ -372,7 +372,7 @@ void runOnMain(void (^block)(void))
 
 // Returns false and writes `error` when the input graph did not start.
 // The engine is left nil in that case.
-bool startInputEngine(Impl* impl, char* error, size_t errorLen)
+bool startInputEngine(MicrophoneCapture::Impl* impl, char* error, size_t errorLen)
 {
     __block bool ok = false;
     runOnMain(^{
@@ -469,7 +469,7 @@ bool startInputEngine(Impl* impl, char* error, size_t errorLen)
     return ok;
 }
 
-void stopInputEngine(Impl* impl)
+void stopInputEngine(MicrophoneCapture::Impl* impl)
 {
     runOnMain(^{
         @autoreleasepool {

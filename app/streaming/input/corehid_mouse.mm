@@ -71,7 +71,7 @@ namespace {
 
 constexpr int kHidRequestListenEvent = 1;
 constexpr int kHidAccessGranted = 0;
-constexpr int kHidAccessDenied = 1;
+[[maybe_unused]] constexpr int kHidAccessDenied = 1; // IOHIDAccessType denied; kept for the enum map
 
 void setError(CoreHidMouseCapture* capture, const char* text)
 {

@@ -43,7 +43,7 @@ CWInterface* currentWifiInterface()
     if (iface != nil) {
         return iface;
     }
-    NSSet<NSString*>* names = client.interfaceNames;
+    NSArray<NSString*>* names = client.interfaceNames;
     for (NSString* name in names) {
         CWInterface* candidate = [client interfaceWithName:name];
         if (candidate != nil) {
@@ -103,11 +103,9 @@ namespace {
 
 bool locationGranted(CLAuthorizationStatus status)
 {
-    // When-in-use is what the prompt asks for. Always is the older macOS grant.
-    // The deprecated kCLAuthorizationStatusAuthorized alias is not referenced;
-    // current macOS SDKs mark it unavailable.
-    return status == kCLAuthorizationStatusAuthorizedAlways ||
-            status == kCLAuthorizationStatusAuthorizedWhenInUse;
+    // macOS: WhenInUse status enum is API_UNAVAILABLE(macos). Always covers
+    // both the modern Always grant and the older Authorized alias.
+    return status == kCLAuthorizationStatusAuthorizedAlways;
 }
 
 } // namespace

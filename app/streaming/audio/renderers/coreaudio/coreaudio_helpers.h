@@ -38,7 +38,7 @@ static void CA_LogError(OSStatus error, const char *fmt, ...)
     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CoreAudio Error: %s (%s)\n", logBuffer, errorString);
 }
 
-static void CA_FourCC(uint32_t value, char *outFormatIDStr)
+static void __attribute__((unused)) CA_FourCC(uint32_t value, char *outFormatIDStr)
 {
     uint32_t formatID = CFSwapInt32HostToBig(value);
     bcopy(&formatID, outFormatIDStr, 4);
@@ -48,6 +48,7 @@ static void CA_FourCC(uint32_t value, char *outFormatIDStr)
 // based on mpv ca_print_asbd()
 static void CA_PrintASBD(const char *description, const AudioStreamBasicDescription *asbd)
 {
+#ifdef COREAUDIO_DEBUG
     char formatIDStr[5];
     CA_FourCC(asbd->mFormatID, formatIDStr);
 
@@ -67,9 +68,14 @@ static void CA_PrintASBD(const char *description, const AudioStreamBasicDescript
         (flags & kAudioFormatFlagIsPacked) ? " packed" : "",
         (flags & kAudioFormatFlagIsAlignedHigh) ? " aligned" : "",
         (flags & kAudioFormatFlagIsNonInterleaved) ? " non-interleaved" : " interleaved");
+#else
+    Q_UNUSED(description);
+    Q_UNUSED(asbd);
+#endif
 }
 
 // classic hex dump
+#ifdef COREAUDIO_DEBUG
 static void CA_HexDump(const float *buffer, size_t length)
 {
     const uint8_t *bytePtr = (const uint8_t *)buffer;
@@ -98,3 +104,4 @@ static void CA_HexDump(const float *buffer, size_t length)
         printf("|\n");
     }
 }
+#endif

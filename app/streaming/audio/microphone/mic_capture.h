@@ -22,7 +22,9 @@ public:
     bool isMuted() const;
     bool isRunning() const;
 
-private:
+public:
+    // Visible to mic_capture_mac.mm free functions (onInputBuffer/encodeLoop).
     struct Impl;
+private:
     Impl* m_Impl;
 };

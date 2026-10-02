@@ -518,7 +518,7 @@ macx {
         streaming/audio/renderers/coreaudio/au_spatial_renderer.mm \
         streaming/audio/renderers/coreaudio/coreaudio.cpp \
         streaming/audio/renderers/coreaudio/TPCircularBuffer.c \
-        streaming/input/corehid_mouse.cpp \
+        streaming/input/corehid_mouse_decoder.cpp \
         streaming/input/corehid_mouse.mm \
         streaming/mac/pip_window.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \

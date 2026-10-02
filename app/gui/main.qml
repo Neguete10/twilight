@@ -484,8 +484,9 @@ ApplicationWindow {
                 visible: active
                 source: "qrc:/gui/ui/v2/UiVersionToggle.qml"
                 Layout.alignment: Qt.AlignVCenter
-                implicitWidth: item ? item.implicitWidth : 0
-                implicitHeight: item ? item.implicitHeight : 0
+                // Qt 6: Loader.implicitWidth/Height are read-only; size via Layout.
+                Layout.preferredWidth: item ? item.implicitWidth : 0
+                Layout.preferredHeight: item ? item.implicitHeight : 0
 
                 onLoaded: {
                     item.darkChrome = true

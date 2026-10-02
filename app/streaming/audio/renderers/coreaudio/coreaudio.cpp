@@ -102,12 +102,11 @@ void CoreAudioRenderer::statsTrackRender(uint64_t startTimeUs, const AudioTimeSt
     if (m_LastSampleTime && inTimestamp->mFlags & kAudioTimeStampSampleTimeValid) {
         double expectedSampleTime = m_LastSampleTime + inNumberFrames;
         if (expectedSampleTime != inTimestamp->mSampleTime) {
-            uint32_t lostFrames = (inTimestamp->mSampleTime - m_LastSampleTime) - m_LastNumFrames;
-            double lostDuration = (double)lostFrames / 48000.0;
-
             m_ActiveWndAudioStats.totalGlitches++;
 
 #ifdef COREAUDIO_DEBUG
+            uint32_t lostFrames = (inTimestamp->mSampleTime - m_LastSampleTime) - m_LastNumFrames;
+            double lostDuration = (double)lostFrames / 48000.0;
             dispatch_async(dispatch_get_main_queue(), ^{
                 DEBUG_TRACE("[%llu] Error: lost/dropped audio frames: %u (%.02fms)", inTimestamp->mHostTime, lostFrames, lostDuration * 1000.0);
             });

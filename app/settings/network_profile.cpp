@@ -58,7 +58,7 @@ std::vector<NetworkProfiles::Ipv4Iface> collectIpv4()
     const QList<QNetworkInterface> interfaces = QNetworkInterface::allInterfaces();
     for (const QNetworkInterface& iface : interfaces) {
         const bool isUp = iface.flags().testFlag(QNetworkInterface::IsUp);
-        const bool isLoopback = iface.flags().testFlag(QNetworkInterface::IsLoopback);
+        const bool isLoopback = iface.flags().testFlag(QNetworkInterface::IsLoopBack);
         const QList<QNetworkAddressEntry> entries = iface.addressEntries();
         for (const QNetworkAddressEntry& entry : entries) {
             if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol) {

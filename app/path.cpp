@@ -32,7 +32,9 @@ QString Path::getQmlCacheDir()
 QByteArray Path::readDataFile(QString fileName)
 {
     QFile dataFile(getDataFilePath(fileName));
-    dataFile.open(QIODevice::ReadOnly);
+    if (!dataFile.open(QIODevice::ReadOnly)) {
+        return QByteArray();
+    }
     return dataFile.readAll();
 }
 
@@ -46,7 +48,9 @@ void Path::writeCacheFile(QString fileName, QByteArray data)
     }
 
     QFile dataFile(cacheDir.absoluteFilePath(fileName));
-    dataFile.open(QIODevice::WriteOnly);
+    if (!dataFile.open(QIODevice::WriteOnly)) {
+        return;
+    }
     dataFile.write(data);
 }
 

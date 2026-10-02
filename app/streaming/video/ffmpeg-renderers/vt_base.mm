@@ -28,9 +28,12 @@ bool VTBaseRenderer::checkDecoderCapabilities(id<MTLDevice> device, PDECODER_PAR
         // simple API to check for Main10 hardware decoding, and if we don't
         // have it, we'll silently get software decoding with horrible performance.
         if (params->videoFormat == VIDEO_FORMAT_H265_MAIN10) {
-            // Exclude all GPUs earlier than macOSGPUFamily2
-            // https://developer.apple.com/documentation/metal/mtlfeatureset/mtlfeatureset_macos_gpufamily2_v1
-            if ([device supportsFeatureSet:MTLFeatureSet_macOS_GPUFamily2_v1]) {
+            // Exclude all GPUs earlier than macOS GPU Family 2 (Metal supportsFamily).
+            // MTLFeatureSet_macOS_GPUFamily2_v1 / supportsFeatureSet: are deprecated.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            if ([device supportsFamily:MTLGPUFamilyMac2]) {
+#pragma clang diagnostic pop
                 if ([device.name containsString:@"Intel"]) {
                     // 500-series Intel GPUs are Skylake and don't support Main10 hardware decoding
                     if ([device.name containsString:@" 5"]) {
