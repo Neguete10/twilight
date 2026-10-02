@@ -51,7 +51,6 @@ Add pages under `app/gui/ui/v2/` and list them in `app/qml.qrc`. The shell is `S
 - On macOS the HUD is a child of the SDL stream window and follows its position, including picture-in-picture. Elsewhere it sits at the top of the primary screen.
 - Gamepad grid navigation stays on Classic. Twilight is pointer-first, with preferences, New, and Escape shortcuts.
 - Custom resolution, custom frame rate, and packet size stay in Classic. Twilight can show a custom size that was already saved, and offers 720p, 1080p, 1440p, 4K, and the current display mode.
-- Language list in Twilight is the set Classic exposes, not every enum value that is commented out upstream.
 - Linux CI can compile the HUD parser test without Qt (`tests/twilight_hud_parse_test.cpp`). Loading the QML still needs a Qt build of the app. This VM does not treat a missing full Moonlight link as a V2 failure.
 
 ## Not in this pass

@@ -20,7 +20,7 @@ public:
     Q_INVOKABLE void save();
 
     // Copies or replaces the stream picture a network profile owns.
-    // Other preferences (language, mouse, mDNS, and so on) stay as they are.
+    // Other preferences (mouse, mDNS, and so on) stay as they are.
     void applyNetworkProfileSettings(const NetworkProfiles::StreamPreset& preset);
     NetworkProfiles::StreamPreset captureNetworkProfileSettings() const;
 
@@ -87,43 +87,6 @@ public:
     };
     Q_ENUM(UIDisplayMode)
 
-    // New entries must go at the end of the enum
-    // to avoid renumbering existing entries (which
-    // would affect existing user preferences).
-    enum Language
-    {
-        LANG_AUTO,
-        LANG_EN,
-        LANG_FR,
-        LANG_ZH_CN,
-        LANG_DE,
-        LANG_NB_NO,
-        LANG_RU,
-        LANG_ES,
-        LANG_JA,
-        LANG_VI,
-        LANG_TH,
-        LANG_KO,
-        LANG_HU,
-        LANG_NL,
-        LANG_SV,
-        LANG_TR,
-        LANG_UK,
-        LANG_ZH_TW,
-        LANG_PT,
-        LANG_PT_BR,
-        LANG_EL,
-        LANG_IT,
-        LANG_HI,
-        LANG_PL,
-        LANG_CS,
-        LANG_HE,
-        LANG_CKB,
-        LANG_LT,
-        LANG_ET,
-    };
-    Q_ENUM(Language);
-
     enum CaptureSysKeysMode
     {
         CSK_OFF,
@@ -175,15 +138,12 @@ public:
     Q_PROPERTY(bool swapFaceButtons MEMBER swapFaceButtons NOTIFY swapFaceButtonsChanged)
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
-    Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
     // "v2" (Twilight, the starting shell) or "v1" (Classic).
     // Stored under the QSettings key "uiVersion". A missing key is v2.
     Q_PROPERTY(QString uiVersion READ uiVersion WRITE setUiVersion NOTIFY uiVersionChanged)
     // UUID of the host last chosen in the Twilight shell. Empty if none.
     // Stored under the QSettings key "lastSelectedHostUuid".
     Q_PROPERTY(QString lastSelectedHostUuid READ lastSelectedHostUuid WRITE setLastSelectedHostUuid NOTIFY lastSelectedHostUuidChanged)
-
-    Q_INVOKABLE bool retranslate();
 
     // Thread-safe read for the decoder thread. True only while the Twilight
     // shell is selected and its performance overlay is enabled.
@@ -244,7 +204,6 @@ public:
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
     UIDisplayMode uiDisplayMode;
-    Language language;
     CaptureSysKeysMode captureSysKeysMode;
 
 signals:
@@ -288,7 +247,6 @@ signals:
     void swapFaceButtonsChanged();
     void captureSysKeysModeChanged();
     void keepAwakeChanged();
-    void languageChanged();
     void uiVersionChanged();
     void lastSelectedHostUuidChanged();
 
@@ -300,8 +258,6 @@ private:
     QString m_UiVersion;
     QString m_LastSelectedHostUuid;
     bool m_ShowTwilightHud;
-
-    QString getSuffixFromLanguage(Language lang);
 
     // Invoked on the GUI thread from the permission callback. Q_INVOKABLE so
     // QMetaObject::invokeMethod can queue it on Qt 5.9, which has no functor

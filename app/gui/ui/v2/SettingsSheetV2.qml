@@ -105,17 +105,6 @@ Item {
                     StreamingPreferences.width, StreamingPreferences.height, StreamingPreferences.fps, next)
     }
 
-    function setLanguage(next) {
-        if (StreamingPreferences.language === next)
-            return
-        StreamingPreferences.language = next
-        if (!StreamingPreferences.retranslate())
-            toastRequested(qsTr("Restart Twilight for this language to take effect."))
-        else if (Window.window)
-            Window.window.clearOnBack = true
-        rebuildChoices()
-    }
-
     function setMdns(next) {
         if (StreamingPreferences.enableMdns === next)
             return
@@ -145,7 +134,6 @@ Item {
 
     Connections {
         target: StreamingPreferences
-        onLanguageChanged: sheet.rebuildChoices()
         onMicrophoneAccessFinished: sheet.micWanted = granted
     }
 
@@ -775,53 +763,6 @@ Item {
                             text: qsTr("The window mode applies the next time the app opens. Packet size and fully custom modes stay in Classic.")
                         }
 
-                        TwTextV2 { theme: sheet.theme; text: qsTr("Language"); color: sheet.theme.secondary; font.pixelSize: 12; font.weight: Font.DemiBold }
-                        Flow {
-                            width: parent.width
-                            spacing: 8
-                            Repeater {
-                                model: ListModel {
-                                    ListElement { label: qsTr("Automatic"); value: StreamingPreferences.LANG_AUTO }
-                                    ListElement { label: "Deutsch"; value: StreamingPreferences.LANG_DE }
-                                    ListElement { label: "English"; value: StreamingPreferences.LANG_EN }
-                                    ListElement { label: "Français"; value: StreamingPreferences.LANG_FR }
-                                    ListElement { label: "简体中文"; value: StreamingPreferences.LANG_ZH_CN }
-                                    ListElement { label: "Español"; value: StreamingPreferences.LANG_ES }
-                                    ListElement { label: "日本語"; value: StreamingPreferences.LANG_JA }
-                                    ListElement { label: "한국어"; value: StreamingPreferences.LANG_KO }
-                                    ListElement { label: "Português"; value: StreamingPreferences.LANG_PT }
-                                    ListElement { label: "Italiano"; value: StreamingPreferences.LANG_IT }
-                                    ListElement { label: "русский"; value: StreamingPreferences.LANG_RU }
-                                    ListElement { label: "Nederlands"; value: StreamingPreferences.LANG_NL }
-                                    ListElement { label: "Svenska"; value: StreamingPreferences.LANG_SV }
-                                    ListElement { label: "Türkçe"; value: StreamingPreferences.LANG_TR }
-                                    ListElement { label: "Polski"; value: StreamingPreferences.LANG_PL }
-                                    ListElement { label: "Čeština"; value: StreamingPreferences.LANG_CS }
-                                }
-                                Rectangle {
-                                    width: langLabel.implicitWidth + 20
-                                    height: 30
-                                    radius: 8
-                                    color: StreamingPreferences.language === model.value ? sheet.theme.accent : sheet.theme.fill
-                                    border.width: 1
-                                    border.color: StreamingPreferences.language === model.value ? sheet.theme.accent : sheet.theme.stroke
-                                    TwTextV2 {
-                                        id: langLabel
-                                        anchors.centerIn: parent
-                                        theme: sheet.theme
-                                        text: model.label
-                                        font.pixelSize: 12
-                                        color: StreamingPreferences.language === model.value ? sheet.theme.accentInk : sheet.theme.ink
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: sheet.setLanguage(model.value)
-                                    }
-                                }
-                            }
-                        }
-
                         TwTextV2 {
                             theme: sheet.theme
                             text: qsTr("In-stream HUD")
@@ -830,14 +771,6 @@ Item {
                             font.weight: Font.DemiBold
                         }
                         HudChipsV2 { preview: true }
-                        TwTextV2 {
-                            width: parent.width
-                            theme: sheet.theme
-                            color: sheet.theme.tertiary
-                            font.pixelSize: 12
-                            wrapMode: Text.WordWrap
-                            text: qsTr("These chips float over a Twilight stream. Forward error correction is not shown. The preview above uses sample numbers.")
-                        }
 
                         TwTextV2 {
                             theme: sheet.theme
