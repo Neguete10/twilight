@@ -14,6 +14,9 @@
 #ifdef HAVE_PYROWAVE
 #include "video/pyrowave.h"
 #endif
+#ifdef HAVE_PYROWAVE_METAL
+#include "video/pyrowave_metal.h"
+#endif
 
 #ifdef HAVE_SLVIDEO
 #include "video/slvid.h"
@@ -288,17 +291,90 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
                 "V-sync %s",
                 enableVsync ? "enabled" : "disabled");
 
-#ifdef HAVE_PYROWAVE
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
     if (videoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
-        chosenDecoder = new PyroWaveVideoDecoder(testOnly);
-        if (chosenDecoder->initialize(&params)) {
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "PyroWave video decoder chosen");
+        static_assert(static_cast<int>(StreamingPreferences::PWBC_AUTO) == static_cast<int>(PyroWaveBackendRequest::Auto),
+                      "PyroWave backend enums diverged");
+        static_assert(static_cast<int>(StreamingPreferences::PWBC_METAL) == static_cast<int>(PyroWaveBackendRequest::Metal),
+                      "PyroWave backend enums diverged");
+        static_assert(static_cast<int>(StreamingPreferences::PWBC_VULKAN) == static_cast<int>(PyroWaveBackendRequest::Vulkan),
+                      "PyroWave backend enums diverged");
+
+        PyroWaveBackendAvailability availability{};
+#ifdef HAVE_PYROWAVE
+        availability.vulkan = true;
+#endif
+        const auto request = static_cast<PyroWaveBackendRequest>(m_Preferences->pyroWaveBackend);
+#ifdef HAVE_PYROWAVE_METAL
+        // Skip the dlopen when the user asked for Vulkan so a missing Metal
+        // dylib does not log on the MoltenVK path.
+        if (request != PyroWaveBackendRequest::Vulkan) {
+            availability.metal = PyroWaveMetalVideoDecoder::runtimeAvailable();
+        }
+#endif
+        // The stream window is created from the backend this probe records.
+        // Once that is set, stay on it: Vulkan present needs SDL_WINDOW_VULKAN
+        // and Metal present needs SDL_WINDOW_METAL.
+        const bool alreadyProbed = m_PyroWaveBackend != PyroWaveGpuBackend::None;
+        const PyroWaveGpuBackend primary = alreadyProbed
+                ? m_PyroWaveBackend
+                : selectPyroWaveBackend(request, availability);
+
+        auto tryBackend = [&](PyroWaveGpuBackend which) -> bool {
+            if (which == PyroWaveGpuBackend::None) {
+                return false;
+            }
+            IVideoDecoder* decoder = nullptr;
+            if (which == PyroWaveGpuBackend::Metal) {
+#ifdef HAVE_PYROWAVE_METAL
+                decoder = new PyroWaveMetalVideoDecoder(testOnly);
+#else
+                return false;
+#endif
+            }
+            else if (which == PyroWaveGpuBackend::Vulkan) {
+#ifdef HAVE_PYROWAVE
+                decoder = new PyroWaveVideoDecoder(testOnly);
+#else
+                return false;
+#endif
+            }
+            if (decoder != nullptr && decoder->initialize(&params)) {
+                chosenDecoder = decoder;
+                m_PyroWaveBackend = which;
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "PyroWave %s video decoder chosen",
+                            pyroWaveBackendName(which));
+                return true;
+            }
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Unable to load PyroWave %s decoder",
+                         pyroWaveBackendName(which));
+            delete decoder;
+            return false;
+        };
+
+        if (tryBackend(primary)) {
             return true;
         }
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Unable to load PyroWave decoder");
-        delete chosenDecoder;
+        if (!alreadyProbed && request == PyroWaveBackendRequest::Auto) {
+            PyroWaveGpuBackend fallback = PyroWaveGpuBackend::None;
+            if (primary == PyroWaveGpuBackend::Metal && availability.vulkan) {
+                fallback = PyroWaveGpuBackend::Vulkan;
+            }
+            else if (primary == PyroWaveGpuBackend::Vulkan && availability.metal) {
+                fallback = PyroWaveGpuBackend::Metal;
+            }
+            if (fallback != PyroWaveGpuBackend::None) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "PyroWave %s failed; trying %s",
+                            pyroWaveBackendName(primary),
+                            pyroWaveBackendName(fallback));
+                if (tryBackend(fallback)) {
+                    return true;
+                }
+            }
+        }
         chosenDecoder = nullptr;
         // FFmpeg has no PyroWave decoder. Returning here lets the caller drop
         // the codec and try H.264, HEVC, or AV1 instead of hitting the
@@ -579,7 +655,8 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_OpusDecoder(nullptr),
       m_AudioRenderer(nullptr),
       m_AudioSampleCount(0),
-      m_DropAudioEndTime(0)
+      m_DropAudioEndTime(0),
+      m_PyroWaveBackend(PyroWaveGpuBackend::None)
 {
 }
 
@@ -720,7 +797,7 @@ bool Session::initialize()
     // Start with all codecs and profiles in priority order.
     // PyroWave is first only when this build can decode it. The rest of the
     // list stays so a host without SCM_PYROWAVE still gets H.264/HEVC/AV1.
-#ifdef HAVE_PYROWAVE
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
     m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_444);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_420);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE_444);
@@ -741,7 +818,7 @@ bool Session::initialize()
     {
     case StreamingPreferences::VCC_AUTO:
     {
-#ifdef HAVE_PYROWAVE
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
         // Offer PyroWave only when the GPU decoder actually comes up. A failed
         // probe leaves H.264/HEVC/AV1 in their existing order.
         if (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE ||
@@ -852,7 +929,7 @@ bool Session::initialize()
         break;
     }
     case StreamingPreferences::VCC_FORCE_PYROWAVE:
-#ifdef HAVE_PYROWAVE
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
         // Do not strip H.264/HEVC/AV1. PyroWave wins only while it remains at
         // the front of the list; validateLaunch() removes it when the host
         // does not advertise SCM_PYROWAVE.
@@ -954,7 +1031,7 @@ bool Session::initialize()
             if (populateDecoderProperties(testWindow)) {
                 break;
             }
-#ifdef HAVE_PYROWAVE
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
             if (m_SupportedVideoFormats.front() & VIDEO_FORMAT_MASK_PYROWAVE) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "PyroWave decoder failed to initialize; falling back");
@@ -1024,7 +1101,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         emitLaunchWarning(tr("Your settings selection to force software decoding may cause poor streaming performance."));
     }
 
-#ifdef HAVE_PYROWAVE
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
     if (m_SupportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) {
         const bool hostSupports = (m_Computer->serverCodecModeSupport & SCM_PYROWAVE) != 0;
         const bool forceSoftware = m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE;
@@ -1919,12 +1996,32 @@ void Session::execInternal()
     std::string windowName = QString(m_Computer->name + " - Moonlight").toStdString();
 #endif
 
+    Uint32 platformFlags = StreamUtils::getPlatformWindowFlags();
+#if defined(Q_OS_DARWIN) && (defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL))
+    // MoltenVK present calls SDL_Vulkan_CreateSurface. That requires
+    // SDL_WINDOW_VULKAN. Darwin's default flag is SDL_WINDOW_METAL so
+    // VideoToolbox (and PyroWave Metal) keep working. Swap only when the
+    // probe selected the Vulkan PyroWave backend.
+    if ((m_ActiveVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) &&
+            m_PyroWaveBackend == PyroWaveGpuBackend::Vulkan) {
+#ifdef SDL_WINDOW_VULKAN
+        platformFlags &= ~SDL_WINDOW_METAL;
+        platformFlags |= SDL_WINDOW_VULKAN;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PyroWave Vulkan selected; stream window uses SDL_WINDOW_VULKAN");
+#else
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "PyroWave Vulkan needs SDL_WINDOW_VULKAN, which this SDL header does not define");
+#endif
+    }
+#endif
+
     m_Window = SDL_CreateWindow(windowName.c_str(),
                                 x,
                                 y,
                                 width,
                                 height,
-                                defaultWindowFlags | StreamUtils::getPlatformWindowFlags());
+                                defaultWindowFlags | platformFlags);
     if (!m_Window) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "SDL_CreateWindow() failed with platform flags: %s",

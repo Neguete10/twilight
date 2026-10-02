@@ -25,6 +25,7 @@
 #define SER_AUDIOCFG "audiocfg"
 #define SER_SPATIALAUDIOCFG "spatialaudiocfg"
 #define SER_VIDEOCFG "videocfg"
+#define SER_PYROWAVE_BACKEND "pyrowavebackend"
 #define SER_HDR "hdr"
 #define SER_YUV444 "yuv444"
 #define SER_VIDEODEC "videodec"
@@ -155,6 +156,15 @@ void StreamingPreferences::reload()
                                                   static_cast<int>(SpatialAudioConfig::SAC_AUTO)).toInt());
     videoCodecConfig = static_cast<VideoCodecConfig>(settings.value(SER_VIDEOCFG,
                                                   static_cast<int>(VideoCodecConfig::VCC_AUTO)).toInt());
+    {
+        int backend = settings.value(SER_PYROWAVE_BACKEND,
+                                     static_cast<int>(PyroWaveBackendConfig::PWBC_AUTO)).toInt();
+        if (backend < static_cast<int>(PyroWaveBackendConfig::PWBC_AUTO) ||
+                backend > static_cast<int>(PyroWaveBackendConfig::PWBC_VULKAN)) {
+            backend = static_cast<int>(PyroWaveBackendConfig::PWBC_AUTO);
+        }
+        pyroWaveBackend = static_cast<PyroWaveBackendConfig>(backend);
+    }
     videoDecoderSelection = static_cast<VideoDecoderSelection>(settings.value(SER_VIDEODEC,
                                                   static_cast<int>(VideoDecoderSelection::VDS_AUTO)).toInt());
     windowMode = static_cast<WindowMode>(settings.value(SER_WINDOWMODE,
@@ -338,6 +348,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_HDR, enableHdr);
     settings.setValue(SER_YUV444, enableYUV444);
     settings.setValue(SER_VIDEOCFG, static_cast<int>(videoCodecConfig));
+    settings.setValue(SER_PYROWAVE_BACKEND, static_cast<int>(pyroWaveBackend));
     settings.setValue(SER_VIDEODEC, static_cast<int>(videoDecoderSelection));
     settings.setValue(SER_WINDOWMODE, static_cast<int>(windowMode));
     settings.setValue(SER_UIDISPLAYMODE, static_cast<int>(uiDisplayMode));

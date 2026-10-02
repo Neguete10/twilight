@@ -744,7 +744,7 @@ bool PyroWaveVideoDecoder::initialize(PDECODER_PARAMETERS params) {
         Session::get()->getOverlayManager().setOverlayRenderer(this);
     }
 
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave GPU zero-copy decoder ready: %dx%d %s %s", m_Width, m_Height, m_YUV444 ? "4:4:4" : "4:2:0", m_TenBit ? "10-bit" : "8-bit");
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave Vulkan decoder ready: %dx%d %s %s", m_Width, m_Height, m_YUV444 ? "4:4:4" : "4:2:0", m_TenBit ? "10-bit" : "8-bit");
     return true;
 }
 

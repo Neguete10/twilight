@@ -1658,6 +1658,57 @@ Flickable {
                     }
                 }
 
+                Label {
+                    width: parent.width
+                    visible: SystemProperties.hasPyroWaveMetal && SystemProperties.hasPyroWaveVulkan
+                    text: qsTr("PyroWave GPU backend")
+                    font.pointSize: 12
+                    wrapMode: Text.Wrap
+                }
+
+                AutoResizingComboBox {
+                    visible: SystemProperties.hasPyroWaveMetal && SystemProperties.hasPyroWaveVulkan
+                    Component.onCompleted: {
+                        var saved = StreamingPreferences.pyroWaveBackend
+                        currentIndex = 0
+                        for (var i = 0; i < pyroBackendListModel.count; i++) {
+                            if (saved === pyroBackendListModel.get(i).val) {
+                                currentIndex = i
+                                break
+                            }
+                        }
+                        activated(currentIndex)
+                    }
+
+                    id: pyroBackendComboBox
+                    textRole: "text"
+                    model: ListModel {
+                        id: pyroBackendListModel
+                        ListElement {
+                            text: qsTr("Automatic (Metal when available)")
+                            val: StreamingPreferences.PWBC_AUTO
+                        }
+                        ListElement {
+                            text: qsTr("Metal")
+                            val: StreamingPreferences.PWBC_METAL
+                        }
+                        ListElement {
+                            text: qsTr("Vulkan (MoltenVK)")
+                            val: StreamingPreferences.PWBC_VULKAN
+                        }
+                    }
+                    onActivated: {
+                        if (enabled) {
+                            StreamingPreferences.pyroWaveBackend = pyroBackendListModel.get(currentIndex).val
+                        }
+                    }
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 5000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Used when the video codec is PyroWave. Automatic prefers the native Metal decoder and falls back to Vulkan. H.264, HEVC, and AV1 stay on Metal / VideoToolbox.")
+                }
+
                 CheckBox {
                     id: enableHdr
                     width: parent.width

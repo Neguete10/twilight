@@ -12,6 +12,15 @@ integration for macOS using MoltenVK”), ported forward without removing
 `HAVE_COREAUDIO` or the spatial mixer. It is **off** unless qmake is run with
 `CONFIG+=pyrowave`, so the existing Mac build does not need the submodule.
 
+`CONFIG+=pyrowave` on macOS now compiles two PyroWave decoders. Vulkan
+(MoltenVK, `PyroWaveVideoDecoder`) stays linked to `libpyrowave-shared` from
+submodule pin `263ef100`. Metal (`PyroWaveMetalVideoDecoder`) dlopens a
+separately built `libpyrowave-metal` and does not replace that pin. Settings
+→ Advanced → PyroWave GPU backend is Automatic / Metal / Vulkan when both
+are compiled. Automatic prefers Metal when that dylib and an Apple7 GPU are
+present, and otherwise uses Vulkan. H.264, HEVC, and AV1 stay on
+Metal/VideoToolbox. Video codec = PyroWave is unchanged.
+
 ## What works / what does not
 
 **Works in this change**
@@ -25,11 +34,18 @@ integration for macOS using MoltenVK”), ported forward without removing
 - Offline parser test for the length-prefixed frame and the 8-byte headers
   (`tests/pyrowave_packets_test.cpp`). It passed on this Linux VM. No GPU
   timing was measured here.
+- Backend selection test (`tests/pyrowave_backend_test.cpp`): Automatic
+  prefers Metal, and an explicit Metal or Vulkan choice does not cross over
+  when that library is absent. It passed on this Linux VM. The test also
+  includes the Metal ABI snapshot so the 0.5.0 struct sizes are checked.
+- A Metal decode/present client (`app/streaming/video/pyrowave_metal.mm`)
+  that coexists with the MoltenVK decoder. It was not compiled here (no
+  Apple SDK, no Metal).
 
 **Does not work yet**
 
-- Live decode of a Vibeshine stream. This VM has no Mac GPU, no MoltenVK, and
-  no host.
+- Live decode of a Vibeshine / Vibepollo stream on either backend. This VM
+  has no Mac GPU, no MoltenVK, and no host.
 - The default Mac link (`-lssl.3 -lcrypto.3 -lavcodec.61 …`, no `-lplacebo`)
   is unchanged. `CONFIG+=pyrowave` adds `-lpyrowave-shared -lplacebo` and
   expects SDL to load MoltenVK. The prebuilts on this branch may not contain
@@ -41,7 +57,8 @@ integration for macOS using MoltenVK”), ported forward without removing
 - Partial RTP delivery. Stock `moonlight-common-c` drops a frame it cannot
   fully reassemble. `andyg.xbox-pyrowave` commit `574aab7` delivers a prefix
   for PyroWave; that patch is not applied here.
-- A native Metal decoder. See the Metal section.
+- A GPU run of the Metal decoder. The client is in the tree; the dylib and
+  an Apple7 GPU are not. See the Metal section.
 
 ## Bitstream
 
@@ -180,17 +197,19 @@ Qt side (`app/streaming/session.cpp`), only the advertising and fallback:
   PyroWave but do **not** clear the other codecs. `andyg.pyrowave-macos`
   used `removeByMask(~VIDEO_FORMAT_MASK_PYROWAVE)`, which left no fallback.
   Forcing H.264, HEVC, or AV1 still removes PyroWave, same as before.
-- A build without `HAVE_PYROWAVE` never adds the profiles. Choosing PyroWave
-  in that build logs a warning and continues with H.264/HEVC/AV1.
+- A build without `HAVE_PYROWAVE` or `HAVE_PYROWAVE_METAL` never adds the
+  profiles. Choosing PyroWave in that build logs a warning and continues
+  with H.264/HEVC/AV1.
 
 `chooseDecoder()` returns false on a PyroWave format instead of falling
 through to FFmpeg. `FFmpegVideoDecoder::isDecoderMatchForParams()` asserts
 the format is H.264, HEVC, or AV1.
 
-## Decoder path (MoltenVK, not Metal)
+## Decoder path (Vulkan / MoltenVK)
 
 `app/streaming/video/pyrowave.cpp` / `pyrowave.h` are the `andyg.pyrowave-macos`
-decoder.
+Vulkan decoder. Metal does not edit this file’s device, plane, or present
+calls.
 
 - **Linux:** PyroWave’s own Vulkan device, exportable dmabuf planes, import
   into libplacebo.
@@ -201,42 +220,97 @@ decoder.
   `vkGetInstanceProcAddr` loads MoltenVK; the binary is not linked with
   `-lvulkan`.
 
+The stream window is `SDL_WINDOW_METAL` on Darwin for VideoToolbox and for
+PyroWave Metal. When the probed backend is Vulkan, `Session::execInternal()`
+clears that flag and sets `SDL_WINDOW_VULKAN` before `SDL_CreateWindow`.
+`SDL_Vulkan_CreateSurface` fails on a Metal window. The hidden probe window
+stays Metal: the Vulkan probe is `testOnly` and uses
+`pyrowave_create_default_device()` with no surface, and H.264/HEVC/AV1 still
+need a Metal view. Non-PyroWave codecs never take the Vulkan flag.
+
 `PyroWaveVideoDecoder::isHardwareAccelerated()` is true. Colorspace reported
 to the host is still `COLORSPACE_REC_601` / `COLOR_RANGE_LIMITED` from that
 file; the wavelet header’s BT.709 / BT.2020 / PQ flags are not yet what
 Moonlight sends in `colorSpace`. Treat that as unfinished if HDR PyroWave
-looks wrong.
+looks wrong. The Metal decoder reports the same colorspace.
 
 `VIDEO_STATS::totalRenderTimeUs` was added in `decoder.h` because the overlay
 in the ported decoder records present time and this branch’s struct did not
 have the field.
 
-## Metal vs MoltenVK
+## Metal backend
 
-MoltenVK is the path that already existed and is what `CONFIG+=pyrowave`
-compiles. It is a poor App Store default: the app must ship or locate
-MoltenVK, SDL must be built with Vulkan, and the decoder still speaks VkImage.
+Checked against [andygrundman/pyrowave](https://github.com/andygrundman/pyrowave)
+commit `89f7e47d4abbf650c91fae766728af866c5e32a0` (2026-09-25, “Fix .def file”).
+`metal/pyrowave_metal.h` there is API **0.5.0**. `metal/` does **not** exist
+at submodule pin `263ef100` (GitHub returns 404 for that path). Master’s
+Vulkan export list also moved (`pyrowave_create_default_device2` removed,
+`pyrowave_create_device_by_compat2` added in `pyrowave-shared.def`). Bumping
+the submodule to pick up Metal would change the Vulkan C API
+`pyrowave.cpp` calls (`fragment_path`, timeline `pyrowave_decoder_decode_gpu_buffer`).
+The two libraries stay separate.
 
-Two Metal codebases exist and are **not** wired in:
+They cannot be linked into one binary. Both export `pyrowave_decoder_create`,
+`pyrowave_device_destroy`, `pyrowave_decoder_push_packet`, and
+`pyrowave_decoder_decode_gpu_buffer`. The Metal `decode_gpu_buffer` takes an
+`MTLCommandBuffer` and three `MTLTexture`s. The Vulkan one takes timeline
+sync ops and `VkImage` views. `PyroWaveMetalVideoDecoder` loads
+`libpyrowave-metal` with `dlopen(..., RTLD_NOW | RTLD_LOCAL)` and
+`dlsym`. `RTLD_LOCAL` keeps those symbols off the Vulkan decoder, which is
+still bound to `libpyrowave-shared` at link time.
 
-1. `metal/` on [andygrundman/pyrowave](https://github.com/andygrundman/pyrowave)
-   `master` (`metal/README.md`, `metal/pyrowave_metal.h`). Native Metal, no
-   Granite. `pyrowave_decoder_push_packet` /
-   `pyrowave_decoder_decode_gpu_buffer` mirror the Vulkan C API but take
-   `MTLDevice` / `MTLTexture`. The README says it is an unsupported,
-   AI-assisted port and that it was faster than Vulkan-on-KosmicKrisp on
-   Apple hardware. Commit `263ef100` (the pin this client builds against)
-   is **not** an ancestor of that master. Master does contain bitstream
-   commit `186f0393`, which is Vibeshine’s `BITSTREAM_ID`.
-2. [EthanLipnik/PyrowaveKit](https://github.com/EthanLipnik/PyrowaveKit), a
-   separate Swift/Metal port (packet decode, 4:2:0 and 4:4:4, rate control).
-   Not vendored.
+The struct layouts Twilight passes are in
+`app/streaming/video/pyrowave_metal_api.h`, copied from that 0.5.0 header
+(MIT, Hans-Kristian Arntzen). `runtimeAvailable()` refuses any other major
+or minor. Patch may differ. Search order for the dylib:
 
-Next decoder step on a Mac: build `libpyrowave` from a commit at or after
-`186f0393`, confirm `pyrowave.h` still matches `pyrowave.cpp`, then either
-keep MoltenVK for a LAN proof or retarget `initialize()` at
-`pyrowave_metal.h` and a `CVPixelBuffer` / `MTLTexture` present path. The
-length-prefix parser can stay.
+1. `PYROWAVE_METAL_LIBRARY`
+2. `Contents/Frameworks/libpyrowave-metal.dylib` (and the `.0` soname) next
+   to the app executable
+3. `pyrowave-metal/build/libpyrowave-metal.dylib` relative to the working
+   directory
+4. `libpyrowave-metal.dylib` on the default loader path
+
+`qmake CONFIG+=pyrowave` on macOS copies a dylib from `pyrowave-metal/build/`
+into the app bundle when that directory exists. It does not link it.
+
+Decode matches the length-prefix path the Vulkan decoder already uses
+(`pyroWaveUnpackLengthPrefixedFrame`, then `pyrowave_decoder_push_packet`).
+`pyrowave_decoder_decode_gpu_buffer` writes three private `R8Unorm` or
+`R16Unorm` planes (shader-read and shader-write). Present is a
+`CAMetalLayer` draw through the existing `vt_renderer.metal`
+`ps_draw_triplanar` shader, on the same `MTLCommandQueue` as decode so the
+GPU sees the writes in commit order. The upstream header says the port
+needs a 32-wide SIMD group and the Apple7 family. Intel and AMD Macs fail
+`pyrowave_device_is_supported` and Automatic falls through to Vulkan.
+
+[EthanLipnik/PyrowaveKit](https://github.com/EthanLipnik/PyrowaveKit) is a
+Swift package with its own packet and pixel-buffer API. It is not wired in.
+The C Metal library already matches the push/decode calls Twilight uses, and
+a Swift runtime is a second integration. The Metal README calls that port
+unsupported and AI-assisted; treat a live picture as unproven until it is
+run on a Mac.
+
+### Settings
+
+Advanced → **PyroWave GPU backend**, shown only when the build has both
+`HAVE_PYROWAVE` and `HAVE_PYROWAVE_METAL` (`SystemProperties.hasPyroWaveVulkan`
+and `hasPyroWaveMetal`).
+
+| Choice | Behavior |
+| --- | --- |
+| Automatic | Metal if the dylib loads and a device is supported, otherwise Vulkan. If Metal’s `initialize()` fails during the probe, Vulkan is tried once, before the stream window exists. |
+| Metal | Metal only. No Vulkan fallback. |
+| Vulkan | MoltenVK only. No Metal fallback. |
+
+`stream --pyrowave-backend auto|metal|vulkan` sets the same preference.
+Video codec = PyroWave is still `VCC_FORCE_PYROWAVE` and still leaves
+H.264/HEVC/AV1 in the list. The backend setting does nothing for those
+codecs.
+
+Automatic’s fallback happens only in the probe (`testOnly`). The real
+window is created afterwards to match the backend that succeeded, and the
+live decoder does not switch libraries under that window.
 
 ## Build
 
@@ -254,7 +328,8 @@ The protocol patch is required even when the decoder is off, so
 submodule working tree and is idempotent. Do not commit that dirty
 submodule; the script is the source of the change.
 
-PyroWave decoder (macOS, MoltenVK):
+PyroWave Vulkan decoder (macOS, MoltenVK). Leave the submodule at
+`263ef100`:
 
 ```bash
 git submodule update --init pyrowave
@@ -266,35 +341,74 @@ qmake CONFIG+=pyrowave
 make
 ```
 
-Linux uses the same `CONFIG+=pyrowave` switch and links `-lvulkan` plus
-`libdrm` and `libplacebo` via pkg-config. Windows is rejected by qmake.
+That qmake line on macOS also compiles the Metal client. Without
+`libpyrowave-metal` the Automatic setting uses Vulkan, which is the previous
+behavior plus `SDL_WINDOW_VULKAN` on the stream window.
 
-Offline parser test (no Qt, no GPU):
+PyroWave Metal library (separate tree, not the submodule):
+
+```bash
+git clone https://github.com/andygrundman/pyrowave.git pyrowave-metal
+cd pyrowave-metal
+git checkout 89f7e47d4abbf650c91fae766728af866c5e32a0
+cmake -S metal -B build
+cmake --build build
+cd ..
+# optional: export PYROWAVE_METAL_LIBRARY=$PWD/pyrowave-metal/build/libpyrowave-metal.dylib
+qmake CONFIG+=pyrowave
+make
+```
+
+`metal/CMakeLists.txt` at that commit builds `libpyrowave-metal` (API 0.5.0)
+and links Metal and IOSurface. It does not need Granite or MoltenVK. Do not
+check this clone out over the `pyrowave` submodule. `pyrowave-metal/` is a
+build directory, not a git submodule.
+
+Linux uses the same `CONFIG+=pyrowave` switch, compiles only the Vulkan
+decoder, and links `-lvulkan` plus `libdrm` and `libplacebo` via pkg-config.
+Windows is rejected by qmake. There is no Metal backend off macOS.
+
+Offline tests (no Qt, no GPU):
 
 ```bash
 g++ -std=c++17 -Wall -Wextra -Iapp/streaming/video \
     tests/pyrowave_packets_test.cpp -o /tmp/pyrowave_packets_test
 /tmp/pyrowave_packets_test
+
+g++ -std=c++17 -Wall -Wextra -Iapp/streaming/video \
+    tests/pyrowave_backend_test.cpp -o /tmp/pyrowave_backend_test
+/tmp/pyrowave_backend_test
 ```
 
 ## Blockers for a live Mac proof
 
-1. No Mac GPU in this environment, so MoltenVK and Metal were not linked or
-   timed.
+1. This environment has no Mac GPU and no Apple SDK. The Metal `.mm` was
+   not compiled. MoltenVK was not linked. Neither backend was timed against
+   a Vibepollo stream (format `0x10`).
 2. Need a Vibeshine (or Vibepollo) host with PyroWave enabled, on a gigabit
    LAN. Bitrate is hundreds of Mbit/s. Nonary’s Windows/Linux Moonlight builds
    are the clients that already decode this; Twilight is the Mac gap.
-3. Move the `pyrowave` pin from `263ef100` to a commit whose bitstream matches
-   `BITSTREAM_ID` `186f0393` before expecting bit-exact interop, and recheck
-   the C API.
-4. This branch’s Mac prebuilts may lack libplacebo and a Vulkan-enabled SDL.
+3. The Vulkan pin stays at `263ef100` so the working MoltenVK calls are not
+   rewritten. Vibeshine’s `BITSTREAM_ID` is `186f0393`, which is an ancestor
+   of the Metal tree (`89f7e47`) and is **not** the Vulkan pin. If a live
+   Vulkan decode disagrees with the host, that mismatch is still open. Do
+   not “fix” it by moving the submodule onto `89f7e47` without re-porting
+   `pyrowave.cpp` to that revision’s Vulkan header.
+4. Metal refuses to load if `pyrowave_get_api_version` is not 0.5.x. A newer
+   `pyrowave_metal.h` needs a matching edit to `pyrowave_metal_api.h`.
+5. This branch’s Mac prebuilts may lack libplacebo and a Vulkan-enabled SDL.
    `andyg.pyrowave-macos` is the reference for those library versions.
-5. App Store: PyroWave itself is MIT. The MoltenVK build also compiles
-   Granite; check that license before shipping. Prefer `metal/pyrowave_metal.h`
-   or PyrowaveKit over bundling MoltenVK. Sandbox and UDP buffer sizes are
-   unchanged from a normal stream, but the receive rate is much higher.
-6. Record framing and partial-frame delivery are still host/client follow-ups.
+   `SDL_WINDOW_VULKAN` has to be in that SDL. The stream window requests it
+   only for the Vulkan backend.
+6. App Store submission is out of scope. PyroWave itself is MIT. The MoltenVK
+   build also compiles Granite; check that license before shipping. The
+   Metal library is the MIT `metal/` port and does not need MoltenVK. Its
+   README says upstream does not support it. Sandbox and UDP buffer sizes
+   are unchanged from a normal stream, but the receive rate is much higher.
+7. Record framing and partial-frame delivery are still host/client follow-ups.
    Until they exist, do not advertise `x-ss-video[0].pyrowaveAdaptiveFec`.
+8. Intel and AMD Macs cannot run the Metal decoder (`pyrowave_device_is_supported`
+   requires Apple7). Use Vulkan there.
 
 ## CoreAudio spatial
 
