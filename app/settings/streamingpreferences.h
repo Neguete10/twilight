@@ -140,6 +140,8 @@ public:
     Q_PROPERTY(bool gameOptimizations MEMBER gameOptimizations NOTIFY gameOptimizationsChanged)
     Q_PROPERTY(bool spatialHeadTracking MEMBER spatialHeadTracking NOTIFY spatialHeadTrackingChanged)
     Q_PROPERTY(bool playAudioOnHost MEMBER playAudioOnHost NOTIFY playAudioOnHostChanged)
+    Q_PROPERTY(bool enableMicrophone MEMBER enableMicrophone NOTIFY enableMicrophoneChanged)
+    Q_PROPERTY(QString microphoneStatusText READ microphoneStatusText NOTIFY microphoneStatusTextChanged)
     Q_PROPERTY(bool multiController MEMBER multiController NOTIFY multiControllerChanged)
     Q_PROPERTY(bool enableMdns MEMBER enableMdns NOTIFY enableMdnsChanged)
     Q_PROPERTY(bool quitAppAfter MEMBER quitAppAfter NOTIFY quitAppAfterChanged)
@@ -173,6 +175,14 @@ public:
 
     Q_INVOKABLE bool retranslate();
 
+    // macOS only. Shows the system microphone prompt when needed.
+    // enableMicrophone becomes true only after access is granted.
+    Q_INVOKABLE void setMicrophoneEnabled(bool enabled);
+
+    Q_INVOKABLE void refreshMicrophoneStatus();
+
+    QString microphoneStatusText() const;
+
     // Directly accessible members for preferences
     int width;
     int height;
@@ -183,6 +193,7 @@ public:
     bool gameOptimizations;
     bool spatialHeadTracking;
     bool playAudioOnHost;
+    bool enableMicrophone;
     bool multiController;
     bool enableMdns;
     bool quitAppAfter;
@@ -223,6 +234,9 @@ signals:
     void gameOptimizationsChanged();
     void spatialHeadTrackingChanged();
     void playAudioOnHostChanged();
+    void enableMicrophoneChanged();
+    void microphoneStatusTextChanged();
+    void microphoneAccessFinished(bool granted);
     void multiControllerChanged();
     void unsupportedFpsChanged();
     void enableMdnsChanged();
@@ -259,6 +273,13 @@ private:
 
     QString getSuffixFromLanguage(Language lang);
 
+    // Invoked on the GUI thread from the permission callback. Q_INVOKABLE so
+    // QMetaObject::invokeMethod can queue it on Qt 5.9, which has no functor
+    // overload of invokeMethod.
+    Q_INVOKABLE void completeMicrophoneRequest(int serial, bool granted);
+
     QQmlEngine* m_QmlEngine;
+    int m_MicRequestSerial = 0;
+    QString m_MicrophoneStatusText;
 };
 

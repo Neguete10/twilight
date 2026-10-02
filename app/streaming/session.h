@@ -9,6 +9,7 @@
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
+#include "audio/microphone/mic_capture.h"
 #include "video/overlaymanager.h"
 #include "video/pyrowave_backend.h"
 
@@ -195,6 +196,12 @@ private:
     bool displayCoversWindow(int width, int height) const;
 #endif
 
+    void startMicrophone();
+
+    void stopMicrophone();
+
+    void toggleMicrophoneMute();
+
     void notifyMouseEmulationMode(bool enabled);
 
     void updateOptimalWindowDisplayMode();
@@ -330,6 +337,8 @@ private:
     bool m_PipReapplying;
     QString m_PipRestoreTitle;
 #endif
+
+    MicrophoneCapture m_Microphone;
 
     Overlay::OverlayManager m_OverlayManager;
 

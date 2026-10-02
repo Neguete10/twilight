@@ -163,6 +163,8 @@ Flickable {
         if (SdlGamepadKeyNavigation.getConnectedGamepads() > 0) {
             resolutionComboBox.forceActiveFocus(Qt.TabFocus)
         }
+
+        StreamingPreferences.refreshMicrophoneStatus()
     }
 
     StackView.onDeactivating: {
@@ -181,6 +183,11 @@ Flickable {
     Connections {
         target: NetworkProfiles
         onSettingsApplied: syncStreamControls()
+    }
+
+    Connections {
+        target: StreamingPreferences
+        onMicrophoneAccessFinished: microphoneCheck.checked = granted
     }
 
     Column {
@@ -1259,6 +1266,29 @@ Flickable {
                     ToolTip.timeout: 5000
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Mutes Moonlight's audio when you Alt+Tab out of the stream or click on a different window.")
+                }
+
+                CheckBox {
+                    id: microphoneCheck
+                    width: parent.width
+                    text: qsTr("Stream microphone to the host")
+                    font.pointSize: 12
+                    visible: Qt.platform.os == "osx"
+                    Component.onCompleted: checked = StreamingPreferences.enableMicrophone
+                    onClicked: StreamingPreferences.setMicrophoneEnabled(checked)
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 8000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Sends the Mac microphone to the host on the encrypted control stream (packet 0x3003, Opus 48 kHz mono). Vibepollo builds with Vibelight microphone passthrough can play it as Steam Streaming Microphone. Stock Sunshine does not. Ctrl+Alt+Shift+N mutes during a stream.")
+                }
+
+                Label {
+                    width: parent.width
+                    visible: microphoneCheck.visible
+                    text: StreamingPreferences.microphoneStatusText
+                    font.pointSize: 10
+                    wrapMode: Text.Wrap
                 }
             }
         }

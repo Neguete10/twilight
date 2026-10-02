@@ -10,9 +10,12 @@
   (pass this file with the entitlements flag on the MAS path only).
   Do not submit the result to App Store review.
   The key com.apple.developer.audio.spatial-audio is intentionally absent.
+  com.apple.security.device.audio-input is the sandbox microphone entitlement.
 -->
 <dict>
 	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>

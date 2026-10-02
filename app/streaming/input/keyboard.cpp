@@ -140,6 +140,12 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
 #endif
         break;
 
+    case KeyComboToggleMicrophoneMute:
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected microphone mute toggle combo");
+        Session::get()->toggleMicrophoneMute();
+        break;
+
     case KeyComboTogglePointerRegionLock:
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected pointer region lock toggle combo");

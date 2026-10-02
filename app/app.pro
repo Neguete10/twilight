@@ -1,13 +1,18 @@
 QT += core quick network quickcontrols2 svg
 CONFIG += c++11
 
-# Teach moonlight-common-c the PyroWave capability bits before either
-# project compiles against Limelight.h. Idempotent. See docs/PYROWAVE_MAC.md.
+# Teach moonlight-common-c the PyroWave capability bits, adaptive triggers,
+# and the microphone control-stream send before either project compiles
+# against Limelight.h. Idempotent. See docs/PYROWAVE_MAC.md,
+# docs/DUALSENSE_MAC.md, and docs/MICROPHONE_MAC.md.
 !system(python3 $$PWD/../scripts/apply_pyrowave_protocol.py) {
     error("Failed to apply the PyroWave protocol patch to moonlight-common-c")
 }
 !system(python3 $$PWD/../scripts/apply_adaptive_triggers_protocol.py) {
     error("Failed to apply the adaptive-trigger protocol patch to moonlight-common-c")
+}
+!system(python3 $$PWD/../scripts/apply_mic_control_packet.py) {
+    error("Failed to apply the microphone control-stream patch to moonlight-common-c")
 }
 
 unix:!macx {
@@ -230,6 +235,7 @@ SOURCES += \
     streaming/input/reltouch.cpp \
     streaming/session.cpp \
     streaming/audio/audio.cpp \
+    streaming/audio/microphone/mic_wire.cpp \
     streaming/audio/renderers/renderer.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
@@ -268,6 +274,10 @@ HEADERS += \
     settings/network_identity.h \
     streaming/input/input.h \
     streaming/session.h \
+    streaming/audio/microphone/mic_capture.h \
+    streaming/audio/microphone/mic_permission.h \
+    streaming/audio/microphone/mic_resample.h \
+    streaming/audio/microphone/mic_wire.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
@@ -494,6 +504,8 @@ macx {
 
     SOURCES += \
         settings/network_identity_mac.mm \
+        streaming/audio/microphone/mic_capture_mac.mm \
+        streaming/audio/microphone/mic_permission_mac.mm \
         streaming/audio/renderers/coreaudio/au_spatial_renderer.mm \
         streaming/audio/renderers/coreaudio/coreaudio.cpp \
         streaming/audio/renderers/coreaudio/TPCircularBuffer.c \
@@ -513,6 +525,11 @@ macx {
         streaming/mac/pip_frame.h \
         streaming/mac/pip_window.h \
         streaming/video/ffmpeg-renderers/vt.h
+}
+!macx {
+    SOURCES += \
+        streaming/audio/microphone/mic_capture.cpp \
+        streaming/audio/microphone/mic_permission.cpp
 }
 soundio {
     message(libsoundio audio renderer selected)
@@ -688,6 +705,7 @@ macx {
         QMAKE_MAC_XCODE_SETTINGS += CODE_SIGN_ENTITLEMENTS ENABLE_HARDENED_RUNTIME
 
         system(sed -i -e 's/Moonlight uses the local network/Twilight uses the local network/g' $$OUT_PWD/Info.plist)
+        system(sed -i -e 's/Moonlight uses the microphone/Twilight uses the microphone/g' $$OUT_PWD/Info.plist)
         message("twilight-mas: bundle id $$TWILIGHT_BUNDLE_ID")
         message("twilight-mas: display name $$TWILIGHT_DISPLAY_NAME")
         message("twilight-mas: entitlements $$PWD/deploy/macos/Twilight-MAS.entitlements")

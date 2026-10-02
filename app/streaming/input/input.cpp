@@ -168,6 +168,15 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboCycleTriggerPreview].scanCode = SDL_SCANCODE_T;
     m_SpecialKeyCombos[KeyComboCycleTriggerPreview].enabled = true;
 
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].keyCombo = KeyComboToggleMicrophoneMute;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].keyCode = SDLK_n;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].scanCode = SDL_SCANCODE_N;
+#ifdef Q_OS_DARWIN
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].enabled = true;
+#else
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].enabled = false;
+#endif
+
     m_OldIgnoreDevices = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES);
     m_OldIgnoreDevicesExcept = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT);
 
