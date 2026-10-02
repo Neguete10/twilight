@@ -1,3 +1,4 @@
+#include "pyrowave_color.h"
 #include "pyrowave_packets.h"
 
 #include <cstdio>
@@ -84,10 +85,73 @@ static void testSequenceHeader()
     expect(seq.chroma444 && seq.pqTransfer, "444 + PQ");
 }
 
+static PyroWaveSequenceHeader headerWith(uint8_t top)
+{
+    uint8_t bytes[8] = {0x01, 0x40, 0x00, 0x80, 0x01, 0x00, 0x00, top};
+    PyroWaveSequenceHeader seq{};
+    expect(pyroWaveParseSequenceHeader(bytes, sizeof(bytes), seq), "color sof");
+    return seq;
+}
+
+static void testPresentColor()
+{
+    const PyroWavePresentColor sdr = pyroWavePresentColor(false, nullptr);
+    expect(sdr.matrix == PyroWaveMatrix::Bt601, "sdr matrix matches HEVC");
+    expect(sdr.range == PyroWaveRange::Limited, "sdr limited");
+    expect(sdr.transfer == PyroWaveTransfer::Bt709, "sdr transfer");
+    expect(!sdr.chromaLeft, "sdr center chroma");
+
+    const PyroWavePresentColor hdr = pyroWavePresentColor(true, nullptr);
+    expect(hdr.matrix == PyroWaveMatrix::Bt2020, "hdr matrix");
+    expect(hdr.range == PyroWaveRange::Limited, "hdr keeps advertised limited range");
+    expect(hdr.transfer == PyroWaveTransfer::Pq, "hdr pq");
+
+    // All-zero usability bits are what current encoders emit. They must not
+    // be read as BT.709 full.
+    PyroWaveSequenceHeader unset{};
+    unset.code = 0;
+    const PyroWavePresentColor ignored = pyroWavePresentColor(false, &unset);
+    expect(pyroWavePresentColorEqual(ignored, sdr), "unset header stays Rec.601 limited");
+
+    // bit 27 primaries, bit 28 PQ, bit 29 matrix, bit 30 limited → top byte
+    const PyroWaveSequenceHeader pq = headerWith((1u << 3) | (1u << 4) | (1u << 5) | (1u << 6));
+    const PyroWavePresentColor pqColor = pyroWavePresentColor(true, &pq);
+    expect(pqColor.matrix == PyroWaveMatrix::Bt2020, "signaled 2020");
+    expect(pqColor.transfer == PyroWaveTransfer::Pq, "signaled pq");
+    expect(pqColor.range == PyroWaveRange::Limited, "signaled limited");
+
+    // Explicit BT.2020, transfer bit clear, HDR mode → HLG. bit 27 + bit 29.
+    const PyroWaveSequenceHeader hlg = headerWith((1u << 3) | (1u << 5));
+    const PyroWavePresentColor hlgColor = pyroWavePresentColor(true, &hlg);
+    expect(hlgColor.transfer == PyroWaveTransfer::Hlg, "hdr + bt2020 without pq is hlg");
+    expect(hlgColor.range == PyroWaveRange::Full, "unset range bit with an explicit header is full");
+
+    // Explicit BT.709 (no 2020/PQ bits cannot be represented except by setting
+    // limited while leaving the others clear). Limited-only keeps Rec.601.
+    const PyroWaveSequenceHeader limitedOnly = headerWith(1u << 6);
+    const PyroWavePresentColor limitedColor = pyroWavePresentColor(false, &limitedOnly);
+    expect(limitedColor.matrix == PyroWaveMatrix::Bt601, "limited-only does not invent 709");
+    expect(limitedColor.range == PyroWaveRange::Limited, "limited-only range");
+
+    // PQ without BT.2020 bits is still an explicit header: Rec.709 + PQ.
+    const PyroWaveSequenceHeader pq709 = headerWith(1u << 4);
+    const PyroWavePresentColor pq709Color = pyroWavePresentColor(false, &pq709);
+    expect(pq709Color.matrix == PyroWaveMatrix::Bt709, "pq without 2020 is rec.709");
+    expect(pq709Color.transfer == PyroWaveTransfer::Pq, "pq bit selects pq");
+    expect(pq709Color.range == PyroWaveRange::Full, "explicit header without limited bit is full");
+
+    // bit 31 chroma left, nothing else.
+    const PyroWaveSequenceHeader left = headerWith(1u << 7);
+    const PyroWavePresentColor leftColor = pyroWavePresentColor(false, &left);
+    expect(leftColor.chromaLeft, "left chroma siting");
+    expect(leftColor.matrix == PyroWaveMatrix::Bt601, "siting does not change matrix");
+}
+
 int main()
 {
     testLengthPrefix();
     testSequenceHeader();
+    testPresentColor();
     if (g_failures != 0) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;

@@ -110,6 +110,54 @@ def main() -> None:
         else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_AV1) && strstr(response.payload, "AV1/90000")) {""",
         "VIDEO_FORMAT_MASK_PYROWAVE",
     )
+    # The block above is what an already-patched tree contains. This second
+    # pass rewrites it. A fresh tree gets the 10-bit-first text, then this
+    # upgrade. A tree that already says "Prefer 8-bit PyroWave" is left alone.
+    # Do not fold this order into the first ensure: that marker would then
+    # be present before this old string exists, and a missing old string exits.
+    ensure(
+        SRC / "RtspConnection.c",
+        """        if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) && (serverInfo->serverCodecModeSupport & SCM_PYROWAVE)) {
+            // PyroWave has no codec-specific SDP media line. Select it when both
+            // sides advertise it, then fall through to AV1/HEVC/H.264 otherwise.
+            // Profile order matches andygrundman/moonlight-common-c 2c263da.
+            if ((serverInfo->serverCodecModeSupport & SCM_PYROWAVE10_444) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE10_444)) {
+                NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE10_444;
+            }
+            else if ((serverInfo->serverCodecModeSupport & SCM_PYROWAVE10_420) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE10_420)) {
+                NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE10_420;
+            }
+            else if ((serverInfo->serverCodecModeSupport & SCM_PYROWAVE_444) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE_444)) {
+                NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE_444;
+            }
+            else {
+                NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE;
+            }
+        }
+        else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_AV1) && strstr(response.payload, "AV1/90000")) {""",
+        """        // Prefer 8-bit PyroWave. VIDEO_FORMAT_MASK_PYROWAVE is the client's one
+        // profile bit; SCM_MASK_PYROWAVE is every host profile, including a
+        // 10-bit-only host. HDR puts a 10-bit bit in supportedVideoFormats.
+        // No matching profile falls through to AV1/HEVC/H.264.
+        if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) && (serverInfo->serverCodecModeSupport & SCM_MASK_PYROWAVE) &&
+            (serverInfo->serverCodecModeSupport & SCM_PYROWAVE_444) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE_444)) {
+            NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE_444;
+        }
+        else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) && (serverInfo->serverCodecModeSupport & SCM_MASK_PYROWAVE) &&
+                 (serverInfo->serverCodecModeSupport & SCM_PYROWAVE) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE)) {
+            NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE;
+        }
+        else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) && (serverInfo->serverCodecModeSupport & SCM_MASK_PYROWAVE) &&
+                 (serverInfo->serverCodecModeSupport & SCM_PYROWAVE10_444) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE10_444)) {
+            NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE10_444;
+        }
+        else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) && (serverInfo->serverCodecModeSupport & SCM_MASK_PYROWAVE) &&
+                 (serverInfo->serverCodecModeSupport & SCM_PYROWAVE10_420) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE10_420)) {
+            NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE10_420;
+        }
+        else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_AV1) && strstr(response.payload, "AV1/90000")) {""",
+        "Prefer 8-bit PyroWave",
+    )
     ensure(
         SRC / "SdpGenerator.c",
         """        if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_AV1) {

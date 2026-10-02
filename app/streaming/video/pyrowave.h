@@ -20,6 +20,7 @@
 
   #include "decoder.h"
   #include "overlaymanager.h"
+  #include "pyrowave_color.h"
   #include "../bandwidth.h"
 
   #ifdef __APPLE__
@@ -106,6 +107,10 @@ private:
     bool m_TenBit;
     std::atomic<bool> m_HdrEnabled;      // host HDR state (control stream); read on render thread
     pl_color_space m_LastColorspace;     // render thread only; drives swapchain colorspace hints
+    PyroWavePresentColor m_LastPresentColor{}; // render thread only
+    bool m_HavePresentColor = false;
+    PyroWaveSequenceHeader m_Sequence{}; // guarded by m_FrameLock
+    bool m_HaveSequence = false;
     SDL_Window* m_Window;
 
     // PyroWave decode side (its own headless device).
