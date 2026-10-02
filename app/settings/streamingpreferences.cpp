@@ -1,4 +1,5 @@
 #include "streamingpreferences.h"
+#include "streaming/audio/microphone/mic_permission.h"
 #include "utils.h"
 
 #include <QAtomicInt>
@@ -22,6 +23,7 @@
 #define SER_GAMEOPTS "gameopts"
 #define SER_HEADTRACKING "headtracking"
 #define SER_HOSTAUDIO "hostaudio"
+#define SER_MICROPHONE "microphone"
 #define SER_MULTICONT "multicontroller"
 #define SER_AUDIOCFG "audiocfg"
 #define SER_SPATIALAUDIOCFG "spatialaudiocfg"
@@ -34,6 +36,7 @@
 #define SER_MDNS "mdns"
 #define SER_QUITAPPAFTER "quitAppAfter"
 #define SER_ABSMOUSEMODE "mouseacceleration"
+#define SER_COREHIDMOUSE "corehidmouse"
 #define SER_ABSTOUCHMODE "abstouchmode"
 #define SER_STARTWINDOWED "startwindowed"
 #define SER_FRAMEPACING "framepacing"
@@ -135,10 +138,13 @@ void StreamingPreferences::reload()
     gameOptimizations = settings.value(SER_GAMEOPTS, true).toBool();
     spatialHeadTracking = settings.value(SER_HEADTRACKING, false).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
+    enableMicrophone = settings.value(SER_MICROPHONE, false).toBool();
+    refreshMicrophoneStatus();
     multiController = settings.value(SER_MULTICONT, true).toBool();
     enableMdns = settings.value(SER_MDNS, true).toBool();
     quitAppAfter = settings.value(SER_QUITAPPAFTER, false).toBool();
     absoluteMouseMode = settings.value(SER_ABSMOUSEMODE, false).toBool();
+    coreHidMouse = settings.value(SER_COREHIDMOUSE, false).toBool();
     absoluteTouchMode = settings.value(SER_ABSTOUCHMODE, true).toBool();
     framePacing = settings.value(SER_FRAMEPACING, false).toBool();
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
@@ -344,10 +350,12 @@ void StreamingPreferences::save()
     settings.setValue(SER_GAMEOPTS, gameOptimizations);
     settings.setValue(SER_HEADTRACKING, spatialHeadTracking);
     settings.setValue(SER_HOSTAUDIO, playAudioOnHost);
+    settings.setValue(SER_MICROPHONE, enableMicrophone);
     settings.setValue(SER_MULTICONT, multiController);
     settings.setValue(SER_MDNS, enableMdns);
     settings.setValue(SER_QUITAPPAFTER, quitAppAfter);
     settings.setValue(SER_ABSMOUSEMODE, absoluteMouseMode);
+    settings.setValue(SER_COREHIDMOUSE, coreHidMouse);
     settings.setValue(SER_ABSTOUCHMODE, absoluteTouchMode);
     settings.setValue(SER_FRAMEPACING, framePacing);
     settings.setValue(SER_CONNWARNINGS, connectionWarnings);
@@ -420,6 +428,69 @@ void StreamingPreferences::setUiVersion(const QString& version)
     emit uiVersionChanged();
 }
 
+QString StreamingPreferences::microphoneStatusText() const
+{
+    return m_MicrophoneStatusText;
+}
+
+void StreamingPreferences::refreshMicrophoneStatus()
+{
+    QString text;
+    switch (MacMicrophonePermission::status()) {
+    case MacMicrophonePermission::Status::Granted:
+        text = tr("Microphone access granted. Ctrl+Alt+Shift+N mutes it during a stream.");
+        break;
+    case MacMicrophonePermission::Status::Denied:
+        text = tr("Microphone access is off for this app. Turn it on in System Settings > Privacy & Security > Microphone.");
+        break;
+    case MacMicrophonePermission::Status::Restricted:
+        text = tr("Microphone access is restricted on this Mac.");
+        break;
+    case MacMicrophonePermission::Status::NotDetermined:
+    default:
+        text = tr("Checking this box asks macOS for microphone access.");
+        break;
+    }
+
+    if (text == m_MicrophoneStatusText) {
+        return;
+    }
+    m_MicrophoneStatusText = text;
+    emit microphoneStatusTextChanged();
+}
+
+void StreamingPreferences::setMicrophoneEnabled(bool enabled)
+{
+    if (!enabled) {
+        ++m_MicRequestSerial;
+        enableMicrophone = false;
+        refreshMicrophoneStatus();
+        save();
+        return;
+    }
+
+    const int serial = ++m_MicRequestSerial;
+    MacMicrophonePermission::request([this, serial](bool granted) {
+        QMetaObject::invokeMethod(this,
+                                  "completeMicrophoneRequest",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(int, serial),
+                                  Q_ARG(bool, granted));
+    });
+}
+
+void StreamingPreferences::completeMicrophoneRequest(int serial, bool granted)
+{
+    if (serial != m_MicRequestSerial) {
+        return;
+    }
+
+    enableMicrophone = granted;
+    refreshMicrophoneStatus();
+    save();
+    emit microphoneAccessFinished(granted);
+}
+
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)
 {
     // Don't scale bitrate linearly beyond 60 FPS. It's definitely not a linear
@@ -474,4 +545,83 @@ int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool
     }
 
     return qRound(resolutionFactor * frameRateFactor) * 1000;
+}
+
+void StreamingPreferences::applyNetworkProfileSettings(const NetworkProfiles::StreamPreset& incoming)
+{
+    NetworkProfiles::StreamPreset preset = incoming;
+
+    // Same migration as reload(): the retired combined HEVC+HDR value is codec
+    // auto plus the HDR flag.
+    if (preset.videoCodecConfig == VCC_FORCE_HEVC_HDR_DEPRECATED) {
+        preset.videoCodecConfig = VCC_AUTO;
+        preset.enableHdr = true;
+    }
+    // The settings page clears frame pacing whenever V-Sync is off.
+    if (!preset.enableVsync) {
+        preset.framePacing = false;
+    }
+    // The bitrate slider tops out at 150 Mbps until "unlock bitrate" is on.
+    if (!preset.unlockBitrate && preset.bitrateKbps > 150000) {
+        preset.bitrateKbps = 150000;
+    }
+
+    width = preset.width;
+    height = preset.height;
+    fps = preset.fps;
+    unlockBitrate = preset.unlockBitrate;
+    enableVsync = preset.enableVsync;
+    spatialHeadTracking = preset.spatialHeadTracking;
+    audioConfig = static_cast<AudioConfig>(preset.audioConfig);
+    spatialAudioConfig = static_cast<SpatialAudioConfig>(preset.spatialAudioConfig);
+    videoCodecConfig = static_cast<VideoCodecConfig>(preset.videoCodecConfig);
+    pyroWaveBackend = static_cast<PyroWaveBackendConfig>(preset.pyroWaveBackend);
+    enableHdr = preset.enableHdr;
+    enableYUV444 = preset.enableYUV444;
+    videoDecoderSelection = static_cast<VideoDecoderSelection>(preset.videoDecoderSelection);
+    windowMode = static_cast<WindowMode>(preset.windowMode);
+    framePacing = preset.framePacing;
+
+    emit unlockBitrateChanged();
+    emit enableYUV444Changed();
+    emit displayModeChanged();
+    emit enableVsyncChanged();
+    emit spatialHeadTrackingChanged();
+    emit audioConfigChanged();
+    emit spatialAudioConfigChanged();
+    emit videoCodecConfigChanged();
+    emit pyroWaveBackendChanged();
+    emit enableHdrChanged();
+    emit videoDecoderSelectionChanged();
+    emit windowModeChanged();
+    emit framePacingChanged();
+
+    // Those signals update the classic settings controls, and the YUV 4:4:4
+    // checkbox replaces bitrate with getDefaultBitrate while it runs. Write
+    // the profile bitrate after that so the saved number wins.
+    bitrateKbps = preset.bitrateKbps;
+    emit bitrateChanged();
+    save();
+}
+
+NetworkProfiles::StreamPreset StreamingPreferences::captureNetworkProfileSettings() const
+{
+    NetworkProfiles::StreamPreset preset = NetworkProfiles::emptyStreamPreset();
+    preset.width = width;
+    preset.height = height;
+    preset.fps = fps;
+    preset.bitrateKbps = bitrateKbps;
+    preset.unlockBitrate = unlockBitrate;
+    preset.videoCodecConfig = static_cast<int>(videoCodecConfig);
+    preset.pyroWaveBackend = static_cast<int>(pyroWaveBackend);
+    preset.enableHdr = enableHdr;
+    preset.enableYUV444 = enableYUV444;
+    preset.videoDecoderSelection = static_cast<int>(videoDecoderSelection);
+    preset.windowMode = static_cast<int>(windowMode);
+    preset.audioConfig = static_cast<int>(audioConfig);
+    preset.spatialAudioConfig = static_cast<int>(spatialAudioConfig);
+    preset.spatialHeadTracking = spatialHeadTracking;
+    preset.enableVsync = enableVsync;
+    preset.framePacing = framePacing;
+    return preset;
 }

@@ -1248,6 +1248,11 @@ void PyroWaveMetalVideoDecoder::renderFrameOnMainThread()
                 rect.x = impl->drawableWidth - (int)overlay.width;
                 rect.y = impl->drawableHeight - (int)overlay.height;
             }
+            else if (i == Overlay::OverlayGamepad) {
+                // Bottom right. y=0 is the bottom on this path.
+                rect.x = SDL_max(0, impl->drawableWidth - (int)overlay.width);
+                rect.y = 0;
+            }
             rect.w = overlay.width;
             rect.h = overlay.height;
             StreamUtils::screenSpaceToNormalizedDeviceCoords(&rect, impl->drawableWidth, impl->drawableHeight);

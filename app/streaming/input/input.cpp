@@ -6,6 +6,7 @@
 #include "utils.h"
 
 #include <QtGlobal>
+#include <QByteArray>
 #include <QDir>
 #include <QGuiApplication>
 
@@ -32,8 +33,38 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_RightButtonReleaseTimer(0),
       m_DragTimer(0),
       m_DragButton(0),
-      m_NumFingersDown(0)
+      m_NumFingersDown(0),
+      m_DualSenseHid(),
+      m_TriggerPreview(DualSensePreviewFollowHost),
+      m_SawHostAdaptiveTriggers(false),
+      m_LoggedAdaptiveSendFailure(false),
+      m_LastHostTypeLeft(0),
+      m_LastHostTypeRight(0),
+      m_LastGamepadOverlayTicks(0)
+#ifdef Q_OS_DARWIN
+      , m_CoreHidRequested(false),
+      m_CoreHidActive(false),
+      m_CoreHidScale(1.0f),
+      m_CoreHidBackend(CoreHidBackendRequest::Auto),
+      m_CoreHid(nullptr)
+#endif
 {
+#ifdef Q_OS_DARWIN
+    // Opt-in. Unset env leaves the checkbox alone. See docs/COREHID_MAC.md.
+    const QByteArray coreHidEnv = qgetenv("TWILIGHT_COREHID");
+    const QByteArray coreHidScaleEnv = qgetenv("TWILIGHT_COREHID_SCALE");
+    const QByteArray coreHidBackendEnv = qgetenv("TWILIGHT_COREHID_BACKEND");
+    m_CoreHidRequested = coreHidResolveEnabled(prefs.coreHidMouse, coreHidEnv.constData());
+    m_CoreHidScale = coreHidResolveScale(coreHidScaleEnv.constData());
+    m_CoreHidBackend = coreHidResolveBackend(coreHidBackendEnv.constData());
+    if (m_CoreHidRequested && !m_AbsoluteMouseMode) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "CoreHID raw mouse requested (backend %s, scale %.2f). It starts when the cursor is captured.",
+                    coreHidBackendName(m_CoreHidBackend),
+                    m_CoreHidScale);
+    }
+#endif
+
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
         m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
@@ -64,6 +95,11 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     // want this behavior, they can override it with the environment variable.
     SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS4_RUMBLE", "1");
     SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS5_RUMBLE", "1");
+
+    // Adaptive trigger effects are written through SDL's HIDAPI PS5 driver
+    // (SDL_GameControllerSendEffect). The Game Controller framework path on
+    // macOS can read a paired DualSense but cannot program trigger resistance.
+    SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS5", "1");
 
     // Populate special key combo configuration
     m_SpecialKeyCombos[KeyComboQuit].keyCombo = KeyComboQuit;
@@ -110,6 +146,36 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].keyCode = SDLK_l;
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].scanCode = SDL_SCANCODE_L;
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].enabled = true;
+
+    // macOS stream picture-in-picture. Disabled elsewhere so the combo
+    // cannot match. P is not used by the other Ctrl+Alt+Shift shortcuts.
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].keyCombo = KeyComboTogglePictureInPicture;
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].keyCode = SDLK_p;
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].scanCode = SDL_SCANCODE_P;
+#ifdef Q_OS_DARWIN
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].enabled = true;
+#else
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].enabled = false;
+#endif
+
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].keyCombo = KeyComboToggleGamepadOverlay;
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].keyCode = SDLK_g;
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].scanCode = SDL_SCANCODE_G;
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].enabled = true;
+
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].keyCombo = KeyComboCycleTriggerPreview;
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].keyCode = SDLK_t;
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].scanCode = SDL_SCANCODE_T;
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].enabled = true;
+
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].keyCombo = KeyComboToggleMicrophoneMute;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].keyCode = SDLK_n;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].scanCode = SDL_SCANCODE_N;
+#ifdef Q_OS_DARWIN
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].enabled = true;
+#else
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].enabled = false;
+#endif
 
     m_OldIgnoreDevices = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES);
     m_OldIgnoreDevicesExcept = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT);
@@ -194,6 +260,17 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
 
 SdlInputHandler::~SdlInputHandler()
 {
+    // Release any resistance we programmed before the HID device goes away.
+    clearAdaptiveTriggers();
+
+#ifdef Q_OS_DARWIN
+    if (m_CoreHidActive) {
+        stopCoreHidCapture();
+    }
+    coreHidMouseCaptureDestroy(m_CoreHid);
+    m_CoreHid = nullptr;
+#endif
+
     for (int i = 0; i < MAX_GAMEPADS; i++) {
         if (m_GamepadState[i].mouseEmulationTimer != 0) {
             Session::get()->notifyMouseEmulationMode(false);
@@ -365,11 +442,16 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
 void SdlInputHandler::setCaptureActive(bool active)
 {
     if (active) {
-        // If we're in relative mode, try to activate SDL's relative mouse mode
-        if (m_AbsoluteMouseMode || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
-            // Relative mouse mode didn't work or was disabled, so we'll just hide the cursor
-            SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
-            m_FakeCaptureActive = true;
+        // Mac CoreHID capture replaces SDL relative mode, which warps the
+        // cursor and reports accelerated deltas. Other platforms, absolute
+        // mouse mode, and a failed native open keep the SDL path below.
+        if (!tryStartCoreHidCapture()) {
+            // If we're in relative mode, try to activate SDL's relative mouse mode
+            if (m_AbsoluteMouseMode || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
+                // Relative mouse mode didn't work or was disabled, so we'll just hide the cursor
+                SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
+                m_FakeCaptureActive = true;
+            }
         }
 
         // Synchronize the client and host cursor when activating absolute capture
@@ -399,13 +481,15 @@ void SdlInputHandler::setCaptureActive(bool active)
         }
     }
     else {
-        if (m_FakeCaptureActive) {
-            // Display the cursor again
-            SDL_ShowCursor(SDL_ENABLE);
-            m_FakeCaptureActive = false;
-        }
-        else {
-            SDL_SetRelativeMouseMode(SDL_FALSE);
+        if (!stopCoreHidCapture()) {
+            if (m_FakeCaptureActive) {
+                // Display the cursor again
+                SDL_ShowCursor(SDL_ENABLE);
+                m_FakeCaptureActive = false;
+            }
+            else {
+                SDL_SetRelativeMouseMode(SDL_FALSE);
+            }
         }
     }
 
@@ -440,3 +524,132 @@ void SdlInputHandler::handleTouchFingerEvent(SDL_TouchFingerEvent* event)
         handleRelativeFingerEvent(event);
     }
 }
+
+bool SdlInputHandler::tryStartCoreHidCapture()
+{
+#ifdef Q_OS_DARWIN
+    if (m_CoreHidActive) {
+        return true;
+    }
+    if (!m_CoreHidRequested || m_AbsoluteMouseMode) {
+        return false;
+    }
+
+    if (m_CoreHid == nullptr) {
+        m_CoreHid = coreHidMouseCaptureCreate(&SdlInputHandler::coreHidMotionThunk,
+                                              &SdlInputHandler::coreHidButtonThunk,
+                                              this,
+                                              m_CoreHidScale,
+                                              m_CoreHidBackend);
+    }
+    if (m_CoreHid == nullptr || !coreHidMouseCaptureStart(m_CoreHid)) {
+        return false;
+    }
+
+    m_CoreHidActive = true;
+    SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
+    m_FakeCaptureActive = true;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool SdlInputHandler::stopCoreHidCapture()
+{
+#ifdef Q_OS_DARWIN
+    if (!m_CoreHidActive) {
+        return false;
+    }
+
+    coreHidMouseCaptureStop(m_CoreHid);
+    m_CoreHidActive = false;
+    SDL_ShowCursor(SDL_ENABLE);
+    m_FakeCaptureActive = false;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool SdlInputHandler::coreHidSuppressesRelativeMotion() const
+{
+#ifdef Q_OS_DARWIN
+    return m_CoreHidActive;
+#else
+    return false;
+#endif
+}
+
+bool SdlInputHandler::coreHidSuppressesScroll() const
+{
+#ifdef Q_OS_DARWIN
+    return m_CoreHidActive && m_CoreHid != nullptr && coreHidMouseCaptureOwnsWheel(m_CoreHid);
+#else
+    return false;
+#endif
+}
+
+#ifdef Q_OS_DARWIN
+
+void SdlInputHandler::coreHidMotionThunk(const CoreHidMouseDelta& delta, void* context)
+{
+    static_cast<SdlInputHandler*>(context)->sendCoreHidMotion(delta);
+}
+
+void SdlInputHandler::coreHidButtonThunk(const CoreHidButtonUpdate& update, void* context)
+{
+    static_cast<SdlInputHandler*>(context)->sendCoreHidButtons(update);
+}
+
+void SdlInputHandler::sendCoreHidMotion(const CoreHidMouseDelta& delta)
+{
+    // Raw relative counts. Not LiSendMouseMoveAsMousePositionEvent: that API
+    // keeps a virtual client cursor for platforms that cannot read HID deltas.
+    if (delta.motion) {
+        LiSendMouseMoveEvent(static_cast<short>(delta.dx), static_cast<short>(delta.dy));
+    }
+
+    if (delta.wheelChanged && delta.wheel != 0) {
+        const int16_t amount = coreHidScrollToHighRes(delta.wheel, m_ReverseScrollDirection);
+        if (amount != 0) {
+            LiSendHighResScrollEvent(amount);
+        }
+    }
+
+    if (delta.hWheelChanged && delta.hWheel != 0) {
+        const int16_t amount = coreHidScrollToHighRes(delta.hWheel, m_ReverseScrollDirection);
+        if (amount != 0) {
+            LiSendHighResHScrollEvent(amount);
+        }
+    }
+}
+
+void SdlInputHandler::sendCoreHidButtons(const CoreHidButtonUpdate& update)
+{
+    const auto sendMask = [this](uint32_t mask, char action) {
+        for (uint32_t usage = 1; usage <= 8; usage++) {
+            if ((mask & (1u << (usage - 1))) == 0) {
+                continue;
+            }
+            int button = coreHidHostButtonForUsage(usage);
+            if (button == 0) {
+                continue;
+            }
+            if (m_SwapMouseButtons) {
+                if (button == BUTTON_RIGHT) {
+                    button = BUTTON_LEFT;
+                }
+                else if (button == BUTTON_LEFT) {
+                    button = BUTTON_RIGHT;
+                }
+            }
+            LiSendMouseButtonEvent(action, button);
+        }
+    };
+
+    sendMask(update.pressed, BUTTON_ACTION_PRESS);
+    sendMask(update.released, BUTTON_ACTION_RELEASE);
+}
+
+#endif

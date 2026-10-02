@@ -1,5 +1,7 @@
 #pragma once
 
+#include "network_profile_logic.h"
+
 #include <QObject>
 #include <QRect>
 #include <QQmlEngine>
@@ -16,6 +18,11 @@ public:
     getDefaultBitrate(int width, int height, int fps, bool yuv444);
 
     Q_INVOKABLE void save();
+
+    // Copies or replaces the stream picture a network profile owns.
+    // Other preferences (language, mouse, mDNS, and so on) stay as they are.
+    void applyNetworkProfileSettings(const NetworkProfiles::StreamPreset& preset);
+    NetworkProfiles::StreamPreset captureNetworkProfileSettings() const;
 
     void reload();
 
@@ -134,10 +141,13 @@ public:
     Q_PROPERTY(bool gameOptimizations MEMBER gameOptimizations NOTIFY gameOptimizationsChanged)
     Q_PROPERTY(bool spatialHeadTracking MEMBER spatialHeadTracking NOTIFY spatialHeadTrackingChanged)
     Q_PROPERTY(bool playAudioOnHost MEMBER playAudioOnHost NOTIFY playAudioOnHostChanged)
+    Q_PROPERTY(bool enableMicrophone MEMBER enableMicrophone NOTIFY enableMicrophoneChanged)
+    Q_PROPERTY(QString microphoneStatusText READ microphoneStatusText NOTIFY microphoneStatusTextChanged)
     Q_PROPERTY(bool multiController MEMBER multiController NOTIFY multiControllerChanged)
     Q_PROPERTY(bool enableMdns MEMBER enableMdns NOTIFY enableMdnsChanged)
     Q_PROPERTY(bool quitAppAfter MEMBER quitAppAfter NOTIFY quitAppAfterChanged)
     Q_PROPERTY(bool absoluteMouseMode MEMBER absoluteMouseMode NOTIFY absoluteMouseModeChanged)
+    Q_PROPERTY(bool coreHidMouse MEMBER coreHidMouse NOTIFY coreHidMouseChanged)
     Q_PROPERTY(bool absoluteTouchMode MEMBER absoluteTouchMode NOTIFY absoluteTouchModeChanged)
     Q_PROPERTY(bool framePacing MEMBER framePacing NOTIFY framePacingChanged)
     Q_PROPERTY(bool connectionWarnings MEMBER connectionWarnings NOTIFY connectionWarningsChanged)
@@ -181,6 +191,14 @@ public:
     bool showTwilightHud() const { return m_ShowTwilightHud; }
     void setShowTwilightHud(bool show);
 
+    // macOS only. Shows the system microphone prompt when needed.
+    // enableMicrophone becomes true only after access is granted.
+    Q_INVOKABLE void setMicrophoneEnabled(bool enabled);
+
+    Q_INVOKABLE void refreshMicrophoneStatus();
+
+    QString microphoneStatusText() const;
+
     // Directly accessible members for preferences
     int width;
     int height;
@@ -191,10 +209,12 @@ public:
     bool gameOptimizations;
     bool spatialHeadTracking;
     bool playAudioOnHost;
+    bool enableMicrophone;
     bool multiController;
     bool enableMdns;
     bool quitAppAfter;
     bool absoluteMouseMode;
+    bool coreHidMouse;
     bool absoluteTouchMode;
     bool framePacing;
     bool connectionWarnings;
@@ -230,11 +250,15 @@ signals:
     void gameOptimizationsChanged();
     void spatialHeadTrackingChanged();
     void playAudioOnHostChanged();
+    void enableMicrophoneChanged();
+    void microphoneStatusTextChanged();
+    void microphoneAccessFinished(bool granted);
     void multiControllerChanged();
     void unsupportedFpsChanged();
     void enableMdnsChanged();
     void quitAppAfterChanged();
     void absoluteMouseModeChanged();
+    void coreHidMouseChanged();
     void absoluteTouchModeChanged();
     void audioConfigChanged();
     void spatialAudioConfigChanged();
@@ -272,6 +296,13 @@ private:
 
     QString getSuffixFromLanguage(Language lang);
 
+    // Invoked on the GUI thread from the permission callback. Q_INVOKABLE so
+    // QMetaObject::invokeMethod can queue it on Qt 5.9, which has no functor
+    // overload of invokeMethod.
+    Q_INVOKABLE void completeMicrophoneRequest(int serial, bool granted);
+
     QQmlEngine* m_QmlEngine;
+    int m_MicRequestSerial = 0;
+    QString m_MicrophoneStatusText;
 };
 

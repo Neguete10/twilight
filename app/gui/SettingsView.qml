@@ -4,6 +4,7 @@ import QtQuick.Layouts 1.2
 import QtQuick.Window 2.2
 
 import StreamingPreferences 1.0
+import NetworkProfiles 1.0
 import ComputerManager 1.0
 import SdlGamepadKeyNavigation 1.0
 import SystemProperties 1.0
@@ -35,6 +36,87 @@ Flickable {
             item = item.parent
         }
         return false
+    }
+
+    // Profile apply writes StreamingPreferences directly. Combo boxes only
+    // read those values when they are created, so point them at the new
+    // picture without going through onActivated (that path recomputes bitrate).
+    function syncEnumCombo(combo, model, value) {
+        for (var i = 0; i < model.count; i++) {
+            if (model.get(i).val === value) {
+                combo.currentIndex = i
+                break
+            }
+        }
+        combo.recalculateWidth()
+    }
+
+    function syncResolutionCombo() {
+        var savedWidth = StreamingPreferences.width
+        var savedHeight = StreamingPreferences.height
+        var match = -1
+        var customIndex = -1
+        for (var i = 0; i < resolutionListModel.count; i++) {
+            var row = resolutionListModel.get(i)
+            if (row.is_custom) {
+                customIndex = i
+                continue
+            }
+            if (parseInt(row.video_width) === savedWidth && parseInt(row.video_height) === savedHeight) {
+                match = i
+            }
+        }
+        if (match >= 0) {
+            resolutionComboBox.currentIndex = match
+            resolutionComboBox.lastIndexValue = match
+        }
+        else if (customIndex >= 0) {
+            resolutionListModel.setProperty(customIndex, "video_width", "" + savedWidth)
+            resolutionListModel.setProperty(customIndex, "video_height", "" + savedHeight)
+            resolutionListModel.setProperty(customIndex, "text", qsTr("Custom") + " (" + savedWidth + "x" + savedHeight + ")")
+            resolutionComboBox.currentIndex = customIndex
+            resolutionComboBox.lastIndexValue = customIndex
+        }
+        resolutionComboBox.recalculateWidth()
+    }
+
+    function syncFpsCombo() {
+        var savedFps = StreamingPreferences.fps
+        var match = -1
+        var customIndex = -1
+        for (var i = 0; i < fpsListModel.count; i++) {
+            var row = fpsListModel.get(i)
+            if (row.is_custom) {
+                customIndex = i
+                continue
+            }
+            if (parseInt(row.video_fps) === savedFps) {
+                match = i
+            }
+        }
+        if (match >= 0) {
+            fpsComboBox.currentIndex = match
+            fpsComboBox.lastIndexValue = match
+        }
+        else if (customIndex >= 0) {
+            fpsListModel.setProperty(customIndex, "video_fps", "" + savedFps)
+            fpsListModel.setProperty(customIndex, "text", qsTr("Custom (%1 FPS)").arg(savedFps))
+            fpsComboBox.currentIndex = customIndex
+            fpsComboBox.lastIndexValue = customIndex
+        }
+        fpsComboBox.recalculateWidth()
+    }
+
+    function syncStreamControls() {
+        syncResolutionCombo()
+        syncFpsCombo()
+        slider.value = StreamingPreferences.bitrateKbps
+        windowModeComboBox.reinitialize()
+        syncEnumCombo(audioComboBox, audioListModel, StreamingPreferences.audioConfig)
+        syncEnumCombo(spatialAudioComboBox, spatialAudioListModel, StreamingPreferences.spatialAudioConfig)
+        syncEnumCombo(decoderComboBox, decoderListModel, StreamingPreferences.videoDecoderSelection)
+        syncEnumCombo(codecComboBox, codecListModel, StreamingPreferences.videoCodecConfig)
+        syncEnumCombo(pyroBackendComboBox, pyroBackendListModel, StreamingPreferences.pyroWaveBackend)
     }
 
     NumberAnimation on contentY {
@@ -70,6 +152,9 @@ Flickable {
     }
 
     StackView.onActivated: {
+        // Re-read SSID or the fallback identity each time settings opens.
+        NetworkProfiles.refreshNetwork()
+
         // This enables Tab and BackTab based navigation rather than arrow keys.
         // It is required to shift focus between controls on the settings page.
         SdlGamepadKeyNavigation.setUiNavMode(true)
@@ -78,6 +163,8 @@ Flickable {
         if (SdlGamepadKeyNavigation.getConnectedGamepads() > 0) {
             resolutionComboBox.forceActiveFocus(Qt.TabFocus)
         }
+
+        StreamingPreferences.refreshMicrophoneStatus()
     }
 
     StackView.onDeactivating: {
@@ -93,11 +180,205 @@ Flickable {
         StreamingPreferences.save()
     }
 
+    Connections {
+        target: NetworkProfiles
+        onSettingsApplied: syncStreamControls()
+    }
+
+    Connections {
+        target: StreamingPreferences
+        onMicrophoneAccessFinished: microphoneCheck.checked = granted
+    }
+
     Column {
         padding: 10
         id: settingsColumn1
         width: settingsPage.width / 2
         spacing: 15
+
+        GroupBox {
+            id: networkProfilesGroupBox
+            width: (parent.width - (parent.leftPadding + parent.rightPadding))
+            padding: 12
+            title: "<font color=\"skyblue\">" + qsTr("Network Profiles") + "</font>"
+            font.pointSize: 12
+
+            Column {
+                anchors.fill: parent
+                spacing: 5
+
+                Label {
+                    width: parent.width
+                    text: qsTr("Save bitrate, resolution, FPS, and codec for a network, then apply them in one tap.")
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
+                }
+
+                Label {
+                    width: parent.width
+                    text: qsTr("Current network: %1").arg(NetworkProfiles.currentNetworkLabel)
+                    font.pointSize: 12
+                    wrapMode: Text.Wrap
+                }
+
+                Label {
+                    width: parent.width
+                    text: NetworkProfiles.currentNetworkDetail
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
+                }
+
+                Label {
+                    width: parent.width
+                    visible: NetworkProfiles.statusMessage !== ""
+                    text: NetworkProfiles.statusMessage
+                    font.pointSize: 9
+                    color: "skyblue"
+                    wrapMode: Text.Wrap
+                }
+
+                Row {
+                    spacing: 6
+                    width: parent.width
+
+                    Button {
+                        text: qsTr("Refresh network")
+                        onClicked: NetworkProfiles.refreshNetwork()
+                    }
+
+                    Button {
+                        visible: NetworkProfiles.ssidAccessRequestable
+                        text: qsTr("Allow Wi-Fi name")
+                        onClicked: NetworkProfiles.requestSsidAccess()
+                    }
+                }
+
+                Button {
+                    visible: NetworkProfiles.matchingProfileCount === 1
+                    text: qsTr("Apply %1").arg(NetworkProfiles.soleMatchName)
+                    onClicked: NetworkProfiles.applyProfile(NetworkProfiles.soleMatchId)
+                }
+
+                Label {
+                    width: parent.width
+                    text: qsTr("Display intent")
+                    font.pointSize: 12
+                    wrapMode: Text.Wrap
+                }
+
+                AutoResizingComboBox {
+                    id: displayIntentCombo
+                    textRole: "text"
+                    model: ListModel {
+                        id: displayIntentModel
+                        ListElement {
+                            text: qsTr("Custom (keep current settings)")
+                            val: NetworkProfiles.Custom
+                        }
+                        ListElement {
+                            text: qsTr("Couch TV")
+                            val: NetworkProfiles.CouchTv
+                        }
+                        ListElement {
+                            text: qsTr("Desk monitor")
+                            val: NetworkProfiles.DeskMonitor
+                        }
+                        ListElement {
+                            text: qsTr("Battery saver")
+                            val: NetworkProfiles.BatterySaver
+                        }
+                    }
+                    onActivated: {
+                        recalculateWidth()
+                        NetworkProfiles.applyDisplayIntent(displayIntentModel.get(currentIndex).val)
+                    }
+                }
+
+                Label {
+                    width: parent.width
+                    text: displayIntentCombo.currentIndex >= 0 ? NetworkProfiles.intentDescription(displayIntentModel.get(displayIntentCombo.currentIndex).val) : ""
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
+                }
+
+                TextField {
+                    id: profileNameField
+                    width: parent.width
+                    placeholderText: qsTr("Profile name (Home Wi-Fi, Work, Hotspot)")
+                    selectByMouse: true
+                }
+
+                CheckBox {
+                    id: bindNetworkCheck
+                    width: parent.width
+                    text: qsTr("Bind to the current network")
+                    font.pointSize: 12
+                    checked: true
+                    hoverEnabled: true
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 5000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Uses the Wi-Fi name when macOS provides it, otherwise the interface and subnet. Uncheck to apply this profile by hand on any network.")
+                }
+
+                Button {
+                    text: qsTr("Save profile")
+                    onClicked: {
+                        var intent = displayIntentModel.get(displayIntentCombo.currentIndex).val
+                        if (NetworkProfiles.saveCurrentSettings(profileNameField.text, intent, bindNetworkCheck.checked)) {
+                            profileNameField.text = ""
+                        }
+                    }
+                }
+
+                Label {
+                    width: parent.width
+                    visible: NetworkProfiles.profileCount === 0
+                    text: qsTr("No saved profiles yet.")
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
+                }
+
+                Repeater {
+                    model: NetworkProfiles.profiles
+                    delegate: Column {
+                        width: parent.width
+                        spacing: 2
+
+                        Label {
+                            width: parent.width
+                            text: modelData.name
+                            font.pointSize: 12
+                            font.bold: modelData.matchesCurrent
+                            color: modelData.matchesCurrent ? "skyblue" : palette.text
+                            wrapMode: Text.Wrap
+                        }
+
+                        Label {
+                            width: parent.width
+                            text: modelData.subtitle
+                            font.pointSize: 9
+                            wrapMode: Text.Wrap
+                        }
+
+                        Row {
+                            spacing: 6
+
+                            Button {
+                                text: modelData.matchesCurrent ? qsTr("Apply for this network") : qsTr("Apply")
+                                onClicked: NetworkProfiles.applyProfile(modelData.id)
+                            }
+
+                            Button {
+                                text: qsTr("Delete")
+                                onClicked: NetworkProfiles.deleteProfile(modelData.id)
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         GroupBox {
             id: basicSettingsGroupBox
@@ -986,6 +1267,29 @@ Flickable {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Mutes Moonlight's audio when you Alt+Tab out of the stream or click on a different window.")
                 }
+
+                CheckBox {
+                    id: microphoneCheck
+                    width: parent.width
+                    text: qsTr("Stream microphone to the host")
+                    font.pointSize: 12
+                    visible: Qt.platform.os == "osx"
+                    Component.onCompleted: checked = StreamingPreferences.enableMicrophone
+                    onClicked: StreamingPreferences.setMicrophoneEnabled(checked)
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 8000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Sends the Mac microphone to the host on the encrypted control stream (packet 0x3003, Opus 48 kHz mono). Vibepollo builds with Vibelight microphone passthrough can play it as Steam Streaming Microphone. Stock Sunshine does not. Ctrl+Alt+Shift+N mutes during a stream.")
+                }
+
+                Label {
+                    width: parent.width
+                    visible: microphoneCheck.visible
+                    text: StreamingPreferences.microphoneStatusText
+                    font.pointSize: 10
+                    wrapMode: Text.Wrap
+                }
             }
         }
 
@@ -1343,6 +1647,24 @@ Flickable {
                     ToolTip.text: qsTr("This enables seamless mouse control without capturing the client's mouse cursor. It is ideal for remote desktop usage but will not work in most games.") + " " +
                                   qsTr("You can toggle this while streaming using Ctrl+Alt+Shift+M.") + "\n\n" +
                                   qsTr("NOTE: Due to a bug in GeForce Experience, this option may not work properly if your host PC has multiple monitors.")
+                }
+
+                CheckBox {
+                    id: coreHidMouseCheck
+                    hoverEnabled: true
+                    width: parent.width
+                    visible: Qt.platform.os == "osx"
+                    text: qsTr("Use CoreHID raw mouse (macOS games)")
+                    font.pointSize: 12
+                    checked: StreamingPreferences.coreHidMouse
+                    onCheckedChanged: {
+                        StreamingPreferences.coreHidMouse = checked
+                    }
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 10000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Reads the mouse with IOHID instead of warping the macOS cursor. Off by default. Requires Input Monitoring, and it does nothing in remote-desktop mouse mode. Trackpads stay on SDL. See docs/COREHID_MAC.md.")
                 }
 
                 Row {

@@ -1,6 +1,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlEngine>
 #include <QIcon>
 #include <QQuickStyle>
 #include <QMutex>
@@ -46,6 +47,7 @@
 #include "backend/systemproperties.h"
 #include "streaming/session.h"
 #include "settings/streamingpreferences.h"
+#include "settings/network_profile.h"
 #include "gui/sdlgamepadkeynavigation.h"
 #include "gui/streamhudstats.h"
 #include "gui/sfsymbolprovider.h"
@@ -729,6 +731,13 @@ int main(int argc, char *argv[])
                                                  QQmlEngine::setObjectOwnership(stats, QQmlEngine::CppOwnership);
                                                  return stats;
                                              });
+    qmlRegisterSingletonType<NetworkProfileStore>("NetworkProfiles", 1, 0,
+                                                  "NetworkProfiles",
+                                                  [](QQmlEngine*, QJSEngine*) -> QObject* {
+                                                      NetworkProfileStore* store = NetworkProfileStore::get();
+                                                      QQmlEngine::setObjectOwnership(store, QQmlEngine::CppOwnership);
+                                                      return store;
+                                                  });
 
     // Create the identity manager on the main thread
     IdentityManager::get();

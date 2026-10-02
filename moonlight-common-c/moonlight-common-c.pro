@@ -10,6 +10,12 @@ QT -= core gui
 !system(python3 $$PWD/../scripts/apply_pyrowave_protocol.py) {
     error("Failed to apply the PyroWave protocol patch to moonlight-common-c")
 }
+!system(python3 $$PWD/../scripts/apply_adaptive_triggers_protocol.py) {
+    error("Failed to apply the adaptive-trigger protocol patch to moonlight-common-c")
+}
+!system(python3 $$PWD/../scripts/apply_mic_control_packet.py) {
+    error("Failed to apply the microphone control-stream patch to moonlight-common-c")
+}
 
 TARGET = moonlight-common-c
 TEMPLATE = lib

@@ -368,6 +368,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addToggleOption("multi-controller", "multiple controller support");
     parser.addToggleOption("quit-after", "quit app after session");
     parser.addToggleOption("absolute-mouse", "remote desktop optimized mouse control");
+    parser.addToggleOption("corehid-mouse", "macOS CoreHID raw mouse instead of SDL cursor warping");
     parser.addToggleOption("mouse-buttons-swap", "left and right mouse buttons swap");
     parser.addToggleOption("touchscreen-trackpad", "touchscreen in trackpad mode");
     parser.addToggleOption("game-optimization", "game optimizations");
@@ -465,6 +466,9 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     // Resolve --absolute-mouse and --no-absolute-mouse options
     preferences->absoluteMouseMode = parser.getToggleOptionValue("absolute-mouse", preferences->absoluteMouseMode);
+
+    // Resolve --corehid-mouse and --no-corehid-mouse. No effect outside macOS.
+    preferences->coreHidMouse = parser.getToggleOptionValue("corehid-mouse", preferences->coreHidMouse);
 
     // Resolve --mouse-buttons-swap and --no-mouse-buttons-swap options
     preferences->swapMouseButtons = parser.getToggleOptionValue("mouse-buttons-swap", preferences->swapMouseButtons);

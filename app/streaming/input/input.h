@@ -2,6 +2,8 @@
 
 #include "settings/streamingpreferences.h"
 #include "backend/computermanager.h"
+#include "dualsense_hid.h"
+#include "streaming/input/corehid_mouse.h"
 
 #include <SDL.h>
 
@@ -95,6 +97,12 @@ public:
 
     void setControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b);
 
+    void setAdaptiveTriggers(uint16_t controllerNumber, DualSenseOutputReport* report);
+
+    void cycleAdaptiveTriggerPreview();
+
+    void refreshGamepadOverlay(bool force);
+
     void handleTouchFingerEvent(SDL_TouchFingerEvent* event);
 
     int getAttachedGamepadMask();
@@ -131,6 +139,10 @@ private:
         KeyComboToggleMinimize,
         KeyComboPasteText,
         KeyComboTogglePointerRegionLock,
+        KeyComboTogglePictureInPicture,
+        KeyComboToggleGamepadOverlay,
+        KeyComboCycleTriggerPreview,
+        KeyComboToggleMicrophoneMute,
         KeyComboMax
     };
 
@@ -165,6 +177,24 @@ private:
 
     static
     Uint32 dragTimerCallback(Uint32 interval, void* param);
+
+    bool tryStartCoreHidCapture();
+
+    bool stopCoreHidCapture();
+
+    bool coreHidSuppressesRelativeMotion() const;
+
+    bool coreHidSuppressesScroll() const;
+
+#ifdef Q_OS_DARWIN
+    static void coreHidMotionThunk(const CoreHidMouseDelta& delta, void* context);
+
+    static void coreHidButtonThunk(const CoreHidButtonUpdate& update, void* context);
+
+    void sendCoreHidMotion(const CoreHidMouseDelta& delta);
+
+    void sendCoreHidButtons(const CoreHidButtonUpdate& update);
+#endif
 
     SDL_Window* m_Window;
     bool m_MultiController;
@@ -210,6 +240,26 @@ private:
     SDL_TimerID m_DragTimer;
     char m_DragButton;
     int m_NumFingersDown;
+
+    DualSenseHidOutput m_DualSenseHid;
+    int m_TriggerPreview;
+    bool m_SawHostAdaptiveTriggers;
+    bool m_LoggedAdaptiveSendFailure;
+    uint8_t m_LastHostTypeLeft;
+    uint8_t m_LastHostTypeRight;
+    uint32_t m_LastGamepadOverlayTicks;
+
+    void clearAdaptiveTriggers();
+
+    bool sendDualSenseReport(SDL_GameController* controller, const DualSenseOutputReport& report);
+
+#ifdef Q_OS_DARWIN
+    bool m_CoreHidRequested;
+    bool m_CoreHidActive;
+    float m_CoreHidScale;
+    CoreHidBackendRequest m_CoreHidBackend;
+    CoreHidMouseCapture* m_CoreHid;
+#endif
 
     static const int k_ButtonMap[];
 };

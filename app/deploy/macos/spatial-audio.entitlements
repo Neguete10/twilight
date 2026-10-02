@@ -4,9 +4,15 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 	<key>com.apple.developer.spatial-audio.profile-access</key>
 	<true/>
 	<key>com.apple.developer.coremotion.head-pose</key>
+	<true/>
+	<!-- Hardened Runtime: lets the CoreHID/IOHID mouse path request Input Monitoring.
+	     App Sandbox can still deny it; the client falls back to SDL. Not used by the MAS plist. -->
+	<key>com.apple.security.device.input-monitoring</key>
 	<true/>
 </dict>
 </plist>
