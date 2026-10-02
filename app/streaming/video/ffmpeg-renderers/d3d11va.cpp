@@ -972,6 +972,11 @@ void D3D11VARenderer::notifyOverlayUpdated(Overlay::OverlayType type)
         renderRect.x = m_DisplayWidth - newSurface->w;
         renderRect.y = m_DisplayHeight - newSurface->h;
     }
+    else if (type == Overlay::OverlayGamepad) {
+        // Bottom right. This renderer treats y=0 as the bottom.
+        renderRect.x = SDL_max(0, m_DisplayWidth - newSurface->w);
+        renderRect.y = 0;
+    }
 
     renderRect.w = newSurface->w;
     renderRect.h = newSurface->h;

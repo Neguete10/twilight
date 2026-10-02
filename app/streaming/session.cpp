@@ -52,8 +52,11 @@
 #define SDL_CODE_GAMECONTROLLER_RUMBLE_TRIGGERS 102
 #define SDL_CODE_GAMECONTROLLER_SET_MOTION_EVENT_STATE 103
 #define SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED 104
+#define SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS 105
 
 #include <openssl/rand.h>
+
+#include <cstring>
 
 #include <QtEndian>
 #include <QCoreApplication>
@@ -81,6 +84,7 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clRumbleTriggers,
     Session::clSetMotionEventState,
     Session::clSetControllerLED,
+    Session::clSetAdaptiveTriggers,
 };
 
 Session* Session::s_ActiveSession;
@@ -269,6 +273,41 @@ void Session::clSetControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g
     setControllerLEDEvent.user.data1 = (void*)(uintptr_t)controllerNumber;
     setControllerLEDEvent.user.data2 = (void*)(uintptr_t)(r << 16 | g << 8 | b);
     SDL_PushEvent(&setControllerLEDEvent);
+}
+
+void Session::clSetAdaptiveTriggers(uint16_t controllerNumber, uint8_t eventFlags, uint8_t typeLeft, uint8_t typeRight, uint8_t* left, uint8_t* right)
+{
+    DualSenseAdaptivePacket packet;
+    DualSenseOutputReport* report;
+
+    // The control thread must not touch the gamepad list. Copy the effect
+    // into an SDL event and let the main thread apply it.
+    if (left == nullptr || right == nullptr) {
+        return;
+    }
+
+    memset(&packet, 0, sizeof(packet));
+    packet.controllerNumber = controllerNumber;
+    packet.eventFlags = eventFlags;
+    packet.typeLeft = typeLeft;
+    packet.typeRight = typeRight;
+    memcpy(packet.left, left, sizeof(packet.left));
+    memcpy(packet.right, right, sizeof(packet.right));
+
+    report = (DualSenseOutputReport*)SDL_malloc(sizeof(*report));
+    if (report == nullptr) {
+        return;
+    }
+    dualSenseFillHostReport(&packet, report);
+
+    SDL_Event event = {};
+    event.type = SDL_USEREVENT;
+    event.user.code = SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS;
+    event.user.data1 = (void*)(uintptr_t)controllerNumber;
+    event.user.data2 = report;
+    if (SDL_PushEvent(&event) < 0) {
+        SDL_free(report);
+    }
 }
 
 bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
@@ -2529,6 +2568,10 @@ void Session::execInternal()
                                                  (uint8_t)((uintptr_t)event.user.data2 >> 8),
                                                  (uint8_t)((uintptr_t)event.user.data2));
                 break;
+            case SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS:
+                m_InputHandler->setAdaptiveTriggers((uint16_t)(uintptr_t)event.user.data1,
+                                                    (DualSenseOutputReport*)event.user.data2);
+                break;
             default:
                 SDL_assert(false);
             }
@@ -2765,11 +2808,13 @@ void Session::execInternal()
             break;
         case SDL_CONTROLLERAXISMOTION:
             m_InputHandler->handleControllerAxisEvent(&event.caxis);
+            m_InputHandler->refreshGamepadOverlay(false);
             break;
         case SDL_CONTROLLERBUTTONDOWN:
         case SDL_CONTROLLERBUTTONUP:
             presence.runCallbacks();
             m_InputHandler->handleControllerButtonEvent(&event.cbutton);
+            m_InputHandler->refreshGamepadOverlay(true);
             break;
 #if SDL_VERSION_ATLEAST(2, 0, 14)
         case SDL_CONTROLLERSENSORUPDATE:
@@ -2789,6 +2834,7 @@ void Session::execInternal()
         case SDL_CONTROLLERDEVICEADDED:
         case SDL_CONTROLLERDEVICEREMOVED:
             m_InputHandler->handleControllerDeviceEvent(&event.cdevice);
+            m_InputHandler->refreshGamepadOverlay(true);
             break;
         case SDL_JOYDEVICEADDED:
             m_InputHandler->handleJoystickArrivalEvent(&event.jdevice);

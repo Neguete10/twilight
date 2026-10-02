@@ -503,6 +503,11 @@ public:
             case Overlay::OverlayStatusUpdate:
                 [m_OverlayTextFields[type] setAlignment:NSTextAlignmentRight];
                 break;
+            case Overlay::OverlayGamepad:
+                [m_OverlayTextFields[type] setAlignment:NSTextAlignmentLeft];
+                [m_OverlayTextFields[type] setUsesSingleLineMode:NO];
+                [m_OverlayTextFields[type] setMaximumNumberOfLines:0];
+                break;
             default:
                 break;
             }
@@ -516,6 +521,20 @@ public:
 
         // Update text contents
         [m_OverlayTextFields[type] setStringValue: [NSString stringWithUTF8String:Session::get()->getOverlayManager().getOverlayText(type)]];
+
+        if (type == Overlay::OverlayGamepad) {
+            // The other overlays are full-frame fields. Keep the pad viz in
+            // the bottom-right of the stream view (AppKit's origin is the bottom).
+            [m_OverlayTextFields[type] sizeToFit];
+            NSRect bounds = m_StreamView.bounds;
+            NSRect frame = m_OverlayTextFields[type].frame;
+            frame.origin.x = NSMaxX(bounds) - frame.size.width - 8;
+            if (frame.origin.x < 8) {
+                frame.origin.x = 8;
+            }
+            frame.origin.y = 8;
+            [m_OverlayTextFields[type] setFrame:frame];
+        }
 
         // Unhide if it's enabled
         [m_OverlayTextFields[type] setHidden: !Session::get()->getOverlayManager().isOverlayEnabled(type)];

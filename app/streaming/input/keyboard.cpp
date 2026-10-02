@@ -153,6 +153,21 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
         updatePointerRegionLock();
         break;
 
+    case KeyComboToggleGamepadOverlay:
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected gamepad overlay toggle combo");
+        Session::get()->getOverlayManager().setOverlayState(
+            Overlay::OverlayGamepad,
+            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayGamepad));
+        refreshGamepadOverlay(true);
+        break;
+
+    case KeyComboCycleTriggerPreview:
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected adaptive trigger preview combo");
+        cycleAdaptiveTriggerPreview();
+        break;
+
     default:
         Q_UNREACHABLE();
     }

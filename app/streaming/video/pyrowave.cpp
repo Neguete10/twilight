@@ -1387,10 +1387,14 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
                 }
                 if (m_Overlays[i].hasOverlay) {
                     overlayParts[i].src = {0, 0, (float) m_Overlays[i].overlay.tex->params.w, (float) m_Overlays[i].overlay.tex->params.h};
-                    overlayParts[i].dst.x0 = 0;
                     if (i == Overlay::OverlayStatusUpdate) {
+                        overlayParts[i].dst.x0 = 0;
                         overlayParts[i].dst.y0 = SDL_max(0.0f, target.crop.y1 - overlayParts[i].src.y1);  // bottom-left
+                    } else if (i == Overlay::OverlayGamepad) {
+                        overlayParts[i].dst.x0 = SDL_max(0.0f, target.crop.x1 - overlayParts[i].src.x1);  // bottom-right
+                        overlayParts[i].dst.y0 = SDL_max(0.0f, target.crop.y1 - overlayParts[i].src.y1);
                     } else {
+                        overlayParts[i].dst.x0 = 0;
                         overlayParts[i].dst.y0 = 0;  // top-left
                     }
                     overlayParts[i].dst.x1 = overlayParts[i].dst.x0 + overlayParts[i].src.x1;

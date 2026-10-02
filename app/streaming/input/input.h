@@ -2,6 +2,7 @@
 
 #include "settings/streamingpreferences.h"
 #include "backend/computermanager.h"
+#include "dualsense_hid.h"
 
 #include <SDL.h>
 
@@ -95,6 +96,12 @@ public:
 
     void setControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b);
 
+    void setAdaptiveTriggers(uint16_t controllerNumber, DualSenseOutputReport* report);
+
+    void cycleAdaptiveTriggerPreview();
+
+    void refreshGamepadOverlay(bool force);
+
     void handleTouchFingerEvent(SDL_TouchFingerEvent* event);
 
     int getAttachedGamepadMask();
@@ -132,6 +139,8 @@ private:
         KeyComboPasteText,
         KeyComboTogglePointerRegionLock,
         KeyComboTogglePictureInPicture,
+        KeyComboToggleGamepadOverlay,
+        KeyComboCycleTriggerPreview,
         KeyComboMax
     };
 
@@ -211,6 +220,18 @@ private:
     SDL_TimerID m_DragTimer;
     char m_DragButton;
     int m_NumFingersDown;
+
+    DualSenseHidOutput m_DualSenseHid;
+    int m_TriggerPreview;
+    bool m_SawHostAdaptiveTriggers;
+    bool m_LoggedAdaptiveSendFailure;
+    uint8_t m_LastHostTypeLeft;
+    uint8_t m_LastHostTypeRight;
+    uint32_t m_LastGamepadOverlayTicks;
+
+    void clearAdaptiveTriggers();
+
+    bool sendDualSenseReport(SDL_GameController* controller, const DualSenseOutputReport& report);
 
     static const int k_ButtonMap[];
 };

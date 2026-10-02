@@ -11,6 +11,7 @@ enum OverlayType {
     OverlayDebug,
     OverlayDebugAudio,
     OverlayStatusUpdate,
+    OverlayGamepad,
     OverlayMax
 };
 

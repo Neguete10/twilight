@@ -32,7 +32,14 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_RightButtonReleaseTimer(0),
       m_DragTimer(0),
       m_DragButton(0),
-      m_NumFingersDown(0)
+      m_NumFingersDown(0),
+      m_DualSenseHid(),
+      m_TriggerPreview(DualSensePreviewFollowHost),
+      m_SawHostAdaptiveTriggers(false),
+      m_LoggedAdaptiveSendFailure(false),
+      m_LastHostTypeLeft(0),
+      m_LastHostTypeRight(0),
+      m_LastGamepadOverlayTicks(0)
 {
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
@@ -64,6 +71,11 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     // want this behavior, they can override it with the environment variable.
     SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS4_RUMBLE", "1");
     SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS5_RUMBLE", "1");
+
+    // Adaptive trigger effects are written through SDL's HIDAPI PS5 driver
+    // (SDL_GameControllerSendEffect). The Game Controller framework path on
+    // macOS can read a paired DualSense but cannot program trigger resistance.
+    SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS5", "1");
 
     // Populate special key combo configuration
     m_SpecialKeyCombos[KeyComboQuit].keyCombo = KeyComboQuit;
@@ -121,6 +133,16 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
 #else
     m_SpecialKeyCombos[KeyComboTogglePictureInPicture].enabled = false;
 #endif
+
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].keyCombo = KeyComboToggleGamepadOverlay;
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].keyCode = SDLK_g;
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].scanCode = SDL_SCANCODE_G;
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].enabled = true;
+
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].keyCombo = KeyComboCycleTriggerPreview;
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].keyCode = SDLK_t;
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].scanCode = SDL_SCANCODE_T;
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].enabled = true;
 
     m_OldIgnoreDevices = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES);
     m_OldIgnoreDevicesExcept = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT);
@@ -205,6 +227,9 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
 
 SdlInputHandler::~SdlInputHandler()
 {
+    // Release any resistance we programmed before the HID device goes away.
+    clearAdaptiveTriggers();
+
     for (int i = 0; i < MAX_GAMEPADS; i++) {
         if (m_GamepadState[i].mouseEmulationTimer != 0) {
             Session::get()->notifyMouseEmulationMode(false);
