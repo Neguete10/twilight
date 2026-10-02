@@ -18,7 +18,7 @@ The main window toolbar has a **Twilight / Classic** control. Twilight is the le
 | --- | --- |
 | Shell | Sidebar of hosts, app library, search, one-click stream, Desktop hero |
 | Host sheet | Wake, pair, rename, remove, network test, show hidden apps |
-| Settings | Video, Audio (including spatial and head tracking), Input, Network, Advanced (codec and PyroWave GPU backend). Same `StreamingPreferences` object as Classic |
+| Settings | Video, Audio (including spatial, head tracking, and on macOS the host microphone), Input, Network, Advanced (codec and PyroWave GPU backend). Same `StreamingPreferences` object as Classic |
 | Stream start | Twilight launch card, then the existing `Session` |
 | In-stream HUD | Glass chips for FPS, bitrate, and RTT, plus End. Sample numbers in Settings → Advanced are a preview |
 
@@ -56,4 +56,4 @@ Add pages under `app/gui/ui/v2/` and list them in `app/qml.qrc`. The shell is `S
 
 ## Not in this pass
 
-CoreHID, picture in picture, mic uplink, DualSense adaptive triggers, and network profiles. Session, CoreAudio spatial, and PyroWave decode paths are unchanged except for publishing the overlay text the HUD already knows how to read.
+CoreHID, picture in picture, DualSense adaptive triggers, and network profiles. The macOS host-microphone switch is in Twilight Audio and uses the same preference as Classic. Session, CoreAudio spatial, and PyroWave decode paths are unchanged except for publishing the overlay text the HUD already knows how to read.

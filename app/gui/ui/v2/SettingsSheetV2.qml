@@ -15,6 +15,9 @@ Item {
     property string section: "video"
     property var resolutionOptions: []
     property var fpsOptions: []
+    // Not bound to enableMicrophone. Turning the switch on asks macOS
+    // first, and the preference stays off until that result arrives.
+    property bool micWanted: false
 
     anchors.fill: parent
     visible: open || hideTimer.running
@@ -22,7 +25,12 @@ Item {
     enabled: open
     z: 30
     Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-    onOpenChanged: if (!open) hideTimer.start()
+    onOpenChanged: {
+        if (open)
+            StreamingPreferences.refreshMicrophoneStatus()
+        else
+            hideTimer.start()
+    }
     Timer { id: hideTimer; interval: 180 }
 
     function resKey(w, h) { return w + "x" + h }
@@ -130,11 +138,15 @@ Item {
         return options
     }
 
-    Component.onCompleted: rebuildChoices()
+    Component.onCompleted: {
+        rebuildChoices()
+        micWanted = StreamingPreferences.enableMicrophone
+    }
 
     Connections {
         target: StreamingPreferences
         onLanguageChanged: sheet.rebuildChoices()
+        onMicrophoneAccessFinished: sheet.micWanted = granted
     }
 
     Rectangle {
@@ -437,7 +449,7 @@ Item {
                         SettingRowV2 {
                             width: parent.width
                             theme: sheet.theme
-                            divider: false
+                            divider: Qt.platform.os == "osx"
                             title: qsTr("Mute when Twilight is in the background")
                             subtitle: qsTr("Silences the stream when another window is active.")
                             SwitchV2 {
@@ -445,6 +457,31 @@ Item {
                                 checked: StreamingPreferences.muteOnFocusLoss
                                 onToggled: StreamingPreferences.muteOnFocusLoss = next
                             }
+                        }
+                        SettingRowV2 {
+                            width: parent.width
+                            theme: sheet.theme
+                            visible: Qt.platform.os == "osx"
+                            divider: false
+                            title: qsTr("Stream microphone to the host")
+                            subtitle: qsTr("Sends this Mac's microphone on the encrypted control stream. Vibepollo with Vibelight can play it. Stock Sunshine does not.")
+                            SwitchV2 {
+                                theme: sheet.theme
+                                checked: sheet.micWanted
+                                onToggled: {
+                                    sheet.micWanted = next
+                                    StreamingPreferences.setMicrophoneEnabled(next)
+                                }
+                            }
+                        }
+                        TwTextV2 {
+                            width: parent.width
+                            visible: Qt.platform.os == "osx" && StreamingPreferences.microphoneStatusText !== ""
+                            theme: sheet.theme
+                            color: sheet.theme.tertiary
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            text: StreamingPreferences.microphoneStatusText
                         }
                     }
 
