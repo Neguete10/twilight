@@ -40,6 +40,10 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Moonlight uses the local network to connect to your gaming PC for streaming.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>This app reads the Wi-Fi network name so a saved stream profile can match this network. macOS requires Location permission to reveal that name. Your location is not stored.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app reads the Wi-Fi network name so a saved stream profile can match this network. macOS requires Location permission to reveal that name. Your location is not stored.</string>
 	<key>CFBundleVersion</key>
 	<string>VERSION</string>
 	<key>CFBundleShortVersionString</key>
