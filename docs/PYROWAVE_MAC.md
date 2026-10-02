@@ -32,8 +32,11 @@ Metal/VideoToolbox. Video codec = PyroWave is unchanged.
   decoder probe succeeds, and drops it when the host lacks `SCM_PYROWAVE` or
   the decoder fails to initialize. H.264 / HEVC / AV1 stay in the list.
 - Offline parser test for the length-prefixed frame and the 8-byte headers
-  (`tests/pyrowave_packets_test.cpp`). It passed on this Linux VM. No GPU
-  timing was measured here.
+  (`tests/pyrowave_packets_test.cpp`), including the present-color decision
+  (Rec.601 limited by default, HDR → Rec.2020 PQ limited, an all-zero header
+  ignored, explicit start-of-frame bits, HLG only when HDR and an explicit
+  BT.2020 header are not PQ). It passed on this Linux VM. No GPU timing was
+  measured here.
 - Backend selection test (`tests/pyrowave_backend_test.cpp`): Automatic
   prefers Metal, and an explicit Metal or Vulkan choice does not cross over
   when that library is absent. It passed on this Linux VM. The test also
@@ -165,11 +168,16 @@ stat fields the spatial-mixer work uses. `2c263da` is not an ancestor of
   becomes `0xCCA4`, so the existing HDR and 4:4:4 filters include PyroWave.
 - `SCM_PYROWAVE` `0x00800000` through `SCM_PYROWAVE10_444` `0x04000000`, and
   `SCM_MASK_PYROWAVE`.
-- `RtspConnection.c` `performRtspHandshake()`: if the client mask contains
-  `VIDEO_FORMAT_MASK_PYROWAVE` and `/serverinfo` contains `SCM_PYROWAVE`, pick
-  the best matching profile (10-bit 4:4:4, then 10-bit 4:2:0, then 8-bit
-  4:4:4, else 8-bit 4:2:0). Otherwise the existing AV1, then HEVC, then H.264
-  tests run.
+- `RtspConnection.c` `performRtspHandshake()`: if both sides have a matching
+  PyroWave profile, pick it. Order is 8-bit 4:4:4, 8-bit 4:2:0, 10-bit 4:4:4,
+  10-bit 4:2:0. The outer check is `VIDEO_FORMAT_MASK_PYROWAVE` and
+  `SCM_MASK_PYROWAVE`, so a host that only advertises 10-bit still matches.
+  The client sends a single profile bit (`supportedVideoFormats` is
+  `front()`). HDR in Twilight moves a 10-bit profile to the front before
+  that bit is sent; with HDR off the bit is 8-bit. If no profile matches,
+  the existing AV1, then HEVC, then H.264 tests run. The old handshake
+  required `SCM_PYROWAVE` (8-bit 4:2:0 only) and preferred 10-bit, which
+  made format `0x40` the usual result and skipped a 10-bit-only host.
 - `SdpGenerator.c`: PyroWave sets `x-nv-vqos[0].bitStreamFormat` to `"3"` and
   `x-nv-clientSupportHevc` to `"0"`.
 - `VideoDepacketizer.c`: PyroWave IDR units are a single `BUFFER_TYPE_PICDATA`
@@ -183,9 +191,13 @@ decoding PyroWave.
 
 Qt side (`app/streaming/session.cpp`), only the advertising and fallback:
 
-- With `HAVE_PYROWAVE`, the four profiles are appended **before** AV1/HEVC/H.264.
+- With `HAVE_PYROWAVE` or `HAVE_PYROWAVE_METAL`, the four profiles are
+  appended **before** AV1/HEVC/H.264, 8-bit before 10-bit (4:4:4 then 4:2:0).
   `m_StreamConfig.supportedVideoFormats` is still only `front()` after
-  filtering, which is the existing Moonlight behavior.
+  filtering, which is the existing Moonlight behavior. HDR
+  (`deprioritizeByMask(~VIDEO_FORMAT_MASK_10BIT)`) still promotes 10-bit,
+  because an 8-bit PQ frame from this host looks banded. HDR off removes
+  10-bit, so the advertised bit stays 8-bit.
 - Automatic mode probes `PyroWaveVideoDecoder`. `VDS_FORCE_SOFTWARE` or a
   failed probe removes `VIDEO_FORMAT_MASK_PYROWAVE`.
 - `validateLaunch()` removes it when `serverCodecModeSupport` has no
@@ -223,20 +235,110 @@ calls.
 The stream window is `SDL_WINDOW_METAL` on Darwin for VideoToolbox and for
 PyroWave Metal. When the probed backend is Vulkan, `Session::execInternal()`
 clears that flag and sets `SDL_WINDOW_VULKAN` before `SDL_CreateWindow`.
-`SDL_Vulkan_CreateSurface` fails on a Metal window. The hidden probe window
-stays Metal: the Vulkan probe is `testOnly` and uses
-`pyrowave_create_default_device()` with no surface, and H.264/HEVC/AV1 still
-need a Metal view. Non-PyroWave codecs never take the Vulkan flag.
+`SDL_WINDOW_VULKAN` is an enumerator, not a preprocessor macro, so the check
+is `SDL_VERSION_ATLEAST(2, 0, 6)` (the flag has existed since SDL 2.0.6).
+`#ifdef SDL_WINDOW_VULKAN` is false and used to leave the stream window as
+`SDL_WINDOW_METAL`, which cannot create a MoltenVK surface. If
+`SDL_CreateWindow` fails, the retry keeps that present flag (Vulkan or
+Metal). A flagless window is not used for PyroWave: present would fail and
+the stream would recreate. The hidden probe window stays Metal: the Vulkan
+probe is `testOnly` and uses `pyrowave_create_default_device()` with no
+surface, and H.264/HEVC/AV1 still need a Metal view. Non-PyroWave codecs
+never take the Vulkan flag.
 
-`PyroWaveVideoDecoder::isHardwareAccelerated()` is true. Colorspace reported
-to the host is still `COLORSPACE_REC_601` / `COLOR_RANGE_LIMITED` from that
-file; the wavelet header’s BT.709 / BT.2020 / PQ flags are not yet what
-Moonlight sends in `colorSpace`. Treat that as unfinished if HDR PyroWave
-looks wrong. The Metal decoder reports the same colorspace.
+`chooseDecoder()` runs inside `initialize()` and calls `Session::get()`.
+`execInternal()` acquires `s_ActiveSessionSemaphore` and sets
+`s_ActiveSession` before `initialize()`. On initialize failure the pointer
+is cleared and the semaphore is released there. The deferred cleanup task
+is not also started on that path (it releases the same semaphore).
+
+`PyroWaveVideoDecoder::isHardwareAccelerated()` is true. Both decoders
+report `COLORSPACE_REC_601` / `COLOR_RANGE_LIMITED`, the same advertisement
+as VT Metal HEVC (`getDecoderColorspace()` in `vt_metal.mm`). The host’s
+RGB→YUV uses that, then switches to Rec.2020 PQ when its display is HDR,
+without changing the range. See Color below.
 
 `VIDEO_STATS::totalRenderTimeUs` was added in `decoder.h` because the overlay
 in the ported decoder records present time and this branch’s struct did not
 have the field.
+
+Resize and display changes do not recreate the decoder.
+`notifyWindowChanged()` clears `WINDOW_STATE_CHANGE_SIZE` and
+`WINDOW_STATE_CHANGE_DISPLAY` and returns true, same as VT Metal.
+`renderFrameOnMainThread()` calls `pl_swapchain_resize()`. Recreating the
+shared MoltenVK device on those events flashed the window. The swapchain
+depth is 3 (`VK_PRESENT_MODE_FIFO_KHR`). A depth of 1 stalls windowed and
+fullscreen presents on MoltenVK, for the same reason the Metal layer uses
+`maximumDrawableCount = 3`. libplacebo 7.360’s `pl_vulkan_queue` is
+`{index, count}`. The import sets `.index` to the queue family and
+`.count` to 1. A third initializer (`{family, 1, 0}`) does not compile
+against that header.
+
+## Color
+
+`app/streaming/video/pyrowave_color.h` is the decision both presents use.
+`setHdrMode()` is the host display HDR flag from the control stream
+(`LiGetCurrentHostDisplayHdrMode()`), not a guess from the format code.
+
+| Situation | Matrix | Transfer | Range |
+| --- | --- | --- | --- |
+| SDR, or a header whose color bits are all zero | Rec.601 | BT.709 (desktop tagged sRGB) | limited |
+| Host display HDR, header unset | Rec.2020 | PQ | limited |
+| Header has primaries, PQ, or matrix set | those bits | PQ, or HLG if HDR and BT.2020 and the PQ bit is clear | limited if that bit is set, otherwise full |
+
+An all-zero start-of-frame header is what current Vibeshine and upstream
+pyrowave encoders write. The spec reads those zeros as BT.709 full. That is
+not what the host encoded, so those bits are ignored. Chroma siting is
+applied whenever a header is present (0 = center, which is also the
+default).
+
+The wavelet sample is a normalized float in `[0, 1]` written to `R8Unorm` or
+`R16Unorm`. There is no 8-bit vs 10-bit flag in the bitstream. 8-bit limited
+black is `16/255` and chroma zero is `128/255`, the same offsets as the VT
+Metal HEVC matrices. 10-bit limited uses `64/1023` and `512/1023`, and the
+limited matrix columns are scaled by `(1023/876)/(255/219)` for luma and
+`(1023/896)/(255/224)` for chroma. Full-range 10-bit does not scale the
+matrix; only the chroma midpoint moves to `512/1023`.
+
+Vulkan (libplacebo) sets `pl_color_repr.bits.sample_depth` and `color_depth`
+to 8 or 10 together. The values are already normalized UNORM, not 10-bit
+codes in the low bits of an R16 texture (that scaling would blow the image
+up). Depth selects the limited-range constants. PQ also fills HDR metadata
+from `LiGetHdrMetadata()` and hints the swapchain. HLG uses
+`PL_COLOR_TRC_HLG`. Chroma location is `pl_frame_set_chroma_location()`
+(left or center).
+
+Metal draws with the existing `vt_renderer.metal` `ps_draw_triplanar`
+shader and the same 8-bit CSC numbers as `vt_metal.mm`. `bitnessScaleFactor`
+is 1. PQ uses `kCGColorSpaceITUR_2100_PQ` and `MTLPixelFormatBGR10A2Unorm`.
+HLG uses `kCGColorSpaceITUR_2100_HLG` and the same 10-bit format. Rec.2020
+without PQ/HLG uses `kCGColorSpaceITUR_2020`. Rec.709 uses
+`kCGColorSpaceITUR_709`. Rec.601 uses sRGB. The shader writes encoded RGB;
+the layer colorspace tags it, same as VT, with no EOTF in the shader.
+`wantsExtendedDynamicRangeContent` is on for PQ, HLG, and any 10-bit
+format, matching VT Metal. The shared shader has no chroma-siting UV shift,
+so left siting is Vulkan-only. Current encoders leave that bit clear
+(center), which both backends use.
+
+The bitstream has one transfer bit (BT.709 or PQ). It has no HLG bit. HLG
+is inferred only for HDR mode plus an explicit BT.2020 header whose
+transfer bit is clear. A log line (`PyroWave present:` / `PyroWave Metal
+present:`) prints the matrix, transfer, and range when they change.
+
+## Present stability
+
+- Size and display changes do not recreate either decoder.
+- Metal sets `drawableSize` from `SDL_Metal_GetDrawableSize` before
+  `nextDrawable`. If that returns nil (common for one frame during
+  fullscreen), `frameReady` is set again so the next event presents the
+  frame instead of dropping it.
+- Vulkan does not recreate MoltenVK on resize, and the swapchain holds
+  three images.
+- The stream window flag matches the backend: `SDL_WINDOW_METAL` for Metal
+  present, `SDL_WINDOW_VULKAN` for Vulkan present. A failed create retries
+  with that flag still set.
+- `s_ActiveSession` is published before `initialize()`, so the decoder
+  probe’s `Session::get()` is this session.
 
 ## Metal backend
 
@@ -383,8 +485,11 @@ g++ -std=c++17 -Wall -Wextra -Iapp/streaming/video \
 ## Blockers for a live Mac proof
 
 1. This environment has no Mac GPU and no Apple SDK. The Metal `.mm` was
-   not compiled. MoltenVK was not linked. Neither backend was timed against
-   a Vibepollo stream (format `0x10`).
+   not compiled. MoltenVK and libplacebo were not linked. The color decision
+   and the packet parser were run here; a live picture was not. SDR should
+   now negotiate 8-bit (format `0x10`, or `0x20` when 4:4:4 is on). HDR still
+   negotiates 10-bit (`0x40` for 4:2:0) and presents it as Rec.2020 PQ
+   limited. That was not compared to HEVC on a display.
 2. Need a Vibeshine (or Vibepollo) host with PyroWave enabled, on a gigabit
    LAN. Bitrate is hundreds of Mbit/s. Nonary’s Windows/Linux Moonlight builds
    are the clients that already decode this; Twilight is the Mac gap.
@@ -409,6 +514,12 @@ g++ -std=c++17 -Wall -Wextra -Iapp/streaming/video \
    Until they exist, do not advertise `x-ss-video[0].pyrowaveAdaptiveFec`.
 8. Intel and AMD Macs cannot run the Metal decoder (`pyrowave_device_is_supported`
    requires Apple7). Use Vulkan there.
+9. Known picture limits, even after the color change: the bitstream has no
+   HLG bit and no 8-vs-10 flag; HLG is inferred, not signaled. Metal present
+   uses the shared HEVC shader, which does not shift UV for left chroma
+   siting (center is what current encoders write). Record framing and
+   partial RTP delivery are still absent. Do not treat a format code alone
+   as the colorspace.
 
 ## CoreAudio spatial
 

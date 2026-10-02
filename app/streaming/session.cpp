@@ -798,10 +798,13 @@ bool Session::initialize()
     // PyroWave is first only when this build can decode it. The rest of the
     // list stays so a host without SCM_PYROWAVE still gets H.264/HEVC/AV1.
 #if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_420);
+    // 8-bit before 10-bit. HDR below still promotes 10-bit, because an
+    // 8-bit PQ frame from this host looks banded. A host that only
+    // advertises 10-bit is selected in the RTSP handshake.
     m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE_444);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE);
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_444);
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_420);
 #endif
     m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_HIGH10_444);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_MAIN10);
@@ -1902,17 +1905,22 @@ void Session::execInternal()
     //
     // NB: This initializes the SDL video subsystem, so it must be
     // called on the main thread.
+    //
+    // chooseDecoder() runs inside initialize() (the PyroWave probe and
+    // the HEVC/AV1 capability probe). Those decoders call Session::get()
+    // while they come up. Wait out the previous session first, then
+    // publish this one, so that call is this session and not a null or
+    // half-destroyed one.
+    s_ActiveSessionSemaphore.acquire();
+    s_ActiveSession = this;
+
     if (!initialize()) {
+        s_ActiveSession = nullptr;
+        s_ActiveSessionSemaphore.release();
         emit sessionFinished(0);
         emit readyForDeletion();
         return;
     }
-
-    // Wait for any old session to finish cleanup
-    s_ActiveSessionSemaphore.acquire();
-
-    // We're now active
-    s_ActiveSession = this;
 
     // Initialize the gamepad code with our preferences
     // NB: m_InputHandler must be initialize before starting the connection.
@@ -2004,14 +2012,18 @@ void Session::execInternal()
     // probe selected the Vulkan PyroWave backend.
     if ((m_ActiveVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) &&
             m_PyroWaveBackend == PyroWaveGpuBackend::Vulkan) {
-#ifdef SDL_WINDOW_VULKAN
+        // SDL_WINDOW_VULKAN is an enumerator in SDL_WindowFlags, not a
+        // preprocessor macro, so #ifdef SDL_WINDOW_VULKAN is false and the
+        // stream window stays SDL_WINDOW_METAL. MoltenVK then cannot create
+        // a surface. The flag has existed since SDL 2.0.6.
+#if SDL_VERSION_ATLEAST(2, 0, 6)
         platformFlags &= ~SDL_WINDOW_METAL;
         platformFlags |= SDL_WINDOW_VULKAN;
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "PyroWave Vulkan selected; stream window uses SDL_WINDOW_VULKAN");
 #else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "PyroWave Vulkan needs SDL_WINDOW_VULKAN, which this SDL header does not define");
+                     "PyroWave Vulkan needs SDL 2.0.6 or newer for SDL_WINDOW_VULKAN");
 #endif
     }
 #endif
@@ -2027,12 +2039,28 @@ void Session::execInternal()
                     "SDL_CreateWindow() failed with platform flags: %s",
                     SDL_GetError());
 
+        // Keep the present flag. Dropping it leaves a Metal decoder on a
+        // Vulkan window, or MoltenVK with no surface, and the stream
+        // recreates forever.
+        Uint32 retryFlags = defaultWindowFlags;
+#if defined(Q_OS_DARWIN) && (defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL))
+        if (m_ActiveVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+            if (m_PyroWaveBackend == PyroWaveGpuBackend::Vulkan) {
+#if SDL_VERSION_ATLEAST(2, 0, 6)
+                retryFlags |= SDL_WINDOW_VULKAN;
+#endif
+            }
+            else if (m_PyroWaveBackend == PyroWaveGpuBackend::Metal) {
+                retryFlags |= SDL_WINDOW_METAL;
+            }
+        }
+#endif
         m_Window = SDL_CreateWindow(windowName.c_str(),
                                     x,
                                     y,
                                     width,
                                     height,
-                                    defaultWindowFlags);
+                                    retryFlags);
         if (!m_Window) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "SDL_CreateWindow() failed: %s",

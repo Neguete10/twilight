@@ -527,7 +527,10 @@ bool PyroWaveVideoDecoder::createSharedDevice() {
     ip.device = m_VkDev;
     ip.extensions = m_DevExtNames.data();
     ip.num_extensions = (int) m_DevExtNames.size();
-    ip.queue_graphics = {m_VkFamily, 1, 0};
+    // libplacebo 7.360 pl_vulkan_queue is {index, count}. A third initializer
+    // does not compile against that header. index is the queue family.
+    ip.queue_graphics.index = m_VkFamily;
+    ip.queue_graphics.count = 1;
     ip.features = &m_Feat2;
     ip.lock_queue = [](void* ctx, uint32_t, uint32_t) { static_cast<PyroWaveVideoDecoder*>(ctx)->m_QueueMutex.lock(); };
     ip.unlock_queue = [](void* ctx, uint32_t, uint32_t) { static_cast<PyroWaveVideoDecoder*>(ctx)->m_QueueMutex.unlock(); };
@@ -591,7 +594,9 @@ bool PyroWaveVideoDecoder::createLibplacebo(PDECODER_PARAMETERS params) {
     pl_vulkan_swapchain_params sp = {};
     sp.surface = m_VkSurface;
     sp.present_mode = VK_PRESENT_MODE_FIFO_KHR;
-    sp.swapchain_depth = 1;
+    // Three images, same reason as the Metal layer's maximumDrawableCount:
+    // a depth of one stalls windowed and fullscreen presents on MoltenVK.
+    sp.swapchain_depth = 3;
     m_Swapchain = pl_vulkan_create_swapchain(m_Vulkan, &sp);
     if (!m_Swapchain) {
         return false;
@@ -821,7 +826,10 @@ bool PyroWaveVideoDecoder::isHardwareAccelerated() { return true; }
 bool PyroWaveVideoDecoder::isAlwaysFullScreen() { return false; }
 bool PyroWaveVideoDecoder::isHdrSupported() { return true; }
 int PyroWaveVideoDecoder::getDecoderCapabilities() { return 0; }
-int PyroWaveVideoDecoder::getDecoderColorspace() { return COLORSPACE_REC_601; }
+int PyroWaveVideoDecoder::getDecoderColorspace() {
+    // Same advertisement as VT Metal HEVC, so the host's RGB→YUV matches that stream.
+    return COLORSPACE_REC_601;
+}
 int PyroWaveVideoDecoder::getDecoderColorRange() { return COLOR_RANGE_LIMITED; }
 QSize PyroWaveVideoDecoder::getDecoderMaxResolution() { return QSize(0, 0); }
 void PyroWaveVideoDecoder::setHdrMode(bool enabled) {
@@ -829,7 +837,15 @@ void PyroWaveVideoDecoder::setHdrMode(bool enabled) {
     m_HdrEnabled.store(enabled);
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave: HDR mode %s", enabled ? "enabled" : "disabled");
 }
-bool PyroWaveVideoDecoder::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO) { return false; }
+bool PyroWaveVideoDecoder::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info) {
+    // pl_swapchain_resize in renderFrameOnMainThread applies size and display
+    // changes. Recreating the shared MoltenVK device on those events flashes
+    // the window and drops frames, which HEVC does not do.
+    uint32_t unhandled = info->stateChangeFlags;
+    unhandled &= ~WINDOW_STATE_CHANGE_SIZE;
+    unhandled &= ~WINDOW_STATE_CHANGE_DISPLAY;
+    return unhandled == 0;
+}
 
 void PyroWaveVideoDecoder::addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
     dst.receivedFrames += src.receivedFrames;
@@ -978,6 +994,8 @@ int PyroWaveVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
     if (!pyroWaveUnpackLengthPrefixedFrame(frame.data(), frame.size(), packets, nullptr)) {
         return DR_OK;
     }
+    PyroWaveSequenceHeader sequence{};
+    const bool haveSequence = pyroWaveFindSequenceHeader(packets, sequence);
     for (const PyroWavePacketView& packet : packets) {
         pyrowave_decoder_push_packet(m_Decoder, packet.data, packet.size);
     }
@@ -1018,6 +1036,10 @@ int PyroWaveVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
             return DR_OK;
         }
         m_LastReleaseVal.store(sigVal);
+        if (haveSequence) {
+            m_Sequence = sequence;
+            m_HaveSequence = true;
+        }
         m_FrameReady = true;
     }
 
@@ -1034,12 +1056,16 @@ int PyroWaveVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
 
 void PyroWaveVideoDecoder::renderFrameOnMainThread() {
     uint64_t renderStartUs = LiGetMicroseconds();
+    PyroWaveSequenceHeader sequence{};
+    bool haveSequence = false;
     {
         std::lock_guard<std::mutex> lock(m_FrameLock);
         if (!m_FrameReady) {
             return;
         }
         m_FrameReady = false;
+        haveSequence = m_HaveSequence;
+        sequence = m_Sequence;
     }
 
     // Reacquire the plane textures from external (PyroWave) use, GPU-waiting on the decode-done
@@ -1054,15 +1080,53 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
         pl_vulkan_release_ex(m_Vulkan->gpu, &rp);
     }
 
-    // Source colorspace + representation follow the host's HDR state (control-stream driven, can
-    // change mid-stream). Must match the encoder's shader convention:
-    //   SDR: BT.601 limited on sRGB R'G'B'.  HDR: BT.2020 NCL FULL range on PQ R'G'B'.
-    bool hdr = m_HdrEnabled.load();
+    // Planes are normalized [0, 1] floats (the Metal/Vulkan decoder writes UNORM).
+    // The host quantized with the colorspace we advertised, which is the same
+    // Rec.601 limited HEVC uses, or Rec.2020 PQ limited when the display is HDR.
+    // An explicit sequence header overrides that. See pyroWavePresentColor().
+    const bool hdr = m_HdrEnabled.load();
+    const PyroWavePresentColor present = pyroWavePresentColor(hdr, haveSequence ? &sequence : nullptr);
+    if (!m_HavePresentColor || !pyroWavePresentColorEqual(present, m_LastPresentColor)) {
+        m_LastPresentColor = present;
+        m_HavePresentColor = true;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PyroWave present: %s %s %s%s",
+                    pyroWaveMatrixName(present.matrix),
+                    pyroWaveTransferName(present.transfer),
+                    pyroWaveRangeName(present.range),
+                    present.chromaLeft ? " left-sited chroma" : "");
+    }
+
     struct pl_color_space csp = {};
     struct pl_color_repr repr = {};
-    if (hdr) {
+    switch (present.matrix) {
+    case PyroWaveMatrix::Bt709:
+        csp.primaries = PL_COLOR_PRIM_BT_709;
+        repr.sys = PL_COLOR_SYSTEM_BT_709;
+        csp.transfer = PL_COLOR_TRC_BT_709;
+        break;
+    case PyroWaveMatrix::Bt2020:
         csp.primaries = PL_COLOR_PRIM_BT_2020;
+        repr.sys = PL_COLOR_SYSTEM_BT_2020_NC;
+        csp.transfer = PL_COLOR_TRC_BT_709;
+        break;
+    case PyroWaveMatrix::Bt601:
+    default:
+        // Desktop RGB is sRGB even when the YUV matrix is Rec.601, matching VT Metal.
+        csp.primaries = PL_COLOR_PRIM_BT_709;
+        csp.transfer = PL_COLOR_TRC_SRGB;
+        repr.sys = PL_COLOR_SYSTEM_BT_601;
+        break;
+    }
+    // Transfer is independent of the matrix. A PQ bit without BT.2020 is still PQ;
+    // the matrix switch above would otherwise leave it as BT.709 or sRGB.
+    if (present.transfer == PyroWaveTransfer::Pq) {
         csp.transfer = PL_COLOR_TRC_PQ;
+    }
+    else if (present.transfer == PyroWaveTransfer::Hlg) {
+        csp.transfer = PL_COLOR_TRC_HLG;
+    }
+    if (present.transfer == PyroWaveTransfer::Pq) {
         SS_HDR_METADATA md;
         if (LiGetHdrMetadata(&md)) {
             csp.hdr.prim.red = {md.displayPrimaries[0].x / 50000.0f, md.displayPrimaries[0].y / 50000.0f};
@@ -1075,16 +1139,15 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
             csp.hdr.max_cll = md.maxContentLightLevel;
             csp.hdr.max_fall = md.maxFrameAverageLightLevel;
         }
-        repr.sys = PL_COLOR_SYSTEM_BT_2020_NC;
-        repr.levels = PL_COLOR_LEVELS_FULL;
-    } else {
-        // YUV matrix must match the encoder (BT.601 limited). Primaries/transfer describe the
-        // RGB volume, which is the captured desktop = sRGB.
-        csp.primaries = PL_COLOR_PRIM_BT_709;
-        csp.transfer = PL_COLOR_TRC_SRGB;
-        repr.sys = PL_COLOR_SYSTEM_BT_601;
-        repr.levels = PL_COLOR_LEVELS_LIMITED;
     }
+    repr.levels = present.range == PyroWaveRange::Full ? PL_COLOR_LEVELS_FULL : PL_COLOR_LEVELS_LIMITED;
+    // sample_depth == color_depth: the wavelet output is already a normalized
+    // float, not a 10-bit code sitting in the low bits of an R16 texture.
+    // Depth selects the limited-range constants (16/255 or 64/1023).
+    const int depth = m_TenBit ? 10 : 8;
+    repr.bits.sample_depth = depth;
+    repr.bits.color_depth = depth;
+    repr.bits.bit_shift = 0;
     if (!pl_color_space_equal(&csp, &m_LastColorspace)) {
         m_LastColorspace = csp;
         // libplacebo picks the closest supported swapchain colorspace (HDR10 when available) and
@@ -1147,6 +1210,7 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
             }
             src.repr = repr;
             src.color = csp;
+            pl_frame_set_chroma_location(&src, present.chromaLeft ? PL_CHROMA_LEFT : PL_CHROMA_CENTER);
             src.crop.x0 = 0;
             src.crop.y0 = 0;
             src.crop.x1 = m_Width;

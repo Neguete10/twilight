@@ -2,6 +2,7 @@
 
 #include "pyrowave_metal.h"
 
+#include "pyrowave_color.h"
 #include "pyrowave_metal_api.h"
 #include "pyrowave_packets.h"
 #include "path.h"
@@ -212,7 +213,10 @@ struct Vertex {
     vector_float2 texCoord;
 };
 
-const CscParams kBt601Limited = {
+// Same coefficients as VTMetalRenderer, so an 8-bit frame matches HEVC.
+// 10-bit planes are normalized floats; the offsets below are scaled to
+// 64/1023 and 512/1023, which is how the host wrote a 10-bit limited code.
+const CscParams kBt601Lim8 = {
     {
         {1.1644f, 0.0f, 1.5960f},
         {1.1644f, -0.3917f, -0.8129f},
@@ -220,8 +224,39 @@ const CscParams kBt601Limited = {
     },
     {16.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f},
 };
-
-const CscParams kBt2020Full = {
+const CscParams kBt601Full8 = {
+    {
+        {1.0f, 0.0f, 1.4020f},
+        {1.0f, -0.3441f, -0.7141f},
+        {1.0f, 1.7720f, 0.0f},
+    },
+    {0.0f, 128.0f / 255.0f, 128.0f / 255.0f},
+};
+const CscParams kBt709Lim8 = {
+    {
+        {1.1644f, 0.0f, 1.7927f},
+        {1.1644f, -0.2132f, -0.5329f},
+        {1.1644f, 2.1124f, 0.0f},
+    },
+    {16.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f},
+};
+const CscParams kBt709Full8 = {
+    {
+        {1.0f, 0.0f, 1.5748f},
+        {1.0f, -0.1873f, -0.4681f},
+        {1.0f, 1.8556f, 0.0f},
+    },
+    {0.0f, 128.0f / 255.0f, 128.0f / 255.0f},
+};
+const CscParams kBt2020Lim8 = {
+    {
+        {1.1644f, 0.0f, 1.6781f},
+        {1.1644f, -0.1874f, -0.6505f},
+        {1.1644f, 2.1418f, 0.0f},
+    },
+    {16.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f},
+};
+const CscParams kBt2020Full8 = {
     {
         {1.0f, 0.0f, 1.4746f},
         {1.0f, -0.1646f, -0.5714f},
@@ -229,6 +264,42 @@ const CscParams kBt2020Full = {
     },
     {0.0f, 128.0f / 255.0f, 128.0f / 255.0f},
 };
+
+CscParams cscFor(PyroWaveMatrix matrix, bool fullRange, bool tenBit)
+{
+    CscParams csc;
+    switch (matrix) {
+    case PyroWaveMatrix::Bt709:
+        csc = fullRange ? kBt709Full8 : kBt709Lim8;
+        break;
+    case PyroWaveMatrix::Bt2020:
+        csc = fullRange ? kBt2020Full8 : kBt2020Lim8;
+        break;
+    case PyroWaveMatrix::Bt601:
+    default:
+        csc = fullRange ? kBt601Full8 : kBt601Lim8;
+        break;
+    }
+    if (!tenBit) {
+        return csc;
+    }
+    // Host 10-bit UNORM is code/1023. 16/255 and 128/255 are the 8-bit
+    // stand-ins; 64/1023 and 512/1023 are the values actually stored.
+    const float yScale = fullRange ? 1.0f : (1023.0f / 876.0f) / (255.0f / 219.0f);
+    const float cScale = fullRange ? 1.0f : (1023.0f / 896.0f) / (255.0f / 224.0f);
+    for (int row = 0; row < 3; row++) {
+        csc.matrix[row].x *= yScale;
+        csc.matrix[row].y *= cScale;
+        csc.matrix[row].z *= cScale;
+    }
+    if (fullRange) {
+        csc.offsets = {0.0f, 512.0f / 1023.0f, 512.0f / 1023.0f};
+    }
+    else {
+        csc.offsets = {64.0f / 1023.0f, 512.0f / 1023.0f, 512.0f / 1023.0f};
+    }
+    return csc;
+}
 
 }  // namespace
 
@@ -239,7 +310,10 @@ struct PyroWaveMetalVideoDecoder::Impl {
     bool yuv444 = false;
     bool tenBit = false;
     std::atomic<bool> hdr{false};
-    bool presentHdr = false;
+    PyroWavePresentColor present{};
+    bool presentValid = false;
+    PyroWaveSequenceHeader sequence{};
+    bool haveSequence = false;
 
     void* pyroDevice = nullptr;
     void* decoder = nullptr;
@@ -272,7 +346,7 @@ struct PyroWaveMetalVideoDecoder::Impl {
 
 namespace {
 
-bool buildPipelines(PyroWaveMetalVideoDecoder::Impl* impl, bool hdr)
+bool buildPipelines(PyroWaveMetalVideoDecoder::Impl* impl, const PyroWavePresentColor& color)
 {
     [impl->videoPipeline release];
     impl->videoPipeline = nil;
@@ -283,19 +357,28 @@ bool buildPipelines(PyroWaveMetalVideoDecoder::Impl* impl, bool hdr)
 
     CGColorSpaceRef colorSpace = nullptr;
     ParamBuffer params{};
+    // Planes are normalized floats. The CSC offsets already use the code range.
     params.bitnessScaleFactor = 1.0f;
-    if (hdr) {
-        impl->layer.colorspace = colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2100_PQ);
-        impl->layer.pixelFormat = MTLPixelFormatBGR10A2Unorm;
-        impl->layer.wantsExtendedDynamicRangeContent = YES;
-        params.cscParams = kBt2020Full;
+    const bool hdrOutput = color.transfer == PyroWaveTransfer::Pq || color.transfer == PyroWaveTransfer::Hlg;
+    CFStringRef colorName = kCGColorSpaceSRGB;
+    if (color.transfer == PyroWaveTransfer::Pq) {
+        colorName = kCGColorSpaceITUR_2100_PQ;
     }
-    else {
-        impl->layer.colorspace = colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-        impl->layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-        impl->layer.wantsExtendedDynamicRangeContent = NO;
-        params.cscParams = kBt601Limited;
+    else if (color.transfer == PyroWaveTransfer::Hlg) {
+        colorName = kCGColorSpaceITUR_2100_HLG;
     }
+    else if (color.matrix == PyroWaveMatrix::Bt2020) {
+        colorName = kCGColorSpaceITUR_2020;
+    }
+    else if (color.matrix == PyroWaveMatrix::Bt709) {
+        colorName = kCGColorSpaceITUR_709;
+    }
+    impl->layer.colorspace = colorSpace = CGColorSpaceCreateWithName(colorName);
+    impl->layer.pixelFormat = hdrOutput ? MTLPixelFormatBGR10A2Unorm : MTLPixelFormatBGRA8Unorm;
+    // VT Metal turns EDR on for any 10-bit format. PQ/HLG also need it so
+    // the 10-bit layer can leave the SDR range. SDR 8-bit stays off.
+    impl->layer.wantsExtendedDynamicRangeContent = (hdrOutput || impl->tenBit) ? YES : NO;
+    params.cscParams = cscFor(color.matrix, color.range == PyroWaveRange::Full, impl->tenBit);
     CGColorSpaceRelease(colorSpace);
 
     impl->cscBuffer = [impl->mtlDevice newBufferWithBytes:&params
@@ -363,7 +446,14 @@ bool buildPipelines(PyroWaveMetalVideoDecoder::Impl* impl, bool hdr)
         return false;
     }
 
-    impl->presentHdr = hdr;
+    impl->present = color;
+    impl->presentValid = true;
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PyroWave Metal present: %s %s %s%s",
+                pyroWaveMatrixName(color.matrix),
+                pyroWaveTransferName(color.transfer),
+                pyroWaveRangeName(color.range),
+                color.chromaLeft ? " left-sited chroma" : "");
     return true;
 }
 
@@ -640,7 +730,7 @@ bool PyroWaveMetalVideoDecoder::initialize(PDECODER_PARAMETERS params)
                          "PyroWave Metal: plane texture allocation failed");
             return false;
         }
-        if (!buildPipelines(m_Impl, false)) {
+        if (!buildPipelines(m_Impl, pyroWavePresentColor(false, nullptr))) {
             return false;
         }
         if (Session::get() != nullptr) {
@@ -660,7 +750,10 @@ bool PyroWaveMetalVideoDecoder::isHardwareAccelerated() { return true; }
 bool PyroWaveMetalVideoDecoder::isAlwaysFullScreen() { return false; }
 bool PyroWaveMetalVideoDecoder::isHdrSupported() { return true; }
 int PyroWaveMetalVideoDecoder::getDecoderCapabilities() { return 0; }
-int PyroWaveMetalVideoDecoder::getDecoderColorspace() { return COLORSPACE_REC_601; }
+int PyroWaveMetalVideoDecoder::getDecoderColorspace() {
+    // Same advertisement as VT Metal HEVC, so the host's RGB→YUV matches that stream.
+    return COLORSPACE_REC_601;
+}
 int PyroWaveMetalVideoDecoder::getDecoderColorRange() { return COLOR_RANGE_LIMITED; }
 QSize PyroWaveMetalVideoDecoder::getDecoderMaxResolution() { return QSize(0, 0); }
 
@@ -792,6 +885,8 @@ int PyroWaveMetalVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
         if (!pyroWaveUnpackLengthPrefixedFrame(frame.data(), frame.size(), packets, nullptr)) {
             return DR_OK;
         }
+        PyroWaveSequenceHeader sequence{};
+        const bool haveSequence = pyroWaveFindSequenceHeader(packets, sequence);
 
         MetalApi* api = metalApi();
         for (const PyroWavePacketView& packet : packets) {
@@ -817,6 +912,10 @@ int PyroWaveMetalVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
 
         {
             std::lock_guard<std::mutex> lock(impl->frameLock);
+            if (haveSequence) {
+                impl->sequence = sequence;
+                impl->haveSequence = true;
+            }
             impl->frameReady = true;
         }
         impl->activeStats.totalDecodeTimeUs += LiGetMicroseconds() - decodeStartUs;
@@ -834,23 +933,33 @@ void PyroWaveMetalVideoDecoder::renderFrameOnMainThread()
 {
     @autoreleasepool {
         Impl* impl = m_Impl;
+        PyroWaveSequenceHeader sequence{};
+        bool haveSequence = false;
         {
             std::lock_guard<std::mutex> lock(impl->frameLock);
             if (!impl->frameReady) {
                 return;
             }
             impl->frameReady = false;
+            haveSequence = impl->haveSequence;
+            sequence = impl->sequence;
         }
         if (impl->layer == nullptr || impl->queue == nullptr) {
             return;
         }
 
         uint64_t renderStartUs = LiGetMicroseconds();
-        bool hdr = impl->hdr.load();
-        if (impl->videoPipeline == nil || hdr != impl->presentHdr) {
-            if (!buildPipelines(impl, hdr)) {
+        const PyroWavePresentColor color = pyroWavePresentColor(impl->hdr.load(), haveSequence ? &sequence : nullptr);
+        if (impl->videoPipeline == nil || !impl->presentValid || !pyroWavePresentColorEqual(color, impl->present)) {
+            if (!buildPipelines(impl, color)) {
                 return;
             }
+        }
+        int drawableWidth = 0;
+        int drawableHeight = 0;
+        SDL_Metal_GetDrawableSize(impl->window, &drawableWidth, &drawableHeight);
+        if (drawableWidth > 0 && drawableHeight > 0) {
+            impl->layer.drawableSize = CGSizeMake(drawableWidth, drawableHeight);
         }
         if (!updateVertices(impl)) {
             return;
@@ -858,6 +967,10 @@ void PyroWaveMetalVideoDecoder::renderFrameOnMainThread()
 
         id<CAMetalDrawable> drawable = [impl->layer nextDrawable];
         if (drawable == nil) {
+            // Fullscreen transitions often have no drawable for a frame.
+            // Put the frame back so the next event can present it.
+            std::lock_guard<std::mutex> lock(impl->frameLock);
+            impl->frameReady = true;
             return;
         }
 
