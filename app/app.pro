@@ -241,6 +241,8 @@ SOURCES += \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
     gui/appmodel.cpp \
+    gui/streamhudparse.cpp \
+    gui/streamhudstats.cpp \
     gui/sfsymbolprovider.cpp \
     streaming/streamutils.cpp \
     backend/autoupdatechecker.cpp \
@@ -284,6 +286,9 @@ HEADERS += \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
     gui/appmodel.h \
+    gui/streamhudparse.h \
+    gui/streamhudstats.h \
+    gui/streamhudplace.h \
     gui/sfsymbolprovider.h \
     streaming/video/decoder.h \
     streaming/streamutils.h \
@@ -507,6 +512,7 @@ macx {
 
     SOURCES += \
         gui/sfsymbol_mac.mm \
+        gui/streamhud_mac.mm \
         settings/network_identity_mac.mm \
         streaming/audio/microphone/mic_capture_mac.mm \
         streaming/audio/microphone/mic_permission_mac.mm \

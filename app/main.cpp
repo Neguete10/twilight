@@ -49,6 +49,7 @@
 #include "settings/streamingpreferences.h"
 #include "settings/network_profile.h"
 #include "gui/sdlgamepadkeynavigation.h"
+#include "gui/streamhudstats.h"
 #include "gui/sfsymbolprovider.h"
 
 #if defined(Q_OS_WIN32)
@@ -729,6 +730,14 @@ int main(int argc, char *argv[])
                                                    [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
                                                        return StreamingPreferences::get(qmlEngine);
                                                    });
+    StreamHudStats::create(&app);
+    qmlRegisterSingletonType<StreamHudStats>("StreamHudStats", 1, 0,
+                                             "StreamHudStats",
+                                             [](QQmlEngine*, QJSEngine*) -> QObject* {
+                                                 QObject* stats = StreamHudStats::instance();
+                                                 QQmlEngine::setObjectOwnership(stats, QQmlEngine::CppOwnership);
+                                                 return stats;
+                                             });
     qmlRegisterSingletonType<NetworkProfileStore>("NetworkProfiles", 1, 0,
                                                   "NetworkProfiles",
                                                   [](QQmlEngine*, QJSEngine*) -> QObject* {

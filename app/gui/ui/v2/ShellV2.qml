@@ -7,6 +7,7 @@ import AppModel 1.0
 import ComputerManager 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
+import StreamHudStats 1.0
 
 Item {
     id: shell
@@ -23,6 +24,8 @@ Item {
     property bool showHidden: false
     property bool directLaunchConsumed: true
     property var appModel: null
+    property var hudWindow: null
+    property var hudComponent: null
     property string query: ""
 
     property bool settingsOpen: false
@@ -308,6 +311,27 @@ Item {
             StreamingPreferences.videoCodecConfig = StreamingPreferences.VCC_AUTO
     }
 
+    function ensureHud() {
+        if (hudWindow)
+            return
+        if (!hudComponent) {
+            hudComponent = Qt.createComponent("qrc:/gui/ui/v2/StreamHudV2.qml", Component.PreferSynchronous)
+        }
+        if (hudComponent.status === Component.Loading) {
+            hudComponent.statusChanged.connect(function() { shell.ensureHud() })
+            return
+        }
+        if (hudComponent.status !== Component.Ready) {
+            console.warn("Twilight HUD did not load: " + hudComponent.errorString())
+            return
+        }
+        // Parent stays null so hiding the main window does not hide the HUD.
+        // hudComponent is a shell property so the component is not collected.
+        hudWindow = hudComponent.createObject(null)
+        if (!hudWindow)
+            console.warn("Twilight HUD window was not created: " + hudComponent.errorString())
+    }
+
     function requestShell(version) {
         if (Window.window && Window.window.streamActive)
             return
@@ -331,6 +355,7 @@ Item {
 
     Component.onCompleted: {
         dropUnavailablePyroWave()
+        ensureHud()
         ComputerManager.computerAddCompleted.connect(addComplete)
         computerModel.pairingCompleted.connect(pairComplete)
         computerModel.connectionTestCompleted.connect(testComplete)
