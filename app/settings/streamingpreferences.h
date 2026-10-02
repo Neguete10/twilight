@@ -39,7 +39,8 @@ public:
         VCC_FORCE_H264,
         VCC_FORCE_HEVC,
         VCC_FORCE_HEVC_HDR_DEPRECATED, // Kept for backwards compatibility
-        VCC_FORCE_AV1
+        VCC_FORCE_AV1,
+        VCC_FORCE_PYROWAVE // Prefer PyroWave; H.264/HEVC/AV1 stay available as fallback
     };
     Q_ENUM(VideoCodecConfig)
 

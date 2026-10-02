@@ -11,6 +11,10 @@
 #include "video/ffmpeg.h"
 #endif
 
+#ifdef HAVE_PYROWAVE
+#include "video/pyrowave.h"
+#endif
+
 #ifdef HAVE_SLVIDEO
 #include "video/slvid.h"
 #endif
@@ -283,6 +287,25 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "V-sync %s",
                 enableVsync ? "enabled" : "disabled");
+
+#ifdef HAVE_PYROWAVE
+    if (videoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+        chosenDecoder = new PyroWaveVideoDecoder(testOnly);
+        if (chosenDecoder->initialize(&params)) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave video decoder chosen");
+            return true;
+        }
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Unable to load PyroWave decoder");
+        delete chosenDecoder;
+        chosenDecoder = nullptr;
+        // FFmpeg has no PyroWave decoder. Returning here lets the caller drop
+        // the codec and try H.264, HEVC, or AV1 instead of hitting the
+        // FFmpeg format assert.
+        return false;
+    }
+#endif
 
 #ifdef HAVE_SLVIDEO
     chosenDecoder = new SLVideoDecoder(testOnly);
@@ -694,7 +717,15 @@ bool Session::initialize()
                 "Audio channel mask: %X",
                 CHANNEL_MASK_FROM_AUDIO_CONFIGURATION(m_StreamConfig.audioConfiguration));
 
-    // Start with all codecs and profiles in priority order
+    // Start with all codecs and profiles in priority order.
+    // PyroWave is first only when this build can decode it. The rest of the
+    // list stays so a host without SCM_PYROWAVE still gets H.264/HEVC/AV1.
+#ifdef HAVE_PYROWAVE
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_444);
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_420);
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE_444);
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE);
+#endif
     m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_HIGH10_444);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_MAIN10);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_H265_REXT10_444);
@@ -710,6 +741,22 @@ bool Session::initialize()
     {
     case StreamingPreferences::VCC_AUTO:
     {
+#ifdef HAVE_PYROWAVE
+        // Offer PyroWave only when the GPU decoder actually comes up. A failed
+        // probe leaves H.264/HEVC/AV1 in their existing order.
+        if (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE ||
+                getDecoderAvailability(testWindow,
+                                       m_Preferences->videoDecoderSelection,
+                                       VIDEO_FORMAT_PYROWAVE,
+                                       m_StreamConfig.width,
+                                       m_StreamConfig.height,
+                                       m_StreamConfig.fps) == DecoderAvailability::None) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave decoder unavailable; not advertising it");
+            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_PYROWAVE);
+        }
+#endif
+
         // Codecs are checked in order of ascending decode complexity to ensure
         // the the deprioritized list prefers lighter codecs for software decoding
 
@@ -804,6 +851,17 @@ bool Session::initialize()
 #endif
         break;
     }
+    case StreamingPreferences::VCC_FORCE_PYROWAVE:
+#ifdef HAVE_PYROWAVE
+        // Do not strip H.264/HEVC/AV1. PyroWave wins only while it remains at
+        // the front of the list; validateLaunch() removes it when the host
+        // does not advertise SCM_PYROWAVE.
+        break;
+#else
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "PyroWave was requested but this build has no PyroWave decoder; using H.264/HEVC/AV1");
+        break;
+#endif
     case StreamingPreferences::VCC_FORCE_H264:
         m_SupportedVideoFormats.removeByMask(~VIDEO_FORMAT_MASK_H264);
         break;
@@ -887,12 +945,30 @@ bool Session::initialize()
     bool ret = validateLaunch(testWindow);
 
     if (ret) {
-        // Video format is now locked in
-        m_StreamConfig.supportedVideoFormats = m_SupportedVideoFormats.front();
-
-        // Populate decoder-dependent properties.
-        // Must be done after validateLaunch() since m_StreamConfig is finalized.
-        ret = populateDecoderProperties(testWindow);
+        // Lock the highest-priority format whose decoder initializes.
+        // PyroWave is optional: a failed GPU init drops it and retries
+        // H.264, HEVC, or AV1. Other codecs still fail the launch if they
+        // cannot be created, which matches the previous behavior.
+        while (!m_SupportedVideoFormats.isEmpty()) {
+            m_StreamConfig.supportedVideoFormats = m_SupportedVideoFormats.front();
+            if (populateDecoderProperties(testWindow)) {
+                break;
+            }
+#ifdef HAVE_PYROWAVE
+            if (m_SupportedVideoFormats.front() & VIDEO_FORMAT_MASK_PYROWAVE) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "PyroWave decoder failed to initialize; falling back");
+                emitLaunchWarning(tr("PyroWave decode is unavailable. Falling back to another video codec."));
+                m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_PYROWAVE);
+                continue;
+            }
+#endif
+            ret = false;
+            break;
+        }
+        if (m_SupportedVideoFormats.isEmpty()) {
+            ret = false;
+        }
     }
 
     SDL_DestroyWindow(testWindow);
@@ -947,6 +1023,23 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     if (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE) {
         emitLaunchWarning(tr("Your settings selection to force software decoding may cause poor streaming performance."));
     }
+
+#ifdef HAVE_PYROWAVE
+    if (m_SupportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) {
+        const bool hostSupports = (m_Computer->serverCodecModeSupport & SCM_PYROWAVE) != 0;
+        const bool forceSoftware = m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE;
+        if (!hostSupports || forceSoftware) {
+            if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_FORCE_PYROWAVE) {
+                emitLaunchWarning(tr("PyroWave is not available for this host or decoder setting. Falling back to H.264, HEVC, or AV1."));
+            }
+            else if (!hostSupports) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Host does not advertise PyroWave; using H.264/HEVC/AV1");
+            }
+            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_PYROWAVE);
+        }
+    }
+#endif
 
     if (m_SupportedVideoFormats & VIDEO_FORMAT_MASK_AV1) {
         if (m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport & SCM_MASK_AV1) == 0) {

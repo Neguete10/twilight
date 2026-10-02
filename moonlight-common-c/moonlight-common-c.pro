@@ -6,6 +6,11 @@
 
 QT -= core gui
 
+# Same patch as app/app.pro. Either qmake pass may run first.
+!system(python3 $$PWD/../scripts/apply_pyrowave_protocol.py) {
+    error("Failed to apply the PyroWave protocol patch to moonlight-common-c")
+}
+
 TARGET = moonlight-common-c
 TEMPLATE = lib
 

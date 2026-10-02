@@ -22,6 +22,7 @@ typedef struct _VIDEO_STATS {
     uint32_t framesWithHostProcessingLatency;  // low-res from RTP
     uint64_t totalReassemblyTimeUs;            // high-res (1us)
     uint64_t totalDecodeTimeUs;                // high-res from moonlight-common-c (1us)
+    uint64_t totalRenderTimeUs;                // high-res (1us), PyroWave present path
     uint64_t totalPacerTimeUs;                 // high-res (1us)
     uint64_t totaldecodeTimeUs;                // high-res (1us)
     uint32_t lastRtt;                          // low-res from enet (1ms)
