@@ -17,3 +17,6 @@
 	path = libs
 	url = https://github.com/cgutman/moonlight-qt-prebuilts.git
 	shallow = true
+[submodule "pyrowave"]
+	path = pyrowave
+	url = https://github.com/andygrundman/pyrowave.git

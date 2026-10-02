@@ -1,6 +1,12 @@
 QT += core quick network quickcontrols2 svg
 CONFIG += c++11
 
+# Teach moonlight-common-c the PyroWave capability bits before either
+# project compiles against Limelight.h. Idempotent. See docs/PYROWAVE_MAC.md.
+!system(python3 $$PWD/../scripts/apply_pyrowave_protocol.py) {
+    error("Failed to apply the PyroWave protocol patch to moonlight-common-c")
+}
+
 unix:!macx {
     TARGET = moonlight
 } else {
@@ -277,6 +283,42 @@ ffmpeg {
         streaming/video/ffmpeg-renderers/sdlvid.h \
         streaming/video/ffmpeg-renderers/swframemapper.h \
         streaming/video/ffmpeg-renderers/pacer/pacer.h
+}
+# PyroWave (intra-only GPU wavelet) decoder. Off by default so the existing
+# macOS CoreAudio build does not need the pyrowave submodule or MoltenVK.
+# Enable with: qmake CONFIG+=pyrowave
+# macOS uses the shared-VkDevice MoltenVK path from andyg.pyrowave-macos
+# (6fd162d2). Linux uses the dmabuf path in the same file. See docs/PYROWAVE_MAC.md.
+pyrowave {
+    message(PyroWave decoder selected)
+
+    DEFINES += HAVE_PYROWAVE
+
+    INCLUDEPATH += $$PWD/../pyrowave
+    INCLUDEPATH += $$PWD/../pyrowave/Granite/third_party/khronos/vulkan-headers/include
+
+    SOURCES += \
+        streaming/bandwidth.cpp \
+        streaming/video/pyrowave.cpp
+    HEADERS += \
+        streaming/bandwidth.h \
+        streaming/video/pyrowave.h \
+        streaming/video/pyrowave_packets.h
+
+    macx {
+        # MoltenVK has no dmabuf. Vulkan entry points come from SDL at runtime.
+        # libplacebo is only pulled in for this config; the default macOS link
+        # line is unchanged.
+        LIBS += -L$$PWD/../pyrowave/build -lpyrowave-shared -lplacebo
+    }
+    unix:!macx {
+        PKGCONFIG += libdrm libplacebo
+        LIBS += -L$$PWD/../pyrowave/build -lpyrowave-shared -lvulkan
+    }
+    win32 {
+        error("CONFIG+=pyrowave is implemented for macOS (MoltenVK) and Linux (Vulkan) only")
+    }
+    QMAKE_RPATHDIR += $$PWD/../pyrowave/build
 }
 libva {
     message(VAAPI renderer selected)
@@ -600,6 +642,7 @@ macx {
 
     !disable-prebuilts {
         APP_BUNDLE_FRAMEWORKS.files = $$files(../libs/mac/Frameworks/*.framework, true) $$files(../libs/mac/lib/*.dylib, true)
+        pyrowave: APP_BUNDLE_FRAMEWORKS.files += $$files(../pyrowave/build/libpyrowave-shared*.dylib)
         APP_BUNDLE_FRAMEWORKS.path = Contents/Frameworks
 
         QMAKE_BUNDLE_DATA += APP_BUNDLE_FRAMEWORKS
