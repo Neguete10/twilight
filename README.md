@@ -1,3 +1,9 @@
+# Twilight
+
+This checkout is the **Twilight** project, a fork of [Moonlight Qt](https://github.com/moonlight-stream/moonlight-qt) (`moonlight-stream/moonlight-qt`), including [Andy Grundman](https://github.com/andygrundman)'s CoreAudio spatial audio work ([andygrundman/moonlight-qt](https://github.com/andygrundman/moonlight-qt)). The Moonlight README below and the GPL-3.0 LICENSE are unchanged.
+
+---
+
 # Moonlight PC
 
 [Moonlight PC](https://moonlight-stream.org) is an open source PC client for NVIDIA GameStream and [Sunshine](https://github.com/LizardByte/Sunshine).
