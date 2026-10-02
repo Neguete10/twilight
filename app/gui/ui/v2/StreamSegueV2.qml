@@ -55,7 +55,7 @@ Item {
 
     function sessionFinished(portTestResult) {
         if (portTestResult !== 0 && portTestResult !== -1 && errorText !== "") {
-            errorText += "\n\n" + qsTr("This PC's Internet connection is blocking Moonlight. Streaming over the Internet may not work while connected to this network.")
+            errorText += "\n\n" + qsTr("This PC's Internet connection is blocking Twilight. Streaming over the Internet may not work while connected to this network.")
         }
 
         SdlGamepadKeyNavigation.enable()

@@ -328,7 +328,7 @@ Item {
                             theme: sheet.theme
                             enabled: SystemProperties.supportsHdr
                             title: qsTr("HDR")
-                            subtitle: SystemProperties.supportsHdr ? qsTr("Experimental. Some games still need an HDR monitor on the host.")
+                            subtitle: SystemProperties.supportsHdr ? qsTr("Some games still need an HDR monitor on the host.")
                                                                    : qsTr("This computer cannot display HDR.")
                             SwitchV2 {
                                 theme: sheet.theme
@@ -564,7 +564,7 @@ Item {
                             width: parent.width
                             theme: sheet.theme
                             title: qsTr("Detect blocked connections")
-                            subtitle: qsTr("Checks whether this network filters Moonlight's ports.")
+                            subtitle: qsTr("Checks whether this network filters streaming ports.")
                             SwitchV2 {
                                 theme: sheet.theme
                                 checked: StreamingPreferences.detectNetworkBlocking
@@ -685,7 +685,7 @@ Item {
                             width: parent.width
                             theme: sheet.theme
                             title: qsTr("Classic performance overlay")
-                            subtitle: qsTr("The yellow Moonlight stats, including FEC on H.264, HEVC, and AV1. Separate from Twilight's chips, and it does not add those FEC lines to PyroWave.")
+                            subtitle: qsTr("The yellow Classic stats, including FEC on H.264, HEVC, and AV1. Separate from Twilight's chips, and it does not add those FEC lines to PyroWave.")
                             SwitchV2 {
                                 theme: sheet.theme
                                 checked: StreamingPreferences.showPerformanceOverlay
@@ -790,14 +790,6 @@ Item {
                             text: qsTr("These chips float over a Twilight stream. Numbers come from the same stats as the classic overlay. Forward error correction is not shown. The preview above uses sample numbers.")
                         }
 
-                        TwTextV2 {
-                            width: parent.width
-                            theme: sheet.theme
-                            color: sheet.theme.tertiary
-                            font.pixelSize: 12
-                            wrapMode: Text.WordWrap
-                            text: qsTr("Twilight is a Moonlight client. Moonlight is developed by the Moonlight Game Streaming Project. CoreAudio spatial audio by Andy Grundman.")
-                        }
                         TwTextV2 {
                             theme: sheet.theme
                             color: sheet.theme.tertiary

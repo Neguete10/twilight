@@ -1,8 +1,8 @@
 import QtQuick 2.9
 
 // System palette, 8pt grid, SF Pro on macOS via the system UI font.
-// Glass is a translucent fill plus a hairline — Qt GraphicalEffects is not
-// a Moonlight dependency, so this does not use a backdrop blur.
+// Glass is a translucent fill plus a hairline. Qt GraphicalEffects is not
+// a dependency of this client, so this does not use a backdrop blur.
 // Item, not QtObject: Qt 5.9 will not instantiate SystemPalette as a
 // property value inside a QtObject, and that took the whole shell down.
 Item {

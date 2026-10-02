@@ -224,7 +224,7 @@ Item {
         if (!appModel || quitting)
             return
         if (!computerModel.computerSupportedAt(selectedIndex)) {
-            showError(qsTr("This build of Moonlight does not support the GeForce Experience version on %1.").arg(selectedName))
+            showError(qsTr("This build of Twilight does not support the GeForce Experience version on %1.").arg(selectedName))
             return
         }
         if (!computerModel.computerOnlineAt(selectedIndex)) {
@@ -280,7 +280,7 @@ Item {
             return
         var text = qsTr("Unable to connect to the specified PC.")
         if (detectedPortBlocking)
-            text += "\n\n" + qsTr("This PC's Internet connection is blocking Moonlight. Streaming over the Internet may not work while connected to this network.")
+            text += "\n\n" + qsTr("This PC's Internet connection is blocking Twilight. Streaming over the Internet may not work while connected to this network.")
         showError(text)
     }
 
@@ -292,13 +292,13 @@ Item {
 
     function testComplete(result, blockedPorts) {
         if (result === -1) {
-            testMessage = qsTr("The network test could not be performed because none of Moonlight's connection testing servers were reachable from this PC.")
+            testMessage = qsTr("The network test could not be performed because none of Twilight's connection testing servers were reachable from this PC.")
         }
         else if (result === 0) {
-            testMessage = qsTr("This network does not appear to be blocking Moonlight. If you still have trouble connecting, check your PC's firewall settings.")
+            testMessage = qsTr("This network does not appear to be blocking Twilight. If you still have trouble connecting, check your PC's firewall settings.")
         }
         else {
-            testMessage = qsTr("Your PC's current network connection seems to be blocking Moonlight.") + "\n\n" + qsTr("The following network ports were blocked:") + "\n" + blockedPorts
+            testMessage = qsTr("Your PC's current network connection seems to be blocking Twilight.") + "\n\n" + qsTr("The following network ports were blocked:") + "\n" + blockedPorts
         }
         testOpen = true
     }
@@ -403,12 +403,6 @@ Item {
                         text: "Twilight"
                         font.pixelSize: 18
                         font.weight: Font.DemiBold
-                    }
-                    TwTextV2 {
-                        theme: shell.theme
-                        text: "Moonlight"
-                        color: theme.tertiary
-                        font.pixelSize: 11
                     }
                 }
             }
@@ -1132,7 +1126,7 @@ Item {
         theme: shell.theme
         open: shell.renameOpen
         title: qsTr("Rename host")
-        message: qsTr("This name is stored by Moonlight on this computer.")
+        message: qsTr("This name is stored by Twilight on this computer.")
         confirmText: qsTr("Save")
         field: true
         onConfirmed: {
@@ -1200,7 +1194,7 @@ Item {
         theme: shell.theme
         open: shell.leaveOpen
         title: qsTr("Quit Twilight?")
-        message: qsTr("This closes Moonlight.")
+        message: qsTr("This closes Twilight.")
         confirmText: qsTr("Quit")
         danger: true
         onConfirmed: {
