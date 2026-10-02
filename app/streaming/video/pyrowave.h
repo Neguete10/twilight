@@ -2,13 +2,15 @@
  * @file app/streaming/video/pyrowave.h
  * @brief PyroWave (Vulkan wavelet, intra-only) client decoder for Moonlight.
  *
- * Stage B4 (GPU zero-copy present), two per-platform wirings:
+ * Stage B4 (GPU zero-copy present). This file is the Vulkan backend only:
  *  - Linux: PyroWave decodes on its own (headless) Vulkan device into exportable dmabuf plane
  *    images; those planes are imported into a libplacebo Vulkan device which does YUV->RGB +
  *    swapchain present. No CPU readback.
  *  - macOS (MoltenVK): no dmabuf/external-fd interop exists, so PyroWave and libplacebo share a
  *    single VkDevice created by us. Plane images are ordinary libplacebo textures whose VkImage
  *    is handed to PyroWave's compute decode; sync uses one timeline semaphore on both sides.
+ * The native Metal backend is PyroWaveMetalVideoDecoder in pyrowave_metal.mm. It does not
+ * replace this path.
  *
  * Compiled only when HAVE_PYROWAVE is defined.
  */

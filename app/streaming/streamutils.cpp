@@ -71,6 +71,10 @@ static int __riscv_hwprobe(struct riscv_hwprobe *pairs, size_t pair_count,
 Uint32 StreamUtils::getPlatformWindowFlags()
 {
 #if defined(Q_OS_DARWIN)
+    // VideoToolbox and PyroWave Metal present through this flag. PyroWave
+    // Vulkan replaces it with SDL_WINDOW_VULKAN on the stream window only
+    // (Session::execInternal), after the backend probe. The hardware-decode
+    // probe window stays Metal so H.264/HEVC/AV1 do not change.
     return SDL_WINDOW_METAL;
 #elif defined(HAVE_LIBPLACEBO_VULKAN)
     // We'll fall back to GL if Vulkan fails

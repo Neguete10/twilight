@@ -44,6 +44,17 @@ public:
     };
     Q_ENUM(VideoCodecConfig)
 
+    // Which GPU library decodes PyroWave. Does not change H.264, HEVC, or AV1.
+    // New values go at the end so saved settings keep their numbers.
+    // Auto on macOS is Metal when libpyrowave-metal loads, otherwise Vulkan.
+    enum PyroWaveBackendConfig
+    {
+        PWBC_AUTO,
+        PWBC_METAL,
+        PWBC_VULKAN
+    };
+    Q_ENUM(PyroWaveBackendConfig)
+
     enum VideoDecoderSelection
     {
         VDS_AUTO,
@@ -136,6 +147,7 @@ public:
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
     Q_PROPERTY(SpatialAudioConfig spatialAudioConfig MEMBER spatialAudioConfig NOTIFY spatialAudioConfigChanged)
     Q_PROPERTY(VideoCodecConfig videoCodecConfig MEMBER videoCodecConfig NOTIFY videoCodecConfigChanged)
+    Q_PROPERTY(PyroWaveBackendConfig pyroWaveBackend MEMBER pyroWaveBackend NOTIFY pyroWaveBackendChanged)
     Q_PROPERTY(bool enableHdr MEMBER enableHdr NOTIFY enableHdrChanged)
     Q_PROPERTY(bool enableYUV444 MEMBER enableYUV444 NOTIFY enableYUV444Changed)
     Q_PROPERTY(VideoDecoderSelection videoDecoderSelection MEMBER videoDecoderSelection NOTIFY videoDecoderSelectionChanged)
@@ -184,6 +196,7 @@ public:
     AudioConfig audioConfig;
     SpatialAudioConfig spatialAudioConfig;
     VideoCodecConfig videoCodecConfig;
+    PyroWaveBackendConfig pyroWaveBackend;
     bool enableHdr;
     bool enableYUV444;
     VideoDecoderSelection videoDecoderSelection;
@@ -210,6 +223,7 @@ signals:
     void audioConfigChanged();
     void spatialAudioConfigChanged();
     void videoCodecConfigChanged();
+    void pyroWaveBackendChanged();
     void enableHdrChanged();
     void enableYUV444Changed();
     void videoDecoderSelectionChanged();

@@ -10,6 +10,7 @@
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
 #include "video/overlaymanager.h"
+#include "video/pyrowave_backend.h"
 
 class SupportedVideoFormatList : public QList<int>
 {
@@ -280,6 +281,10 @@ private:
     OPUS_MULTISTREAM_CONFIGURATION m_OriginalAudioConfig;
     int m_AudioSampleCount;
     Uint32 m_DropAudioEndTime;
+    // Set by the PyroWave probe before the stream window exists. None when
+    // this session is not using PyroWave. Vulkan needs SDL_WINDOW_VULKAN;
+    // Metal and every other codec keep SDL_WINDOW_METAL.
+    PyroWaveGpuBackend m_PyroWaveBackend;
 
     Overlay::OverlayManager m_OverlayManager;
 

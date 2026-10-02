@@ -66,6 +66,17 @@ SystemProperties::SystemProperties()
     hasDiscordIntegration = false;
 #endif
 
+#ifdef HAVE_PYROWAVE
+    hasPyroWaveVulkan = true;
+#else
+    hasPyroWaveVulkan = false;
+#endif
+#ifdef HAVE_PYROWAVE_METAL
+    hasPyroWaveMetal = true;
+#else
+    hasPyroWaveMetal = false;
+#endif
+
     unmappedGamepads = SdlInputHandler::getUnmappedGamepads();
 
     // Populate data that requires talking to SDL. We do it all in one shot

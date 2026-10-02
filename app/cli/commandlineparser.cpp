@@ -324,6 +324,11 @@ StreamCommandLineParser::StreamCommandLineParser()
         {"software", StreamingPreferences::VDS_FORCE_SOFTWARE},
         {"hardware", StreamingPreferences::VDS_FORCE_HARDWARE},
     };
+    m_PyroWaveBackendMap = {
+        {"auto",   StreamingPreferences::PWBC_AUTO},
+        {"metal",  StreamingPreferences::PWBC_METAL},
+        {"vulkan", StreamingPreferences::PWBC_VULKAN},
+    };
     m_CaptureSysKeysModeMap = {
         {"never",      StreamingPreferences::CSK_OFF},
         {"fullscreen", StreamingPreferences::CSK_FULLSCREEN},
@@ -379,6 +384,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());
     parser.addChoiceOption("video-codec", "video codec", m_VideoCodecMap.keys());
     parser.addChoiceOption("video-decoder", "video decoder", m_VideoDecoderMap.keys());
+    parser.addChoiceOption("pyrowave-backend", "PyroWave GPU backend", m_PyroWaveBackendMap.keys());
 
     if (!parser.parse(args)) {
         parser.showError(parser.errorText());
@@ -512,6 +518,11 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     // Resolve --video-decoder option
     if (parser.isSet("video-decoder")) {
         preferences->videoDecoderSelection = mapValue(m_VideoDecoderMap, parser.getChoiceOptionValue("video-decoder"));
+    }
+
+    // Resolve --pyrowave-backend option (auto, metal, vulkan)
+    if (parser.isSet("pyrowave-backend")) {
+        preferences->pyroWaveBackend = mapValue(m_PyroWaveBackendMap, parser.getChoiceOptionValue("pyrowave-backend"));
     }
 
     // This method will not return and terminates the process if --version or

@@ -303,12 +303,24 @@ pyrowave {
     HEADERS += \
         streaming/bandwidth.h \
         streaming/video/pyrowave.h \
+        streaming/video/pyrowave_backend.h \
         streaming/video/pyrowave_packets.h
 
     macx {
         # MoltenVK has no dmabuf. Vulkan entry points come from SDL at runtime.
         # libplacebo is only pulled in for this config; the default macOS link
         # line is unchanged.
+        #
+        # Metal is a second decoder in this same CONFIG+=pyrowave build. It
+        # dlopens libpyrowave-metal and is not linked here: that dylib exports
+        # the same C names as libpyrowave-shared (pyrowave_decoder_create, …)
+        # with different signatures. Do not bump the pyrowave submodule to the
+        # metal/ tree; 263ef100 is the Vulkan API this file calls.
+        DEFINES += HAVE_PYROWAVE_METAL
+        SOURCES += streaming/video/pyrowave_metal.mm
+        HEADERS += \
+            streaming/video/pyrowave_metal.h \
+            streaming/video/pyrowave_metal_api.h
         LIBS += -L$$PWD/../pyrowave/build -lpyrowave-shared -lplacebo
     }
     unix:!macx {
@@ -316,7 +328,7 @@ pyrowave {
         LIBS += -L$$PWD/../pyrowave/build -lpyrowave-shared -lvulkan
     }
     win32 {
-        error("CONFIG+=pyrowave is implemented for macOS (MoltenVK) and Linux (Vulkan) only")
+        error("CONFIG+=pyrowave is implemented for macOS (Vulkan/MoltenVK and Metal) and Linux (Vulkan) only")
     }
     QMAKE_RPATHDIR += $$PWD/../pyrowave/build
 }
@@ -643,6 +655,7 @@ macx {
     !disable-prebuilts {
         APP_BUNDLE_FRAMEWORKS.files = $$files(../libs/mac/Frameworks/*.framework, true) $$files(../libs/mac/lib/*.dylib, true)
         pyrowave: APP_BUNDLE_FRAMEWORKS.files += $$files(../pyrowave/build/libpyrowave-shared*.dylib)
+        pyrowave: APP_BUNDLE_FRAMEWORKS.files += $$files(../pyrowave-metal/build/libpyrowave-metal*.dylib)
         APP_BUNDLE_FRAMEWORKS.path = Contents/Frameworks
 
         QMAKE_BUNDLE_DATA += APP_BUNDLE_FRAMEWORKS
