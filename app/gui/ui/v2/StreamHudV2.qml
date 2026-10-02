@@ -8,7 +8,7 @@ Window {
     flags: Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus | Qt.NoDropShadowWindowHint
     color: "transparent"
     title: ""
-    visible: StreamHudStats.streaming && StreamingPreferences.uiVersion === "v2"
+    visible: StreamHudStats.streaming && StreamingPreferences.uiVersion === "v2" && StreamingPreferences.showTwilightHud
 
     width: column.implicitWidth
     height: column.implicitHeight

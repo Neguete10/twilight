@@ -34,16 +34,20 @@ QImage twilightRenderSfSymbol(const QString& name, int pointSize, const QColor& 
                 return QImage();
             }
 
-            const int width = qMax(1, static_cast<int>(CGImageGetWidth(cgImage)));
-            const int height = qMax(1, static_cast<int>(CGImageGetHeight(cgImage)));
+            const int glyphWidth = qMax(1, static_cast<int>(CGImageGetWidth(cgImage)));
+            const int glyphHeight = qMax(1, static_cast<int>(CGImageGetHeight(cgImage)));
+            // Square slot so a wide or tall symbol stays optically centered.
+            const int side = qMax(glyphWidth, glyphHeight);
+            const CGFloat originX = (side - glyphWidth) / 2.0;
+            const CGFloat originY = (side - glyphHeight) / 2.0;
 
-            QImage bitmap(width, height, QImage::Format_ARGB32_Premultiplied);
+            QImage bitmap(side, side, QImage::Format_ARGB32_Premultiplied);
             bitmap.fill(Qt::transparent);
 
             CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
             CGContextRef ctx = CGBitmapContextCreate(bitmap.bits(),
-                                                      static_cast<size_t>(width),
-                                                      static_cast<size_t>(height),
+                                                      static_cast<size_t>(side),
+                                                      static_cast<size_t>(side),
                                                       8,
                                                       static_cast<size_t>(bitmap.bytesPerLine()),
                                                       space,
@@ -53,14 +57,28 @@ QImage twilightRenderSfSymbol(const QString& name, int pointSize, const QColor& 
                 return QImage();
             }
 
-            // A CGBitmapContext treats the first QImage row as the bottom.
-            // Flip the context once so every SF Symbol lands right-side up.
-            // drawInRect: ignored NSGraphicsContext's flipped flag, which is
-            // why wifi, pencil, trash, display, gamecontroller, and network
-            // (and the other glyphs) were inverted together.
-            CGContextTranslateCTM(ctx, 0, height);
+            // Same recipe as Qt's qt_mac_toQPixmap (qcoregraphics.mm):
+            // QMacCGContext flips the CTM so y grows down from the top row,
+            // then NSImage is drawn with respectFlipped:YES.
+            //
+            // The previous attempt flipped the CTM and called CGContextDrawImage.
+            // That helper exists only to undo a flipped context (qt_mac_drawCGImage
+            // flips *again* before CGContextDrawImage). One flip plus
+            // CGContextDrawImage leaves the glyph upside down, which is what
+            // the Mac build still showed. drawInRect: without respectFlipped
+            // also ignored the flipped flag, so the first attempt was inverted too.
+            CGContextTranslateCTM(ctx, 0, side);
             CGContextScaleCTM(ctx, 1, -1);
-            CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), cgImage);
+            NSGraphicsContext* gc = [NSGraphicsContext graphicsContextWithCGContext:ctx flipped:YES];
+            [NSGraphicsContext saveGraphicsState];
+            [NSGraphicsContext setCurrentContext:gc];
+            [image drawInRect:NSMakeRect(originX, originY, glyphWidth, glyphHeight)
+                     fromRect:NSZeroRect
+                    operation:NSCompositingOperationSourceOver
+                     fraction:1.0
+               respectFlipped:YES
+                        hints:nil];
+            [NSGraphicsContext restoreGraphicsState];
             CGContextRelease(ctx);
 
             QPainter painter(&bitmap);

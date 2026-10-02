@@ -26,7 +26,7 @@ Pin on an app tile is Moonlight's existing direct-launch flag (one app per host)
 
 ## Icons and type
 
-On macOS 11 and later, `image://sfsymbol/<name>/<pointSize>/<hex>` draws a real SF Symbol with `NSImage imageWithSystemSymbolName` (`app/gui/sfsymbol_mac.mm`). The bitmap context is flipped once so the glyph matches `QImage`'s top-left origin. Other platforms, and unknown names, use a small geometric stand-in from `twilightDrawFallbackSymbol`.
+On macOS 11 and later, `image://sfsymbol/<name>/<pointSize>/<hex>` draws a real SF Symbol with `NSImage imageWithSystemSymbolName` (`app/gui/sfsymbol_mac.mm`). The draw matches Qt's `qt_mac_toQPixmap`: flip the bitmap context so y grows downward, then `drawInRect:respectFlipped:YES`, and center the glyph in a square. `CGContextDrawImage` after a single flip is upside down, which is why the earlier attempt stayed inverted. Other platforms, and unknown names, use a small geometric stand-in from `twilightDrawFallbackSymbol`.
 
 Type uses `.AppleSystemUIFont` on Darwin, which is SF Pro on current macOS. The font is not bundled. Windows uses Segoe UI. Elsewhere the application font is left alone.
 
@@ -36,7 +36,7 @@ Light and dark follow `SystemPalette`. Classic still forces the Material dark th
 
 ## HUD stats
 
-When `uiVersion` is `v2`, the decoders still build the usual overlay string, but they do not enable the yellow SDL overlay unless **Classic performance overlay** is on. The HUD parses FPS, bitrate, and `Average network latency` and drops FEC lines. PyroWave's string has no FEC fields; the parser does not add any.
+When `uiVersion` is `v2` and **Twilight performance overlay** is on (`showTwilightHud`, default on), the decoders still build the usual overlay string, but they do not enable the yellow SDL overlay unless **Classic performance overlay** is on. The HUD parses FPS, bitrate, and `Average network latency` and drops FEC lines. PyroWave's string has no FEC fields; the parser does not add any. Turning Twilight's overlay off hides the chips and stops that sampling. The classic yellow overlay stays on its own switch.
 
 The HUD is a separate frameless tool window. A fullscreen SDL stream can cover it. End asks once, then posts the same `SDL_QUIT` as Ctrl+Alt+Shift+Q.
 

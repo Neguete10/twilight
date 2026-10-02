@@ -145,6 +145,9 @@ public:
     Q_PROPERTY(bool gamepadMouse MEMBER gamepadMouse NOTIFY gamepadMouseChanged)
     Q_PROPERTY(bool detectNetworkBlocking MEMBER detectNetworkBlocking NOTIFY detectNetworkBlockingChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
+    // Twilight's glass HUD. Independent of the classic yellow overlay.
+    // Stored under the QSettings key "showTwilightHud". Missing key is on.
+    Q_PROPERTY(bool showTwilightHud READ showTwilightHud WRITE setShowTwilightHud NOTIFY showTwilightHudChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
     Q_PROPERTY(SpatialAudioConfig spatialAudioConfig MEMBER spatialAudioConfig NOTIFY spatialAudioConfigChanged)
     Q_PROPERTY(VideoCodecConfig videoCodecConfig MEMBER videoCodecConfig NOTIFY videoCodecConfigChanged)
@@ -170,11 +173,13 @@ public:
     Q_INVOKABLE bool retranslate();
 
     // Thread-safe read for the decoder thread. True only while the Twilight
-    // shell is selected, so the classic overlay path stays idle on V1.
+    // shell is selected and its performance overlay is enabled.
     static bool hudWantsSamples();
 
     QString uiVersion() const { return m_UiVersion; }
     void setUiVersion(const QString& version);
+    bool showTwilightHud() const { return m_ShowTwilightHud; }
+    void setShowTwilightHud(bool show);
 
     // Directly accessible members for preferences
     int width;
@@ -246,6 +251,7 @@ signals:
     void gamepadMouseChanged();
     void detectNetworkBlockingChanged();
     void showPerformanceOverlayChanged();
+    void showTwilightHudChanged();
     void mouseButtonsChanged();
     void muteOnFocusLossChanged();
     void backgroundGamepadChanged();
@@ -262,6 +268,7 @@ private:
     void publishHudSamplingFlag();
 
     QString m_UiVersion;
+    bool m_ShowTwilightHud;
 
     QString getSuffixFromLanguage(Language lang);
 

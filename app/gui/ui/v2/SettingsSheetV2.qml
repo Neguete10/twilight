@@ -127,7 +127,7 @@ Item {
         height: Math.min(680, parent.height - 32)
         anchors.centerIn: parent
         radius: 22
-        color: sheet.theme.elevated
+        color: sheet.theme.sheetSurface
         border.width: 1
         border.color: sheet.theme.stroke
         clip: true
@@ -689,11 +689,22 @@ Item {
                             width: parent.width
                             theme: sheet.theme
                             title: qsTr("Classic performance overlay")
-                            subtitle: qsTr("The yellow Moonlight stats, including FEC on H.264, HEVC, and AV1. Twilight's chips stay on either way and do not add those FEC lines to PyroWave.")
+                            subtitle: qsTr("The yellow Moonlight stats, including FEC on H.264, HEVC, and AV1. Separate from Twilight's chips, and it does not add those FEC lines to PyroWave.")
                             SwitchV2 {
                                 theme: sheet.theme
                                 checked: StreamingPreferences.showPerformanceOverlay
                                 onToggled: StreamingPreferences.showPerformanceOverlay = next
+                            }
+                        }
+                        SettingRowV2 {
+                            width: parent.width
+                            theme: sheet.theme
+                            title: qsTr("Twilight performance overlay")
+                            subtitle: qsTr("FPS, bitrate, and latency chips while a Twilight stream is open. Turn this off to hide them.")
+                            SwitchV2 {
+                                theme: sheet.theme
+                                checked: StreamingPreferences.showTwilightHud
+                                onToggled: StreamingPreferences.showTwilightHud = next
                             }
                         }
 

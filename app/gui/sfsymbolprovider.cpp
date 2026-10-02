@@ -341,8 +341,16 @@ QImage SfSymbolImageProvider::requestImage(const QString& id, QSize* size, const
         const int pixelSize = requestedSize.width() > 0 ? requestedSize.width() : pointSize * 2;
         image = twilightDrawFallbackSymbol(name, pixelSize, color);
     }
-    else if (requestedSize.width() > 0 && requestedSize.height() > 0 && image.size() != requestedSize) {
-        image = image.scaled(requestedSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    if (requestedSize.width() > 0 && requestedSize.height() > 0 && image.size() != requestedSize) {
+        QImage fitted = image.scaled(requestedSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QImage canvas(requestedSize, QImage::Format_ARGB32_Premultiplied);
+        canvas.fill(Qt::transparent);
+        QPainter painter(&canvas);
+        painter.drawImage((requestedSize.width() - fitted.width()) / 2,
+                          (requestedSize.height() - fitted.height()) / 2,
+                          fitted);
+        painter.end();
+        image = canvas;
     }
 
     if (size != nullptr) {

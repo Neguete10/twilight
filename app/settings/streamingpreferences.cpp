@@ -45,6 +45,7 @@
 #define SER_PACKETSIZE "packetsize"
 #define SER_DETECTNETBLOCKING "detectnetblocking"
 #define SER_SHOWPERFOVERLAY "showperfoverlay"
+#define SER_TWILIGHTHUD "showTwilightHud"
 #define SER_SWAPMOUSEBUTTONS "swapmousebuttons"
 #define SER_MUTEONFOCUSLOSS "muteonfocusloss"
 #define SER_BACKGROUNDGAMEPAD "backgroundgamepad"
@@ -63,7 +64,8 @@ static StreamingPreferences* s_GlobalPrefs;
 static QReadWriteLock s_GlobalPrefsLock;
 
 StreamingPreferences::StreamingPreferences(QQmlEngine *qmlEngine)
-    : m_QmlEngine(qmlEngine)
+    : m_ShowTwilightHud(true),
+      m_QmlEngine(qmlEngine)
 {
     reload();
 }
@@ -184,8 +186,9 @@ void StreamingPreferences::reload()
         // Missing key starts on Twilight. An explicit "v1" still restores Classic.
         const QString version = settings.value(SER_UIVERSION).toString().trimmed().toLower();
         m_UiVersion = (version == QLatin1String("v1")) ? QStringLiteral("v1") : QStringLiteral("v2");
-        publishHudSamplingFlag();
     }
+    m_ShowTwilightHud = settings.value(SER_TWILIGHTHUD, true).toBool();
+    publishHudSamplingFlag();
 
 
     // Perform default settings updates as required based on last default version
@@ -372,6 +375,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_CAPTURESYSKEYS, captureSysKeysMode);
     settings.setValue(SER_KEEPAWAKE, keepAwake);
     settings.setValue(SER_UIVERSION, m_UiVersion);
+    settings.setValue(SER_TWILIGHTHUD, m_ShowTwilightHud);
 }
 
 bool StreamingPreferences::hudWantsSamples()
@@ -381,7 +385,22 @@ bool StreamingPreferences::hudWantsSamples()
 
 void StreamingPreferences::publishHudSamplingFlag()
 {
-    s_HudWantsSamples.storeRelease(m_UiVersion == QLatin1String("v2") ? 1 : 0);
+    const bool sample = m_UiVersion == QLatin1String("v2") && m_ShowTwilightHud;
+    s_HudWantsSamples.storeRelease(sample ? 1 : 0);
+}
+
+void StreamingPreferences::setShowTwilightHud(bool show)
+{
+    if (m_ShowTwilightHud == show) {
+        return;
+    }
+
+    m_ShowTwilightHud = show;
+    publishHudSamplingFlag();
+
+    QSettings settings;
+    settings.setValue(SER_TWILIGHTHUD, m_ShowTwilightHud);
+    emit showTwilightHudChanged();
 }
 
 void StreamingPreferences::setUiVersion(const QString& version)

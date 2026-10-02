@@ -49,6 +49,8 @@ Item {
     readonly property color sheen: Qt.rgba(1, 1, 1, dark ? 0.16 : 0.7)
     readonly property color glass: dark ? Qt.rgba(0.09, 0.10, 0.13, 0.72) : Qt.rgba(1, 1, 1, 0.74)
     readonly property color elevated: dark ? Qt.rgba(0.12, 0.13, 0.16, 0.96) : Qt.rgba(0.99, 0.99, 1, 0.97)
+    // Settings sheet only. Fully opaque so the host behind the panel cannot show through.
+    readonly property color sheetSurface: dark ? "#1F2129" : "#FCFCFF"
     readonly property color sidebar: dark ? Qt.rgba(0.07, 0.08, 0.10, 0.66) : Qt.rgba(1, 1, 1, 0.62)
     readonly property color scrim: Qt.rgba(0, 0, 0, dark ? 0.46 : 0.28)
     readonly property color selection: Qt.rgba(accent.r, accent.g, accent.b, dark ? 0.22 : 0.14)

@@ -18,6 +18,8 @@ Image {
     width: pointSize
     height: pointSize
     fillMode: Image.PreserveAspectFit
+    horizontalAlignment: Image.AlignHCenter
+    verticalAlignment: Image.AlignVCenter
     smooth: true
     mipmap: true
     asynchronous: true
