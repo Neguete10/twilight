@@ -128,6 +128,18 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
         break;
     }
 
+    case KeyComboTogglePictureInPicture:
+#ifdef Q_OS_DARWIN
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected picture-in-picture toggle combo");
+        Session::s_ActiveSession->togglePictureInPicture();
+
+        // The modifier keys were already delivered to the host. Release
+        // them so the mini player does not leave Ctrl/Alt/Shift stuck.
+        raiseAllKeys();
+#endif
+        break;
+
     case KeyComboTogglePointerRegionLock:
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected pointer region lock toggle combo");
