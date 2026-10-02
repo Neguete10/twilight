@@ -72,7 +72,7 @@ There is no Mac in this change’s build environment, so the `.mm` file was not 
 
 - Off unless you opt in.
 - Trackpads, graphics tablets, and devices whose top-level usage is not Mouse stay on SDL. If a mouse is captured, SDL relative motion is suppressed for the whole grab, including the trackpad.
-- IOHID counts are device units, not macOS points. Y is the HID value, not flipped. `TWILIGHT_COREHID_SCALE` is the sensitivity knob. The host still applies its own mouse settings.
+- IOHID counts are device units, not macOS points. Pointer Y from IOHID Desktop `0x31` and from GCMouse is positive upward, so it is negated once (`coreHidPointerDyForHost`) before scale. That matches SDL `yrel` and `LiSendMouseMoveEvent`, which are positive downward. X and the wheel are not negated. `TWILIGHT_COREHID_SCALE` is the sensitivity knob. The host still applies its own mouse settings.
 - SDL can still deliver the wheel event that taught us the device has a wheel, so the first notch may be sent twice. Later notches are HID only.
 - GCMouse can be accelerated. It is the fallback, not the raw path.
 - Buttons past X2 (HID usage 6+) are tracked so they can be released, and they are not sent. Limelight has no code for them.

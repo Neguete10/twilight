@@ -121,6 +121,16 @@ float coreHidResolveScale(const char* env)
     return value;
 }
 
+int32_t coreHidPointerDyForHost(int32_t dy)
+{
+    // int32 min cannot be negated. A mouse count will not get here; saturate
+    // so the later int16 clamp still points down.
+    if (dy == static_cast<int32_t>(0x80000000)) {
+        return 2147483647;
+    }
+    return -dy;
+}
+
 int16_t coreHidApplyScale(int32_t raw, float scale)
 {
     if (!(scale > 0.0f)) {
@@ -229,7 +239,7 @@ CoreHidDecodedUpdate CoreHidMouseDecoder::apply(const CoreHidElementUpdate& upda
             decoded.motion.motion = true;
         }
         else if (axisY) {
-            decoded.motion.dy = update.value;
+            decoded.motion.dy = coreHidPointerDyForHost(update.value);
             decoded.motion.motion = true;
         }
         else if (wheel) {

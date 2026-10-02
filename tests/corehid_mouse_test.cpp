@@ -59,7 +59,11 @@ static void testDecoderMotion()
     expectTrue(x.hasMotion && x.motion.motion && x.motion.dx == 5 && x.motion.dy == 0, "relative X");
 
     CoreHidDecodedUpdate y = decoder.apply(element(1, CoreHidUsage::PageGenericDesktop, CoreHidUsage::DesktopY, -3, true));
-    expectTrue(y.hasMotion && y.motion.dy == -3 && y.motion.dx == 0, "relative Y");
+    expectTrue(y.hasMotion && y.motion.dy == 3 && y.motion.dx == 0, "relative Y is negated once for SDL");
+    expectInt(coreHidPointerDyForHost(-3), 3, "upward count becomes downward host dy");
+    expectInt(coreHidPointerDyForHost(4), -4, "downward count becomes upward host dy");
+    expectInt(coreHidPointerDyForHost(0), 0, "zero pointer Y stays zero");
+    expectInt(coreHidPointerDyForHost(static_cast<int32_t>(0x80000000)), 2147483647, "int32 min Y saturates");
 
     CoreHidDecodedUpdate zero = decoder.apply(element(1, CoreHidUsage::PageGenericDesktop, CoreHidUsage::DesktopX, 0, true));
     expectTrue(!zero.hasMotion, "zero delta is not sent");

@@ -414,7 +414,7 @@ void attachGcMouse(CoreHidMouseCapture* capture, GCMouse* mouse)
         }
         CoreHidMouseDelta delta = {};
         delta.dx = coreHidApplyScale(static_cast<int32_t>(std::lround(static_cast<double>(deltaX))), capture->scale);
-        delta.dy = coreHidApplyScale(static_cast<int32_t>(std::lround(static_cast<double>(deltaY))), capture->scale);
+        delta.dy = coreHidApplyScale(coreHidPointerDyForHost(static_cast<int32_t>(std::lround(static_cast<double>(deltaY)))), capture->scale);
         delta.motion = delta.dx != 0 || delta.dy != 0;
         if (delta.motion) {
             capture->onMotion(delta, capture->context);

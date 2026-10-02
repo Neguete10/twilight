@@ -604,8 +604,10 @@ void SdlInputHandler::coreHidButtonThunk(const CoreHidButtonUpdate& update, void
 
 void SdlInputHandler::sendCoreHidMotion(const CoreHidMouseDelta& delta)
 {
-    // Raw relative counts. Not LiSendMouseMoveAsMousePositionEvent: that API
-    // keeps a virtual client cursor for platforms that cannot read HID deltas.
+    // dx/dy are already host-oriented. Pointer Y was negated once in the
+    // IOHID decoder or the GCMouse handler. Do not negate again.
+    // Not LiSendMouseMoveAsMousePositionEvent: that API keeps a virtual
+    // client cursor for platforms that cannot read HID deltas.
     if (delta.motion) {
         LiSendMouseMoveEvent(static_cast<short>(delta.dx), static_cast<short>(delta.dy));
     }

@@ -9,9 +9,11 @@
 // backend uses IOHIDManager, the C API CoreHID's HIDDeviceClient reads, and
 // can fall back to GCMouse from Game Controller. See docs/COREHID_MAC.md.
 //
-// Relative HID counts are forwarded as LiSendMouseMoveEvent deltas. This path
-// does not use LiSendMouseMoveAsMousePositionEvent, which keeps a virtual
-// client cursor and exists for platforms that cannot read raw motion.
+// Relative HID counts are forwarded as LiSendMouseMoveEvent deltas. Pointer Y
+// is negated once (coreHidPointerDyForHost) so it matches SDL yrel, which is
+// positive downward. This path does not use LiSendMouseMoveAsMousePositionEvent,
+// which keeps a virtual client cursor and exists for platforms that cannot
+// read raw motion.
 
 namespace CoreHidUsage {
 
@@ -103,6 +105,11 @@ float coreHidResolveScale(const char* env);
 
 // Rounds raw * scale into the int16 range LiSendMouseMoveEvent accepts.
 int16_t coreHidApplyScale(int32_t raw, float scale);
+
+// IOHID Desktop Y and GCMouse deltaY are positive upward. SDL yrel and
+// LiSendMouseMoveEvent are positive downward. Negate pointer Y once, before
+// scale. Do not apply this to the wheel.
+int32_t coreHidPointerDyForHost(int32_t dy);
 
 // One HID wheel notch is 120, matching the SDL high-res scroll path (WHEEL_DELTA).
 int16_t coreHidScrollToHighRes(int32_t notches, bool reverse);
