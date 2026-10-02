@@ -16,7 +16,9 @@
 //   [0..1] sequence, big-endian, first packet is 0
 //   [2]    channel count, always 1 (mono)
 //   [3]    flags, always 0
-//   [4..]  one Opus packet, 48 kHz mono, 20 ms (960 samples)
+//   [4..]  one Opus packet, 48 kHz mono, 20 ms (960 samples).
+//          DTX is off in this client so a quiet mic still produces packets.
+//          Vibepollo opens the Windows device on the first of those packets.
 //
 // sendMessageEnet() copies `sizeof(NVCTL_ENET_PACKET_HEADER_V2) + paylen`
 // into a 256-byte stack buffer and asserts that sum is strictly less than

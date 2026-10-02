@@ -38,7 +38,7 @@ Light and dark follow `SystemPalette`. Classic still forces the Material dark th
 
 When `uiVersion` is `v2` and **Twilight performance overlay** is on (`showTwilightHud`, default on), the decoders still build the usual overlay string, but they do not enable the yellow SDL overlay unless **Classic performance overlay** is on. The HUD parses FPS, bitrate, and `Average network latency` and drops FEC lines. PyroWave's string has no FEC fields; the parser does not add any. Turning Twilight's overlay off hides the chips and stops that sampling. The classic yellow overlay stays on its own switch.
 
-The HUD is a separate frameless window, not a tool panel. On macOS the stream loop places it on the SDL stream window's frame — fullscreen, windowed, and picture-in-picture — raises it to the floating window level, and lets it draw over fullscreen spaces. It keeps draining Qt events so the chips and End stay live. End asks once, then posts the same `SDL_QUIT` as Ctrl+Alt+Shift+Q.
+The HUD is a separate frameless window, not a tool panel. On macOS the stream loop places it on the SDL window's frame — fullscreen, windowed, and picture-in-picture — and re-applies the floating level plus `FullScreenAuxiliary` after every move. AppKit drops that collection behavior when the frame changes, and without it the chips stay on the desktop space behind the stream. A zero-size stream frame is ignored so the window is not parked off-screen. The overlay is ordered front when that behavior was missing, not on every move. It keeps draining Qt events so the chips and End stay live. End asks once, then posts the same `SDL_QUIT` as Ctrl+Alt+Shift+Q.
 
 ## Extending
 

@@ -464,7 +464,7 @@ Item {
                             visible: Qt.platform.os == "osx"
                             divider: false
                             title: qsTr("Stream microphone to the host")
-                            subtitle: qsTr("Sends this Mac's microphone on the encrypted control stream. Vibepollo with Vibelight can play it. Stock Sunshine does not.")
+                            subtitle: qsTr("Sends this Mac's microphone on the encrypted control stream. A Vibepollo build with Vibelight passthrough opens Steam Streaming Microphone after the first packet, and Steam has to be running. Stock Sunshine does not.")
                             SwitchV2 {
                                 theme: sheet.theme
                                 checked: sheet.micWanted

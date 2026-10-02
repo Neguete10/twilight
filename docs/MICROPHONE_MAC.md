@@ -36,18 +36,32 @@ Capture stays off unless all of these are true:
 1. macOS.
 2. Settings → Audio → "Stream microphone to the host" is checked, and macOS has granted microphone access. Classic and Twilight both show this switch, and both call `setMicrophoneEnabled`.
 3. The host is not GeForce Experience (`NvComputer::isNvidiaServerSoftware`).
-4. `LiIsControlStreamEncrypted()` is true. Voice is not sent on an unencrypted control stream. Current Sunshine, Apollo, and Vibepollo negotiate encryption.
+4. `LiIsControlStreamEncrypted()` is true. That flag follows the host version (7.1.431 or newer), which is when moonlight-common-c encrypts control packets. Voice is not sent on an unencrypted control stream.
 
-There is no SDP capability bit. A Sunshine build that does not know `0x3003` still receives the packets if the toggle is on.
+There is no SDP capability bit. A Sunshine build that does not know `0x3003` still receives the packets if the toggle is on. Receiving them is not the same as showing a Windows input device.
+
+## When Windows shows a microphone
+
+xenstalker02/Vibepollo does not create an input device at connect time. On session start it arms passthrough only when `mic_sink` is non-empty (the default on that fork is `Speakers (Steam Streaming Microphone)`) and the control stream negotiated `SS_ENC_CONTROL_V2`. The Steam Streaming Microphone endpoint, the default-capture switch, and the Opus decoder are created on the **first** valid `0x3003` packet. Until that packet arrives, Windows has nothing new to select.
+
+That first packet is ignored, and no device appears, when any of these is true:
+
+- The host is stock Sunshine, Apollo without this patch, or Nonary/Vibepollo. Issue 169 on Nonary/Vibepollo was closed. That tree does not ship the receiver. No client packet can make it grow "Microphone (Steam Streaming Microphone)".
+- `mic_sink` was cleared in the host config. The log line is `mic_sink not configured — passthrough disabled`.
+- Steam is not running, so the Steam audio endpoint is missing. The log line is `Steam Streaming Microphone unavailable — passthrough disabled`.
+- The client never sends a packet. See the capture notes below. A quiet mic used to hit Opus DTX and send nothing; DTX is now off.
+
+A working host log looks like `passthrough armed`, then `First mic packet received from client`, then `using Steam Streaming Microphone backend`. The recording meter for "Microphone (Steam Streaming Microphone)" moves after that. Point Discord or the game at that device, or at Default after Vibepollo switches the default input.
 
 ## Mac capture path
 
 `MicrophoneCapture` in `app/streaming/audio/microphone/mic_capture_mac.mm`:
 
-1. `AVAudioEngine`'s input node, default device, hardware format.
-2. Downmix to mono in the tap, then a linear resample to 48 kHz (`MicResampler`).
-3. A worker thread slices 960-sample frames, encodes Opus, and calls `LiSendRawControlStreamPacket`.
-4. The tap does not encode or send. The worker paces sends at 20 ms and drops queued audio beyond two frames.
+1. `Session::startMicrophone()` runs on the async connection thread. The `AVAudioEngine` graph is created and started on the main thread. Starting it on the connection thread is accepted by `startAndReturnError` and then delivers no buffers.
+2. The input node is connected to an `AVAudioSinkNode` before the tap is installed. A tap on an unconnected input does not pull the microphone. The sink does not open a playback device.
+3. The tap format is non-interleaved float32. Downmix to mono happens in the tap, then a linear resample to 48 kHz (`MicResampler`).
+4. A worker thread slices 960-sample frames, encodes Opus with DTX off, and calls `LiSendRawControlStreamPacket`. Until the tap delivers samples, the worker sends silence so the host can open its device. Mute replaces the frame with silence and still sends.
+5. The tap does not encode or send. The worker paces sends at 20 ms and drops queued audio beyond two frames.
 
 `Session::startConnectionAsync()` starts capture after `LiStartConnection()` succeeds. `DeferredSessionCleanupTask` stops it, and joins the worker, before `LiStopConnection()`.
 
@@ -93,7 +107,7 @@ The second run prints `already patched` and does not edit the files again.
 On a Mac, against a host that actually decodes `0x3003` (xenstalker02 Vibepollo, or another tree that copied the Vibelight receiver):
 
 1. Pair and open Settings → Audio. Check "Stream microphone to the host" and allow the system prompt.
-2. Start a stream. Speak. On the host, the recording meter for "Microphone (Steam Streaming Microphone)" should move. Discord or a game has to be set to that device, or to Default after Vibepollo switches the default input.
+2. Start a stream with Steam running on the Windows host. The Moonlight log should include `Microphone capture started` and `Sent first microphone packet`. The host log should include `First mic packet received from client`. Speak. The recording meter for "Microphone (Steam Streaming Microphone)" should move. Discord or a game has to be set to that device, or to Default after Vibepollo switches the default input.
 3. Press Ctrl+Alt+Shift+N. The meter should drop to silence. Press it again and it should return.
 4. Quit the stream. The next stream starts unmuted.
 
@@ -110,7 +124,7 @@ This environment is Linux, so AVAudioEngine, the permission prompt, and a live V
 ## Known gaps
 
 - No hardware capture run in CI. The Mac file is compiled only by a macOS qmake build.
-- Stock Sunshine and Nonary/Vibepollo do not play the audio. The bytes match Vibelight's client, not an upstream Sunshine spec.
+- Stock Sunshine and Nonary/Vibepollo do not create a Windows input device. The bytes match Vibelight's client, not an upstream Sunshine spec. xenstalker02/Vibepollo creates "Microphone (Steam Streaming Microphone)" only after the first packet, and only while Steam is running.
 - No host capability flag. The client cannot tell a decoding Vibepollo from stock Sunshine before it sends.
 - `0x5510` and the separate UDP microphone port are not implemented.
 - The linear resampler is for voice. It is not a band-limited converter.

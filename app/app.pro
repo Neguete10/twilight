@@ -287,6 +287,7 @@ HEADERS += \
     gui/appmodel.h \
     gui/streamhudparse.h \
     gui/streamhudstats.h \
+    gui/streamhudplace.h \
     gui/sfsymbolprovider.h \
     streaming/video/decoder.h \
     streaming/streamutils.h \
