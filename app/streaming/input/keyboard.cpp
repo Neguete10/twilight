@@ -52,9 +52,12 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
     case KeyComboToggleStatsOverlay:
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected stats toggle combo");
-        // The yellow stats overlay is not drawn. Twilight chips stay on
-        // their own settings switch. Swallow the combo so the keys are
-        // not passed to the host.
+
+        // Toggle the stats overlay
+        Session::get()->getOverlayManager().setOverlayState(Overlay::OverlayDebug,
+                                                            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug));
+        Session::get()->getOverlayManager().setOverlayState(Overlay::OverlayDebugAudio,
+                                                            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebugAudio));
         break;
 
     case KeyComboToggleMouseMode:

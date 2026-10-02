@@ -732,6 +732,17 @@ Item {
                         SettingRowV2 {
                             width: parent.width
                             theme: sheet.theme
+                            title: qsTr("Classic performance overlay")
+                            subtitle: qsTr("The yellow Classic stats, including FEC on H.264, HEVC, and AV1. Separate from Twilight's chips, and it does not add those FEC lines to PyroWave.")
+                            SwitchV2 {
+                                theme: sheet.theme
+                                checked: StreamingPreferences.showPerformanceOverlay
+                                onToggled: StreamingPreferences.showPerformanceOverlay = next
+                            }
+                        }
+                        SettingRowV2 {
+                            width: parent.width
+                            theme: sheet.theme
                             title: qsTr("Twilight performance overlay")
                             subtitle: qsTr("FPS, bitrate, and latency chips while a Twilight stream is open. Turn this off to hide them.")
                             SwitchV2 {
@@ -763,21 +774,6 @@ Item {
                             text: qsTr("The window mode applies the next time the app opens. Packet size and fully custom modes stay in Classic.")
                         }
 
-                        TwTextV2 {
-                            theme: sheet.theme
-                            text: qsTr("In-stream HUD")
-                            color: sheet.theme.secondary
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                        }
-                        HudChipsV2 { preview: true }
-
-                        TwTextV2 {
-                            theme: sheet.theme
-                            color: sheet.theme.tertiary
-                            font.pixelSize: 12
-                            text: qsTr("Version %1").arg(SystemProperties.versionString)
-                        }
                     }
                 }
             }

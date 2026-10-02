@@ -2569,10 +2569,9 @@ void Session::execInternal()
     // Start rich presence to indicate we're in game
     RichPresenceManager presence(*m_Preferences, m_App.name);
 
-    // Yellow Classic stats stay off. Twilight chips already show FPS,
-    // bitrate, and latency, and the yellow text would draw on top of them.
-    m_OverlayManager.setOverlayState(Overlay::OverlayDebug, false);
-    m_OverlayManager.setOverlayState(Overlay::OverlayDebugAudio, false);
+    // Toggle the stats overlay if requested by the user
+    m_OverlayManager.setOverlayState(Overlay::OverlayDebug, m_Preferences->showPerformanceOverlay);
+    m_OverlayManager.setOverlayState(Overlay::OverlayDebugAudio, m_Preferences->showPerformanceOverlay);
 
 #ifdef Q_OS_DARWIN
     MacPipInstallMenu(macPipMenuToggle);
