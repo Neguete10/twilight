@@ -14,7 +14,6 @@
   #include <pyrowave.h>
 
   #include "streaming/session.h"
-  #include "gui/streamhudstats.h"
 
   #ifndef __APPLE__
     #include <drm_fourcc.h>
@@ -1074,25 +1073,14 @@ int PyroWaveVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
         m_ActiveWndVideoStats.totalRenderTimeUs = m_TotalRenderTimeUs.exchange(0);
 
         const bool overlayOn = Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug);
-        const bool hudOn = StreamingPreferences::hudWantsSamples();
-        if (overlayOn || hudOn) {
+        if (overlayOn) {
             VIDEO_STATS lastTwoWndStats = {};
             addVideoStats(m_LastWndVideoStats, lastTwoWndStats);
             addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
-            char hudScratch[1024];
-            char* text = overlayOn
-                    ? Session::get()->getOverlayManager().getOverlayText(Overlay::OverlayDebug)
-                    : hudScratch;
-            const int textLen = overlayOn
-                    ? Session::get()->getOverlayManager().getOverlayMaxTextLength()
-                    : static_cast<int>(sizeof(hudScratch));
+            char* text = Session::get()->getOverlayManager().getOverlayText(Overlay::OverlayDebug);
+            const int textLen = Session::get()->getOverlayManager().getOverlayMaxTextLength();
             stringifyVideoStats(lastTwoWndStats, text, textLen);
-            if (overlayOn) {
-                Session::get()->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
-            }
-            if (hudOn) {
-                StreamHudStats::submitOverlayText(text);
-            }
+            Session::get()->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
         }
 
         addVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);

@@ -28,8 +28,6 @@
         <file>gui/ui/v2/ChoiceV2.qml</file>
         <file>gui/ui/v2/SettingRowV2.qml</file>
         <file>gui/ui/v2/DialogCardV2.qml</file>
-        <file>gui/ui/v2/HudChipsV2.qml</file>
-        <file>gui/ui/v2/StreamHudV2.qml</file>
         <file>gui/ui/v2/StreamSegueV2.qml</file>
         <file>gui/ui/v2/SettingsSheetV2.qml</file>
         <file>gui/ui/v2/HostSheetV2.qml</file>

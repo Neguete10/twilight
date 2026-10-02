@@ -12,10 +12,10 @@ Canonical fork (corresponding-source remote once that GitHub repo is the one you
 | --- | --- |
 | `app/deploy/macos/Twilight-MAS.entitlements` | App Sandbox, network client/server, Spatial Audio Profile, Head Pose. Used only by the opt-in MAS config. |
 | `app/app.pro` (`CONFIG+=twilight-mas`) | Rewrites the bundle id and display name, and points the Xcode generator at those entitlements plus Hardened Runtime. |
-| `app/Info.plist` | `BUNDLE_ID` and `DISPLAY_NAME` tokens. qmake substitutes them. `CFBundleName` and `CFBundleDisplayName` are Twilight, which is the Dock hover. `CFBundleExecutable` stays Moonlight. |
+| `app/Info.plist` | `BUNDLE_ID` and `DISPLAY_NAME` tokens. qmake substitutes them. `CFBundleName` and `CFBundleDisplayName` are Twilight. `CFBundleExecutable` stays Moonlight. |
 | `scripts/generate-dmg.sh` | `TWILIGHT_MAS=1` passes `CONFIG+=twilight-mas` and `codesign --options runtime --entitlements ...`. Unset, the script is the existing Developer ID / DMG path. |
 
-The executable name and `TARGET` stay `Moonlight`, so `scripts/generate-dmg.sh` still looks for `app/Moonlight.app`. The Dock hover uses `CFBundleName` (`Twilight`) together with `LSHasLocalizedDisplayName` and `en.lproj/InfoPlist.strings`. The bundle filename can still read Moonlight until Launch Services reloads it; relaunch after a rebuild. `QCoreApplication::applicationName` stays `Moonlight` so QSettings do not move. Shipping desktop builds keep the bundle id `com.moonlight-stream.Moonlight`. `CONFIG+=twilight-mas` is what changes that id.
+`TARGET` and `CFBundleExecutable` stay `Moonlight`, so the binary is `Twilight.app/Contents/MacOS/Moonlight`. On makefile builds, `QMAKE_APPLICATION_BUNDLE_NAME` is `Twilight`, which is the `.app` folder. The Xcode generator forces `PRODUCT_NAME` to `TARGET`, so an Xcode project stays `Moonlight.app`. A built app whose plist names, `InfoPlist.strings`, and icon were already Twilight still showed Moonlight on Dock hover; that label was the `Moonlight.app` folder. `scripts/generate-dmg.sh` looks for `app/Twilight.app`. `QCoreApplication::applicationName` stays `Moonlight` so QSettings do not move. `setApplicationDisplayName("Twilight")` is the Apple menu, not the Dock tile. Shipping desktop builds keep the bundle id `com.moonlight-stream.Moonlight`. `CONFIG+=twilight-mas` is what changes that id. Launch the new `Twilight.app`. A leftover `Moonlight.app` from an older build still hovers as Moonlight.
 
 ## Enable the MAS config
 
@@ -37,7 +37,7 @@ qmake prints the bundle id, the entitlements path, and the codesign shape:
 ```text
 codesign --force --options runtime --timestamp \
   --entitlements app/deploy/macos/Twilight-MAS.entitlements \
-  --sign "IDENTITY" Moonlight.app
+  --sign "IDENTITY" Twilight.app
 ```
 
 `--options runtime` is Hardened Runtime. The default DMG invocation already uses it and does **not** pass an entitlements file, so App Sandbox stays off for Developer ID builds.
@@ -141,7 +141,7 @@ Creating this record does not submit the app.
 A store package, when you eventually build one locally, is a signed installer, not the DMG:
 
 ```sh
-productbuild --component Moonlight.app /Applications \
+productbuild --component Twilight.app /Applications \
   --sign "3rd Party Mac Developer Installer: Your Name (TEAMID)" \
   Twilight.pkg
 ```
@@ -212,7 +212,7 @@ These are open. None of them are fixed by this scaffolding.
 - **Qt deployment.** `scripts/generate-dmg.sh` already runs `macdeployqt -appstore-compliant`. MAS distribution is still a `productbuild` `.pkg` signed with the installer certificate, not a DMG. Hardened Runtime plus sandbox can trip Qt's QML JIT; add `com.apple.security.cs.allow-jit` or `com.apple.security.cs.allow-unsigned-executable-memory` only if a sandboxed run proves you need it. `com.apple.security.cs.disable-library-validation` is a poor fit for the store.
 - **Bundle id.** Upstream `com.moonlight-stream.Moonlight` cannot be registered by this team. The MAS id is `com.henrique.twilight` and only applies with `CONFIG+=twilight-mas`.
 - **Game Mode.** Already present in `app/Info.plist`: `GCSupportsGameMode` and `LSSupportsGameMode` (both true), plus `GCSupportedGameControllers` / `ExtendedGamepad`. No change in this PR.
-- **Bundle file name.** The `.app` and `CFBundleExecutable` remain `Moonlight` so the DMG script stays valid. The user-visible display name becomes Twilight only in the MAS config.
+- **Bundle file name.** The folder is `Twilight.app` so Dock hover matches the product name. `CFBundleExecutable` and the binary stay `Moonlight`. The DMG script deploys `Twilight.app`.
 - **GPL UI and source offer.** Missing About/Licenses page, described above.
 - **Restricted entitlements without a profile.** Signing `TWILIGHT_MAS=1` with a Developer ID certificate will fail or yield an unusable signature for the two `com.apple.developer.*` keys. Use the Mac App Store profile after the capabilities are approved.
 - **Spatial mixer not on master.** Head tracking cannot be tested end to end until `andyg.coreaudio-spatial-mixer` is merged.

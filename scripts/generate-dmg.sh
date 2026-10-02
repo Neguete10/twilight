@@ -56,7 +56,7 @@ popd
 
 echo Saving dSYM file
 pushd $BUILD_FOLDER
-dsymutil app/Moonlight.app/Contents/MacOS/Moonlight -o Moonlight-$VERSION.dsym || fail "dSYM creation failed!"
+dsymutil app/Twilight.app/Contents/MacOS/Moonlight -o Moonlight-$VERSION.dsym || fail "dSYM creation failed!"
 cp -R Moonlight-$VERSION.dsym $INSTALLER_FOLDER || fail "dSYM copy failed!"
 popd
 
@@ -64,10 +64,10 @@ echo Creating app bundle
 EXTRA_ARGS=
 if [ "$BUILD_CONFIG" == "Debug" ]; then EXTRA_ARGS="$EXTRA_ARGS -use-debug-libs"; fi
 echo Extra deployment arguments: $EXTRA_ARGS
-macdeployqt $BUILD_FOLDER/app/Moonlight.app $EXTRA_ARGS -qmldir=$SOURCE_ROOT/app/gui -appstore-compliant || fail "macdeployqt failed!"
+macdeployqt $BUILD_FOLDER/app/Twilight.app $EXTRA_ARGS -qmldir=$SOURCE_ROOT/app/gui -appstore-compliant || fail "macdeployqt failed!"
 
 echo Removing dSYM files from app bundle
-find $BUILD_FOLDER/app/Moonlight.app/ -name '*.dSYM' | xargs rm -rf
+find $BUILD_FOLDER/app/Twilight.app/ -name '*.dSYM' | xargs rm -rf
 
 if [ "$SIGNING_IDENTITY" != "" ]; then
   echo Signing app bundle
@@ -76,23 +76,23 @@ if [ "$SIGNING_IDENTITY" != "" ]; then
     codesign --force --deep --options runtime --timestamp \
       --entitlements "$SOURCE_ROOT/app/deploy/macos/Twilight-MAS.entitlements" \
       --sign "$SIGNING_IDENTITY" \
-      $BUILD_FOLDER/app/Moonlight.app || fail "Signing failed!"
+      $BUILD_FOLDER/app/Twilight.app || fail "Signing failed!"
   else
     # Preserve the CoreAudio/spatial-audio signing entitlements for desktop builds.
     codesign --force --deep --options runtime --timestamp \
       --entitlements $SOURCE_ROOT/app/deploy/macos/spatial-audio.entitlements \
       --sign "$SIGNING_IDENTITY" \
-      $BUILD_FOLDER/app/Moonlight.app || fail "Signing failed!"
+      $BUILD_FOLDER/app/Twilight.app || fail "Signing failed!"
   fi
   echo "App signature:"
-  codesign -d --entitlements - -vvv $BUILD_FOLDER/app/Moonlight.app
+  codesign -d --entitlements - -vvv $BUILD_FOLDER/app/Twilight.app
 fi
 
 echo Creating DMG
 if [ "$SIGNING_IDENTITY" != "" ]; then
-  create-dmg $BUILD_FOLDER/app/Moonlight.app $INSTALLER_FOLDER --identity="$SIGNING_IDENTITY" || fail "create-dmg failed!"
+  create-dmg $BUILD_FOLDER/app/Twilight.app $INSTALLER_FOLDER --identity="$SIGNING_IDENTITY" || fail "create-dmg failed!"
 else
-  create-dmg $BUILD_FOLDER/app/Moonlight.app $INSTALLER_FOLDER
+  create-dmg $BUILD_FOLDER/app/Twilight.app $INSTALLER_FOLDER
   case $? in
     0) ;;
     2) ;;
@@ -105,11 +105,11 @@ fi
 # Notarization is not App Store review, and this script never submits for review.
 if [ "$NOTARY_KEYCHAIN_PROFILE" != "" ] && [ "${TWILIGHT_MAS:-}" != "1" ]; then
   echo Uploading to App Notary service
-  xcrun notarytool submit --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait $INSTALLER_FOLDER/Moonlight\ $VERSION.dmg || fail "Notary submission failed"
+  xcrun notarytool submit --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait $INSTALLER_FOLDER/Twilight\ $VERSION.dmg || fail "Notary submission failed"
 
   echo Stapling notary ticket to DMG
-  xcrun stapler staple -v $INSTALLER_FOLDER/Moonlight\ $VERSION.dmg || fail "Notary ticket stapling failed!"
+  xcrun stapler staple -v $INSTALLER_FOLDER/Twilight\ $VERSION.dmg || fail "Notary ticket stapling failed!"
 fi
 
-mv $INSTALLER_FOLDER/Moonlight\ $VERSION.dmg $INSTALLER_FOLDER/Moonlight-$VERSION.dmg
+mv $INSTALLER_FOLDER/Twilight\ $VERSION.dmg $INSTALLER_FOLDER/Twilight-$VERSION.dmg
 echo Build successful

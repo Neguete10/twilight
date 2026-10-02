@@ -6,7 +6,6 @@
 #include <Limelight.h>
 #include <SDL.h>
 #include "utils.h"
-#include "gui/streamhudstats.h"
 
 #ifdef HAVE_FFMPEG
 #include "video/ffmpeg.h"
@@ -1834,12 +1833,6 @@ void Session::reapplyPictureInPictureChrome(bool orderFront)
 #if SDL_VERSION_ATLEAST(2, 0, 5)
     SDL_SetWindowAlwaysOnTop(m_Window, SDL_TRUE);
 #endif
-    if (orderFront) {
-        StreamHudStats::orderFront();
-    }
-    else {
-        StreamHudStats::followStream();
-    }
     m_PipReapplying = false;
 }
 
@@ -1917,8 +1910,6 @@ void Session::enterPictureInPicture()
         m_InputHandler->setCaptureActive(false);
     }
 
-    StreamHudStats::orderFront();
-
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Entered picture-in-picture at %d,%d %dx%d",
                 frame.x, frame.y, frame.w, frame.h);
@@ -1961,8 +1952,6 @@ void Session::exitPictureInPicture()
         m_InputHandler->updateKeyboardGrabState();
         m_InputHandler->updatePointerRegionLock();
     }
-
-    StreamHudStats::orderFront();
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Exited picture-in-picture");
@@ -2511,18 +2500,6 @@ void Session::execInternal()
         SDL_SetWindowFullscreen(m_Window, m_FullScreenFlag);
     }
 
-#ifdef Q_OS_DARWIN
-    // The HUD was shown while Qt still owned the main thread. Anchor it to
-    // this window (fullscreen or the desktop stream window), then deliver
-    // the expose so the chips are painted before SDL takes over.
-    StreamHudStats::noteStreamWindow(m_Window);
-    StreamHudStats::orderFront();
-    if (StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming()) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
-        StreamHudStats::orderFront();
-    }
-#endif
-
     bool needsFirstEnterCapture = false;
     bool needsPostDecoderCreationCapture = false;
 
@@ -2579,26 +2556,8 @@ void Session::execInternal()
 
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
-    // The Twilight HUD is the exception on macOS: while it is up, the idle
-    // wait is shorter and queued Qt events are drained there. Doing that on
-    // every SDL event re-enters Cocoa from inside the stream loop.
     SDL_Event event;
-#ifdef Q_OS_DARWIN
-    int twilightHudPump = 0;
-    int twilightHudRaise = 0;
-#endif
     for (;;) {
-#ifdef Q_OS_DARWIN
-        // Gamepad and mouse events can arrive faster than the idle timeout,
-        // which would otherwise starve the HUD's queued updates. Move the
-        // chips with the stream window here; raising on every batch flickers.
-        if (StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming() &&
-                ++twilightHudPump >= 20) {
-            twilightHudPump = 0;
-            QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
-            StreamHudStats::followStream();
-        }
-#endif
 #if SDL_VERSION_ATLEAST(2, 0, 18) && !defined(STEAM_LINK)
         // SDL 2.0.18 has a proper wait event implementation that uses platform
         // support to block on events rather than polling on Windows, macOS, X11,
@@ -2609,27 +2568,8 @@ void Session::execInternal()
         // NB: This behavior was introduced in SDL 2.0.16, but had a few critical
         // issues that could cause indefinite timeouts, delayed joystick detection,
         // and other problems.
-        int waitMs = 1000;
-#ifdef Q_OS_DARWIN
-        const bool twilightHud = StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming();
-        if (twilightHud) {
-            waitMs = 100;
-        }
-#endif
-        if (!SDL_WaitEventTimeout(&event, waitMs)) {
+        if (!SDL_WaitEventTimeout(&event, 1000)) {
             presence.runCallbacks();
-#ifdef Q_OS_DARWIN
-            if (twilightHud) {
-                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
-                StreamHudStats::followStream();
-                // Fullscreen spaces can cover the chips. Raise occasionally,
-                // not on every move, so the window does not flicker.
-                if (++twilightHudRaise >= 10) {
-                    twilightHudRaise = 0;
-                    StreamHudStats::orderFront();
-                }
-            }
-#endif
             continue;
         }
 #else
@@ -2703,9 +2643,6 @@ void Session::execInternal()
             // user is typing into beyond the corner the player already occupies.
             if (m_PipActive) {
                 reapplyPictureInPictureChrome(event.window.event == SDL_WINDOWEVENT_FOCUS_LOST);
-            }
-            if (StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming()) {
-                StreamHudStats::followStream();
             }
 #endif
             // Early handling of some events
@@ -3031,7 +2968,6 @@ DispatchDeferredCleanup:
 
     // This must be called after the decoder is deleted, because
     // the renderer may want to interact with the window
-    StreamHudStats::noteStreamWindow(nullptr);
     SDL_DestroyWindow(m_Window);
 
     if (iconSurface != nullptr) {

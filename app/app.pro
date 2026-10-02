@@ -18,8 +18,8 @@ CONFIG += c++11
 unix:!macx {
     TARGET = moonlight
 } else {
-    # Executable and Moonlight.app filename. scripts/generate-dmg.sh looks
-    # for that bundle. The Dock hover label is CFBundleName (Twilight).
+    # Executable name stays Moonlight (CFBundleExecutable and QSettings).
+    # The .app folder is Twilight.app; see QMAKE_APPLICATION_BUNDLE_NAME.
     TARGET = Moonlight
 }
 
@@ -241,8 +241,6 @@ SOURCES += \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
     gui/appmodel.cpp \
-    gui/streamhudparse.cpp \
-    gui/streamhudstats.cpp \
     gui/sfsymbolprovider.cpp \
     streaming/streamutils.cpp \
     backend/autoupdatechecker.cpp \
@@ -286,9 +284,6 @@ HEADERS += \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
     gui/appmodel.h \
-    gui/streamhudparse.h \
-    gui/streamhudstats.h \
-    gui/streamhudplace.h \
     gui/sfsymbolprovider.h \
     streaming/video/decoder.h \
     streaming/streamutils.h \
@@ -512,7 +507,6 @@ macx {
 
     SOURCES += \
         gui/sfsymbol_mac.mm \
-        gui/streamhud_mac.mm \
         settings/network_identity_mac.mm \
         streaming/audio/microphone/mic_capture_mac.mm \
         streaming/audio/microphone/mic_permission_mac.mm \
@@ -694,11 +688,17 @@ win32 {
 }
 macx {
     # Create Info.plist in object dir with the correct version string.
-    # CFBundleName and CFBundleDisplayName are Twilight, which is the Dock
-    # hover and the Apple menu. CFBundleExecutable stays Moonlight, and so
-    # does the Moonlight.app filename. Bundle id stays
-    # com.moonlight-stream.Moonlight unless twilight-mas swaps it.
-    # See docs/TWILIGHT_MAS.md.
+    # CFBundleName, CFBundleDisplayName, and InfoPlist.strings are Twilight.
+    # On a live 387b7f64 build those were already Twilight and Dock hover
+    # still said Moonlight, which is the .app folder name. The folder is
+    # Twilight.app. CFBundleExecutable and the binary stay Moonlight.
+    # Bundle id stays com.moonlight-stream.Moonlight unless twilight-mas
+    # swaps it. See docs/TWILIGHT_MAS.md.
+    # Makefile builds name the folder from this variable and the binary
+    # from TARGET. The Xcode generator forces PRODUCT_NAME to TARGET, so
+    # leave that path as Moonlight.app rather than pointing the product
+    # reference at a different folder than Xcode writes.
+    !macx-xcode: QMAKE_APPLICATION_BUNDLE_NAME = Twilight
     # Hardened Runtime signing is: codesign --options runtime
     system(cp $$PWD/Info.plist $$OUT_PWD/Info.plist)
     system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$OUT_PWD/Info.plist)
@@ -729,8 +729,8 @@ macx {
     APP_BUNDLE_RESOURCES.files = twilight.icns
     APP_BUNDLE_RESOURCES.path = Contents/Resources
 
-    # LSHasLocalizedDisplayName makes the Dock use this name instead of
-    # the Moonlight.app filename.
+    # Localized names. Dock hover still follows the Twilight.app folder
+    # when Launch Services does not substitute these.
     APP_BUNDLE_DISPLAY_NAME.files = deploy/macos/en.lproj/InfoPlist.strings
     APP_BUNDLE_DISPLAY_NAME.path = Contents/Resources/en.lproj
 

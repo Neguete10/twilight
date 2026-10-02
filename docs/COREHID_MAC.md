@@ -55,7 +55,7 @@ On a Mac with a USB or Bluetooth mouse, Xcode that can build this tree, and a Su
 qmake moonlight-qt.pro
 make -j$(sysctl -n hw.logicalcpu)
 # Settings checkbox, or:
-TWILIGHT_COREHID=1 open app/Moonlight.app
+TWILIGHT_COREHID=1 open app/Twilight.app
 ```
 
 Or pass `--corehid-mouse` on a `stream` command. In a game (not remote-desktop mouse mode):

@@ -8,7 +8,6 @@
 #include "pyrowave_stats.h"
 #include "path.h"
 #include "streaming/session.h"
-#include "gui/streamhudstats.h"
 #include "streaming/streamutils.h"
 #include "streaming/bandwidth.h"
 
@@ -1040,25 +1039,14 @@ int PyroWaveMetalVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
             Session* session = Session::get();
             const bool overlayOn = session != nullptr &&
                     session->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug);
-            const bool hudOn = StreamingPreferences::hudWantsSamples();
-            if (session != nullptr && (overlayOn || hudOn)) {
+            if (overlayOn) {
                 VIDEO_STATS combined{};
                 addVideoStats(impl->lastStats, combined);
                 addVideoStats(impl->activeStats, combined);
-                char hudScratch[1024];
-                char* text = overlayOn
-                        ? session->getOverlayManager().getOverlayText(Overlay::OverlayDebug)
-                        : hudScratch;
-                const int textLen = overlayOn
-                        ? session->getOverlayManager().getOverlayMaxTextLength()
-                        : static_cast<int>(sizeof(hudScratch));
+                char* text = session->getOverlayManager().getOverlayText(Overlay::OverlayDebug);
+                const int textLen = session->getOverlayManager().getOverlayMaxTextLength();
                 stringifyVideoStats(impl, combined, text, textLen);
-                if (overlayOn) {
-                    session->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
-                }
-                if (hudOn) {
-                    StreamHudStats::submitOverlayText(text);
-                }
+                session->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
             }
             addVideoStats(impl->activeStats, impl->globalStats);
             if (++impl->statsWindows >= 5) {

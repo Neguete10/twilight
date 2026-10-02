@@ -745,22 +745,11 @@ Item {
                             width: parent.width
                             theme: sheet.theme
                             title: qsTr("Classic performance overlay")
-                            subtitle: qsTr("The yellow Classic stats, including FEC on H.264, HEVC, and AV1. Separate from Twilight's chips, and it does not add those FEC lines to PyroWave.")
+                            subtitle: qsTr("Yellow stats drawn on the video. H.264, HEVC, and AV1 include FEC. PyroWave keeps its own stats line.")
                             SwitchV2 {
                                 theme: sheet.theme
                                 checked: StreamingPreferences.showPerformanceOverlay
                                 onToggled: StreamingPreferences.showPerformanceOverlay = next
-                            }
-                        }
-                        SettingRowV2 {
-                            width: parent.width
-                            theme: sheet.theme
-                            title: qsTr("Twilight performance overlay")
-                            subtitle: qsTr("FPS, bitrate, and latency chips while a Twilight stream is open. Turn this off to hide them.")
-                            SwitchV2 {
-                                theme: sheet.theme
-                                checked: StreamingPreferences.showTwilightHud
-                                onToggled: StreamingPreferences.showTwilightHud = next
                             }
                         }
 
@@ -831,23 +820,6 @@ Item {
                                     }
                                 }
                             }
-                        }
-
-                        TwTextV2 {
-                            theme: sheet.theme
-                            text: qsTr("In-stream HUD")
-                            color: sheet.theme.secondary
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                        }
-                        HudChipsV2 { preview: true }
-                        TwTextV2 {
-                            width: parent.width
-                            theme: sheet.theme
-                            color: sheet.theme.tertiary
-                            font.pixelSize: 12
-                            wrapMode: Text.WordWrap
-                            text: qsTr("These chips float over a Twilight stream. Numbers come from the same stats as the classic overlay. Forward error correction is not shown. The preview above uses sample numbers.")
                         }
 
                         TwTextV2 {

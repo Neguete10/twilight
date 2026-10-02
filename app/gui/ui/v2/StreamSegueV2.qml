@@ -2,7 +2,6 @@ import QtQuick 2.9
 import QtQuick.Window 2.2
 
 import SdlGamepadKeyNavigation 1.0
-import StreamHudStats 1.0
 
 // V2 stream launch. Mirrors StreamSegue.qml signal handling without touching
 // the classic StackView, so Classic stays intact.
@@ -32,7 +31,6 @@ Item {
         card.visible = false
         if (Window.window)
             Window.window.streamActive = true
-        StreamHudStats.noteSessionStarted()
         if (Window.window)
             Window.window.visible = false
     }
@@ -59,7 +57,6 @@ Item {
         }
 
         SdlGamepadKeyNavigation.enable()
-        StreamHudStats.noteSessionEnded()
         if (Window.window) {
             Window.window.streamActive = false
             Window.window.visible = true

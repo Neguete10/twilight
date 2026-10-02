@@ -2,7 +2,6 @@
 #include "streaming/audio/microphone/mic_permission.h"
 #include "utils.h"
 
-#include <QAtomicInt>
 #include <QSettings>
 #include <QTranslator>
 #include <QCoreApplication>
@@ -48,7 +47,6 @@
 #define SER_PACKETSIZE "packetsize"
 #define SER_DETECTNETBLOCKING "detectnetblocking"
 #define SER_SHOWPERFOVERLAY "showperfoverlay"
-#define SER_TWILIGHTHUD "showTwilightHud"
 #define SER_SWAPMOUSEBUTTONS "swapmousebuttons"
 #define SER_MUTEONFOCUSLOSS "muteonfocusloss"
 #define SER_BACKGROUNDGAMEPAD "backgroundgamepad"
@@ -62,14 +60,11 @@
 
 #define CURRENT_DEFAULT_VER 2
 
-static QAtomicInt s_HudWantsSamples(0);
-
 static StreamingPreferences* s_GlobalPrefs;
 static QReadWriteLock s_GlobalPrefsLock;
 
 StreamingPreferences::StreamingPreferences(QQmlEngine *qmlEngine)
-    : m_ShowTwilightHud(true),
-      m_QmlEngine(qmlEngine)
+    : m_QmlEngine(qmlEngine)
 {
     reload();
 }
@@ -195,9 +190,6 @@ void StreamingPreferences::reload()
         m_UiVersion = (version == QLatin1String("v1")) ? QStringLiteral("v1") : QStringLiteral("v2");
     }
     m_LastSelectedHostUuid = settings.value(SER_LASTHOSTUUID).toString();
-    m_ShowTwilightHud = settings.value(SER_TWILIGHTHUD, true).toBool();
-    publishHudSamplingFlag();
-
 
     // Perform default settings updates as required based on last default version
     if (defaultVer < 1) {
@@ -385,33 +377,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_CAPTURESYSKEYS, captureSysKeysMode);
     settings.setValue(SER_KEEPAWAKE, keepAwake);
     settings.setValue(SER_UIVERSION, m_UiVersion);
-    settings.setValue(SER_TWILIGHTHUD, m_ShowTwilightHud);
     settings.setValue(SER_LASTHOSTUUID, m_LastSelectedHostUuid);
-}
-
-bool StreamingPreferences::hudWantsSamples()
-{
-    return s_HudWantsSamples.loadAcquire() != 0;
-}
-
-void StreamingPreferences::publishHudSamplingFlag()
-{
-    const bool sample = m_UiVersion == QLatin1String("v2") && m_ShowTwilightHud;
-    s_HudWantsSamples.storeRelease(sample ? 1 : 0);
-}
-
-void StreamingPreferences::setShowTwilightHud(bool show)
-{
-    if (m_ShowTwilightHud == show) {
-        return;
-    }
-
-    m_ShowTwilightHud = show;
-    publishHudSamplingFlag();
-
-    QSettings settings;
-    settings.setValue(SER_TWILIGHTHUD, m_ShowTwilightHud);
-    emit showTwilightHudChanged();
 }
 
 void StreamingPreferences::setLastSelectedHostUuid(const QString& uuid)
@@ -437,7 +403,6 @@ void StreamingPreferences::setUiVersion(const QString& version)
     }
 
     m_UiVersion = normalized;
-    publishHudSamplingFlag();
 
     QSettings settings;
     settings.setValue(SER_UIVERSION, m_UiVersion);
