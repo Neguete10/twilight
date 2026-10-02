@@ -1,3 +1,7 @@
+> **Twilight** is Henrique’s Mac App Store–oriented client project based on this repository.
+>
+> This repository is a fork of [Moonlight Qt](https://github.com/moonlight-stream/moonlight-qt) (`moonlight-stream/moonlight-qt`), including [Andy Grundman](https://github.com/andygrundman)’s CoreAudio spatial-audio work (`andygrundman/moonlight-qt`, PR #1399 lineage). License: GPL-3.0 — see `LICENSE`. Do not remove Moonlight or Grundman attribution.
+
 # Moonlight PC
 
 [Moonlight PC](https://moonlight-stream.org) is an open source PC client for NVIDIA GameStream and [Sunshine](https://github.com/LizardByte/Sunshine).
