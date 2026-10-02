@@ -6,6 +6,7 @@
 #include <Limelight.h>
 #include <SDL.h>
 #include "utils.h"
+#include "gui/streamhudstats.h"
 
 #ifdef HAVE_FFMPEG
 #include "video/ffmpeg.h"
@@ -2491,6 +2492,17 @@ void Session::execInternal()
         SDL_SetWindowFullscreen(m_Window, m_FullScreenFlag);
     }
 
+#ifdef Q_OS_DARWIN
+    // The HUD was shown while Qt still owned the main thread. Put it above
+    // this window now that fullscreen (or the desktop stream window) exists,
+    // then deliver the expose so the chips are painted before SDL takes over.
+    StreamHudStats::orderFront();
+    if (StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming()) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        StreamHudStats::orderFront();
+    }
+#endif
+
     bool needsFirstEnterCapture = false;
     bool needsPostDecoderCreationCapture = false;
 
@@ -2547,8 +2559,24 @@ void Session::execInternal()
 
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
+    // The Twilight HUD is the exception on macOS: while it is up, the idle
+    // wait is shorter and queued Qt events are drained there. Doing that on
+    // every SDL event re-enters Cocoa from inside the stream loop.
     SDL_Event event;
+#ifdef Q_OS_DARWIN
+    int twilightHudPump = 0;
+#endif
     for (;;) {
+#ifdef Q_OS_DARWIN
+        // Gamepad and mouse events can arrive faster than the idle timeout,
+        // which would otherwise starve the HUD's queued updates.
+        if (StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming() &&
+                ++twilightHudPump >= 20) {
+            twilightHudPump = 0;
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+            StreamHudStats::orderFront();
+        }
+#endif
 #if SDL_VERSION_ATLEAST(2, 0, 18) && !defined(STEAM_LINK)
         // SDL 2.0.18 has a proper wait event implementation that uses platform
         // support to block on events rather than polling on Windows, macOS, X11,
@@ -2559,8 +2587,21 @@ void Session::execInternal()
         // NB: This behavior was introduced in SDL 2.0.16, but had a few critical
         // issues that could cause indefinite timeouts, delayed joystick detection,
         // and other problems.
-        if (!SDL_WaitEventTimeout(&event, 1000)) {
+        int waitMs = 1000;
+#ifdef Q_OS_DARWIN
+        const bool twilightHud = StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming();
+        if (twilightHud) {
+            waitMs = 100;
+        }
+#endif
+        if (!SDL_WaitEventTimeout(&event, waitMs)) {
             presence.runCallbacks();
+#ifdef Q_OS_DARWIN
+            if (twilightHud) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+                StreamHudStats::orderFront();
+            }
+#endif
             continue;
         }
 #else

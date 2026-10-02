@@ -1,10 +1,28 @@
 #include "streamhudstats.h"
 
 #include "streamhudparse.h"
+#include "settings/streamingpreferences.h"
 
 #include <SDL.h>
 
 #include <QMetaObject>
+#include <QPointer>
+#include <QWindow>
+
+void twilightHudOrderFront(QWindow* window);
+
+static QPointer<QWindow> s_HudWindow;
+
+#ifndef Q_OS_DARWIN
+void twilightHudOrderFront(QWindow* window)
+{
+    if (window == nullptr) {
+        return;
+    }
+    window->show();
+    window->raise();
+}
+#endif
 
 static StreamHudStats* s_Instance = nullptr;
 
@@ -115,6 +133,24 @@ void StreamHudStats::noteSessionEnded()
     m_CodecText.clear();
     emit statsChanged();
     emit streamingChanged();
+}
+
+void StreamHudStats::attachWindow(QObject* window)
+{
+    s_HudWindow = qobject_cast<QWindow*>(window);
+    orderFront();
+}
+
+void StreamHudStats::orderFront()
+{
+    StreamHudStats* self = instance();
+    if (self == nullptr || !self->m_Streaming || s_HudWindow.isNull()) {
+        return;
+    }
+    if (!StreamingPreferences::hudWantsSamples()) {
+        return;
+    }
+    twilightHudOrderFront(s_HudWindow.data());
 }
 
 void StreamHudStats::requestDisconnect()

@@ -108,6 +108,18 @@ Item {
         }
     }
 
+    function codecChoices() {
+        var options = [
+            { text: qsTr("Automatic"), value: StreamingPreferences.VCC_AUTO },
+            { text: "H.264", value: StreamingPreferences.VCC_FORCE_H264 },
+            { text: "HEVC", value: StreamingPreferences.VCC_FORCE_HEVC },
+            { text: "AV1", value: StreamingPreferences.VCC_FORCE_AV1 }
+        ]
+        if (SystemProperties.hasPyroWaveVulkan || SystemProperties.hasPyroWaveMetal)
+            options.push({ text: "PyroWave", value: StreamingPreferences.VCC_FORCE_PYROWAVE })
+        return options
+    }
+
     Component.onCompleted: rebuildChoices()
 
     Connections {
@@ -595,19 +607,21 @@ Item {
                             width: parent.width
                             theme: sheet.theme
                             current: StreamingPreferences.videoCodecConfig
-                            options: [
-                                { text: qsTr("Automatic"), value: StreamingPreferences.VCC_AUTO },
-                                { text: "H.264", value: StreamingPreferences.VCC_FORCE_H264 },
-                                { text: "HEVC", value: StreamingPreferences.VCC_FORCE_HEVC },
-                                { text: "AV1", value: StreamingPreferences.VCC_FORCE_AV1 },
-                                { text: "PyroWave", value: StreamingPreferences.VCC_FORCE_PYROWAVE }
-                            ]
+                            options: sheet.codecChoices()
                             onPicked: StreamingPreferences.videoCodecConfig = value
                         }
-                        TwTextV2 { theme: sheet.theme; text: qsTr("PyroWave GPU backend"); color: sheet.theme.secondary; font.pixelSize: 12; font.weight: Font.DemiBold }
+                        TwTextV2 {
+                            theme: sheet.theme
+                            visible: SystemProperties.hasPyroWaveMetal && SystemProperties.hasPyroWaveVulkan
+                            text: qsTr("PyroWave GPU backend")
+                            color: sheet.theme.secondary
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                        }
                         ChoiceV2 {
                             width: parent.width
                             theme: sheet.theme
+                            visible: SystemProperties.hasPyroWaveMetal && SystemProperties.hasPyroWaveVulkan
                             current: StreamingPreferences.pyroWaveBackend
                             options: [
                                 { text: qsTr("Automatic"), value: StreamingPreferences.PWBC_AUTO },
@@ -619,12 +633,11 @@ Item {
                         TwTextV2 {
                             width: parent.width
                             theme: sheet.theme
+                            visible: SystemProperties.hasPyroWaveMetal && SystemProperties.hasPyroWaveVulkan
                             color: sheet.theme.tertiary
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
-                            text: (SystemProperties.hasPyroWaveMetal && SystemProperties.hasPyroWaveVulkan)
-                                  ? qsTr("Used only when the codec is PyroWave. Automatic prefers Metal on Apple7 GPUs and otherwise uses Vulkan. H.264, HEVC, and AV1 stay on VideoToolbox.")
-                                  : qsTr("Stored for builds that include the Metal and Vulkan decoders. It does not change H.264, HEVC, or AV1.")
+                            text: qsTr("Used only when the codec is PyroWave. Automatic prefers Metal on Apple7 GPUs and otherwise uses Vulkan. H.264, HEVC, and AV1 stay on VideoToolbox.")
                         }
                         TwTextV2 { theme: sheet.theme; text: qsTr("Decoder"); color: sheet.theme.secondary; font.pixelSize: 12; font.weight: Font.DemiBold }
                         ChoiceV2 {

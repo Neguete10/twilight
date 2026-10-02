@@ -5,7 +5,10 @@ import StreamingPreferences 1.0
 
 Window {
     id: hud
-    flags: Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus | Qt.NoDropShadowWindowHint
+    // Not Qt.Tool: on macOS that is an NSPanel, which hides when the SDL
+    // stream becomes the active app. The stream loop raises this window
+    // over fullscreen after the SDL window exists.
+    flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus | Qt.NoDropShadowWindowHint
     color: "transparent"
     title: ""
     visible: StreamHudStats.streaming && StreamingPreferences.uiVersion === "v2" && StreamingPreferences.showTwilightHud
@@ -21,8 +24,15 @@ Window {
         y = 28
     }
 
-    onVisibleChanged: if (visible) place()
+    onVisibleChanged: {
+        if (visible) {
+            place()
+            StreamHudStats.orderFront()
+        }
+    }
     onWidthChanged: if (visible) place()
+
+    Component.onCompleted: StreamHudStats.attachWindow(hud)
 
     Column {
         id: column

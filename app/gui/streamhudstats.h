@@ -35,6 +35,14 @@ public:
     Q_INVOKABLE void noteSessionEnded();
     Q_INVOKABLE void requestDisconnect();
 
+    // The QML HUD window. Kept so the stream loop can raise it after SDL
+    // creates the fullscreen window. Parent stays null.
+    Q_INVOKABLE void attachWindow(QObject* window);
+
+    // Show the attached window above the stream when this HUD is enabled.
+    // Safe to call from the main thread during Session::execInternal().
+    static void orderFront();
+
 signals:
     void streamingChanged();
     void statsChanged();

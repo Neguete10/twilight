@@ -4,10 +4,14 @@
 <dict>
 	<key>CFBundleExecutable</key>
 	<string>Moonlight</string>
+	<key>CFBundleName</key>
+	<string>Moonlight</string>
+	<key>CFBundleSpokenName</key>
+	<string>Twilight</string>
 	<key>CFBundleGetInfoString</key>
 	<string>Stream games and other applications from another PC</string>
 	<key>CFBundleIconFile</key>
-	<string>moonlight</string>
+	<string>twilight</string>
 	<key>CFBundleIdentifier</key>
 	<string>BUNDLE_ID</string>
 	<key>NSHighResolutionCapable</key>
@@ -39,13 +43,13 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Moonlight uses the local network to connect to your gaming PC for streaming.</string>
+	<string>Twilight uses the local network to connect to your gaming PC for streaming.</string>
 	<key>NSLocationUsageDescription</key>
 	<string>This app reads the Wi-Fi network name so a saved stream profile can match this network. macOS requires Location permission to reveal that name. Your location is not stored.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app reads the Wi-Fi network name so a saved stream profile can match this network. macOS requires Location permission to reveal that name. Your location is not stored.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Moonlight uses the microphone to send your voice to the host PC while streaming.</string>
+	<string>Twilight uses the microphone to send your voice to the host PC while streaming.</string>
 	<key>CFBundleVersion</key>
 	<string>VERSION</string>
 	<key>CFBundleShortVersionString</key>

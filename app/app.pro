@@ -510,6 +510,7 @@ macx {
 
     SOURCES += \
         gui/sfsymbol_mac.mm \
+        gui/streamhud_mac.mm \
         settings/network_identity_mac.mm \
         streaming/audio/microphone/mic_capture_mac.mm \
         streaming/audio/microphone/mic_permission_mac.mm \
@@ -691,15 +692,16 @@ win32 {
 }
 macx {
     # Create Info.plist in object dir with the correct version string.
-    # BUNDLE_ID / DISPLAY_NAME default to the upstream Moonlight identity.
-    # Opt in to Twilight Mac App Store scaffolding with CONFIG+=twilight-mas
-    # (see app/deploy/macos/Twilight-MAS.entitlements and docs/TWILIGHT_MAS.md).
+    # Dock and Finder use DISPLAY_NAME (Twilight). CFBundleName stays
+    # Moonlight in Info.plist so that short name is still the fallback.
+    # Bundle id and the Moonlight executable stay put unless twilight-mas
+    # swaps the bundle id. See docs/TWILIGHT_MAS.md.
     # Hardened Runtime signing is: codesign --options runtime
     system(cp $$PWD/Info.plist $$OUT_PWD/Info.plist)
     system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$OUT_PWD/Info.plist)
 
     TWILIGHT_BUNDLE_ID = com.moonlight-stream.Moonlight
-    TWILIGHT_DISPLAY_NAME = Moonlight
+    TWILIGHT_DISPLAY_NAME = Twilight
     twilight-mas {
         TWILIGHT_BUNDLE_ID = com.henrique.twilight
         TWILIGHT_DISPLAY_NAME = Twilight
@@ -711,8 +713,6 @@ macx {
         ENABLE_HARDENED_RUNTIME.value = YES
         QMAKE_MAC_XCODE_SETTINGS += CODE_SIGN_ENTITLEMENTS ENABLE_HARDENED_RUNTIME
 
-        system(sed -i -e 's/Moonlight uses the local network/Twilight uses the local network/g' $$OUT_PWD/Info.plist)
-        system(sed -i -e 's/Moonlight uses the microphone/Twilight uses the microphone/g' $$OUT_PWD/Info.plist)
         message("twilight-mas: bundle id $$TWILIGHT_BUNDLE_ID")
         message("twilight-mas: display name $$TWILIGHT_DISPLAY_NAME")
         message("twilight-mas: entitlements $$PWD/deploy/macos/Twilight-MAS.entitlements")
@@ -723,7 +723,7 @@ macx {
 
     QMAKE_INFO_PLIST = $$OUT_PWD/Info.plist
 
-    APP_BUNDLE_RESOURCES.files = moonlight.icns
+    APP_BUNDLE_RESOURCES.files = twilight.icns
     APP_BUNDLE_RESOURCES.path = Contents/Resources
 
     APP_BUNDLE_PLIST.files = $$OUT_PWD/Info.plist
