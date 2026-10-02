@@ -5,7 +5,11 @@
 	<key>CFBundleExecutable</key>
 	<string>Moonlight</string>
 	<key>CFBundleName</key>
-	<string>Moonlight</string>
+	<string>Twilight</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>LSHasLocalizedDisplayName</key>
+	<true/>
 	<key>CFBundleSpokenName</key>
 	<string>Twilight</string>
 	<key>CFBundleGetInfoString</key>

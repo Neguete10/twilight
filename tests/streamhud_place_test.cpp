@@ -44,6 +44,17 @@ int main()
     expectPlace(twilightPlaceHud(0, 0, 1920, 1080, 0, 0),
                 false, 0, 0, "empty hud");
 
+    // SDL and Qt use a top-left origin. 220x44 chips sit 28pt below the
+    // top of a 1080p stream, centered.
+    expectPlace(twilightPlaceHudTopLeft(0, 0, 1920, 1080, 220, 44),
+                true, 850, 28, "1080p qt");
+    expectPlace(twilightPlaceHudTopLeft(1260, 700, 640, 360, 220, 44),
+                true, 1470, 708, "pip qt");
+    expectPlace(twilightPlaceHudTopLeft(100, 100, 80, 600, 200, 44),
+                true, 100, 128, "wider than stream qt");
+    expectPlace(twilightPlaceHudTopLeft(0, 0, 0, 0, 200, 44),
+                false, 0, 0, "empty stream qt");
+
     if (g_Failures != 0) {
         std::printf("%d failure(s)\n", g_Failures);
         return 1;

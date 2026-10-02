@@ -18,7 +18,8 @@ CONFIG += c++11
 unix:!macx {
     TARGET = moonlight
 } else {
-    # On macOS, this is the name displayed in the global menu bar
+    # Executable and Moonlight.app filename. scripts/generate-dmg.sh looks
+    # for that bundle. The Dock hover label is CFBundleName (Twilight).
     TARGET = Moonlight
 }
 
@@ -693,10 +694,11 @@ win32 {
 }
 macx {
     # Create Info.plist in object dir with the correct version string.
-    # Dock and Finder use DISPLAY_NAME (Twilight). CFBundleName stays
-    # Moonlight in Info.plist so that short name is still the fallback.
-    # Bundle id and the Moonlight executable stay put unless twilight-mas
-    # swaps the bundle id. See docs/TWILIGHT_MAS.md.
+    # CFBundleName and CFBundleDisplayName are Twilight, which is the Dock
+    # hover and the Apple menu. CFBundleExecutable stays Moonlight, and so
+    # does the Moonlight.app filename. Bundle id stays
+    # com.moonlight-stream.Moonlight unless twilight-mas swaps it.
+    # See docs/TWILIGHT_MAS.md.
     # Hardened Runtime signing is: codesign --options runtime
     system(cp $$PWD/Info.plist $$OUT_PWD/Info.plist)
     system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$OUT_PWD/Info.plist)
@@ -727,10 +729,15 @@ macx {
     APP_BUNDLE_RESOURCES.files = twilight.icns
     APP_BUNDLE_RESOURCES.path = Contents/Resources
 
+    # LSHasLocalizedDisplayName makes the Dock use this name instead of
+    # the Moonlight.app filename.
+    APP_BUNDLE_DISPLAY_NAME.files = deploy/macos/en.lproj/InfoPlist.strings
+    APP_BUNDLE_DISPLAY_NAME.path = Contents/Resources/en.lproj
+
     APP_BUNDLE_PLIST.files = $$OUT_PWD/Info.plist
     APP_BUNDLE_PLIST.path = Contents
 
-    QMAKE_BUNDLE_DATA += APP_BUNDLE_RESOURCES APP_BUNDLE_PLIST
+    QMAKE_BUNDLE_DATA += APP_BUNDLE_RESOURCES APP_BUNDLE_DISPLAY_NAME APP_BUNDLE_PLIST
 
     !disable-prebuilts {
         APP_BUNDLE_FRAMEWORKS.files = $$files(../libs/mac/Frameworks/*.framework, true) $$files(../libs/mac/lib/*.dylib, true)

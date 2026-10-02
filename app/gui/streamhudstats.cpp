@@ -7,10 +7,13 @@
 
 #include <QMetaObject>
 #include <QPointer>
+#include <QSurfaceFormat>
 #include <QWindow>
 
-// raise: also order the window in front. Passing false only moves it.
+// raise is ignored on macOS: the chips are ordered front on every sync.
+// Passing false on other platforms only moves the window.
 void twilightHudSync(QWindow* window, void* sdlWindow, bool raise);
+void twilightHudDetach(QWindow* window);
 
 static QPointer<QWindow> s_HudWindow;
 static void* s_StreamWindow = nullptr;
@@ -24,6 +27,11 @@ void twilightHudSync(QWindow* window, void* sdlWindow, bool raise)
     }
     window->show();
     window->raise();
+}
+
+void twilightHudDetach(QWindow* window)
+{
+    (void)window;
 }
 #endif
 
@@ -140,12 +148,24 @@ void StreamHudStats::noteSessionEnded()
 
 void StreamHudStats::attachWindow(QObject* window)
 {
-    s_HudWindow = qobject_cast<QWindow*>(window);
+    QWindow* hud = qobject_cast<QWindow*>(window);
+    s_HudWindow = hud;
+    if (hud != nullptr && hud->format().alphaBufferSize() < 8) {
+        // A transparent Qt Quick window without an alpha buffer never
+        // composites, so the chips are invisible even when the window is up.
+        QSurfaceFormat format = hud->format();
+        format.setAlphaBufferSize(8);
+        hud->setFormat(format);
+    }
     orderFront();
 }
 
 void StreamHudStats::noteStreamWindow(void* sdlWindow)
 {
+    if (sdlWindow == nullptr && s_StreamWindow != nullptr) {
+        // Drop the child relationship before SDL destroys the stream window.
+        twilightHudDetach(s_HudWindow.data());
+    }
     s_StreamWindow = sdlWindow;
 }
 
@@ -161,6 +181,7 @@ static bool hudShouldSync()
 void StreamHudStats::followStream()
 {
     if (!hudShouldSync()) {
+        twilightHudDetach(s_HudWindow.data());
         return;
     }
     twilightHudSync(s_HudWindow.data(), s_StreamWindow, false);
@@ -169,6 +190,7 @@ void StreamHudStats::followStream()
 void StreamHudStats::orderFront()
 {
     if (!hudShouldSync()) {
+        twilightHudDetach(s_HudWindow.data());
         return;
     }
     twilightHudSync(s_HudWindow.data(), s_StreamWindow, true);

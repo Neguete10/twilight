@@ -12,10 +12,10 @@ Canonical fork (corresponding-source remote once that GitHub repo is the one you
 | --- | --- |
 | `app/deploy/macos/Twilight-MAS.entitlements` | App Sandbox, network client/server, Spatial Audio Profile, Head Pose. Used only by the opt-in MAS config. |
 | `app/app.pro` (`CONFIG+=twilight-mas`) | Rewrites the bundle id and display name, and points the Xcode generator at those entitlements plus Hardened Runtime. |
-| `app/Info.plist` | `BUNDLE_ID` and `DISPLAY_NAME` tokens. qmake substitutes them. Display name is Twilight. `CFBundleName` stays Moonlight. |
+| `app/Info.plist` | `BUNDLE_ID` and `DISPLAY_NAME` tokens. qmake substitutes them. `CFBundleName` and `CFBundleDisplayName` are Twilight, which is the Dock hover. `CFBundleExecutable` stays Moonlight. |
 | `scripts/generate-dmg.sh` | `TWILIGHT_MAS=1` passes `CONFIG+=twilight-mas` and `codesign --options runtime --entitlements ...`. Unset, the script is the existing Developer ID / DMG path. |
 
-The executable name and `TARGET` stay `Moonlight`, so `scripts/generate-dmg.sh` still looks for `app/Moonlight.app`. Finder and the Dock use `CFBundleDisplayName` (`Twilight` on every macOS build). `CFBundleName` stays `Moonlight`, which is what macOS uses when a display name is missing. Shipping desktop builds keep the bundle id `com.moonlight-stream.Moonlight`. `CONFIG+=twilight-mas` is what changes that id.
+The executable name and `TARGET` stay `Moonlight`, so `scripts/generate-dmg.sh` still looks for `app/Moonlight.app`. The Dock hover uses `CFBundleName` (`Twilight`) together with `LSHasLocalizedDisplayName` and `en.lproj/InfoPlist.strings`. The bundle filename can still read Moonlight until Launch Services reloads it; relaunch after a rebuild. `QCoreApplication::applicationName` stays `Moonlight` so QSettings do not move. Shipping desktop builds keep the bundle id `com.moonlight-stream.Moonlight`. `CONFIG+=twilight-mas` is what changes that id.
 
 ## Enable the MAS config
 

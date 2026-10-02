@@ -584,6 +584,13 @@ int main(int argc, char *argv[])
 
     QGuiApplication app(argc, argv);
 
+#ifdef Q_OS_DARWIN
+    // Dock hover and the Apple menu follow the bundle display name. The
+    // application name above stays "Moonlight" so QSettings and the cache
+    // directory do not move.
+    QGuiApplication::setApplicationDisplayName(QStringLiteral("Twilight"));
+#endif
+
 #ifndef STEAM_LINK
     // Force use of the KMSDRM backend for SDL when using Qt platform plugins
     // that directly draw to the display without a windowing system.

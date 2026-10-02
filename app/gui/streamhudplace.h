@@ -61,3 +61,49 @@ inline TwilightHudPlace twilightPlaceHud(double streamX, double streamY,
     place.ok = true;
     return place;
 }
+
+// Top-left origin, which is what SDL_GetWindowPosition and QWindow::setPosition
+// share. The returned point is the HUD's top-left. A degenerate frame is
+// refused so the caller keeps the previous on-screen position.
+inline TwilightHudPlace twilightPlaceHudTopLeft(double streamX, double streamY,
+                                                double streamW, double streamH,
+                                                double hudW, double hudH)
+{
+    TwilightHudPlace place = {0, 0, false};
+    if (!(streamW >= 2.0 && streamH >= 2.0 && hudW >= 1.0 && hudH >= 1.0)) {
+        return place;
+    }
+
+    const double margin = streamH < 520.0 ? 8.0 : 28.0;
+    double x = streamX + (streamW * 0.5) - (hudW * 0.5);
+    double y = streamY + margin;
+
+    if (hudW <= streamW) {
+        const double minX = streamX;
+        const double maxX = streamX + streamW - hudW;
+        if (x < minX) {
+            x = minX;
+        }
+        if (x > maxX) {
+            x = maxX;
+        }
+    }
+    else {
+        x = streamX;
+    }
+
+    if (hudH <= streamH) {
+        const double maxY = streamY + streamH - hudH;
+        if (y > maxY) {
+            y = maxY;
+        }
+        if (y < streamY) {
+            y = streamY;
+        }
+    }
+
+    place.x = x;
+    place.y = y;
+    place.ok = true;
+    return place;
+}
