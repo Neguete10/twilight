@@ -155,9 +155,24 @@ Item {
         if (changed)
             rebuildApps()
         if (fromUser) {
+            var uuid = computerModel.computerUuidAt(index)
+            if (uuid !== "")
+                StreamingPreferences.lastSelectedHostUuid = uuid
             directLaunchConsumed = false
             considerDirectLaunch()
         }
+    }
+
+    function indexForSavedHost() {
+        var saved = StreamingPreferences.lastSelectedHostUuid
+        if (saved === "")
+            return -1
+        var count = computerModel.computerCount()
+        for (var i = 0; i < count; i++) {
+            if (computerModel.computerUuidAt(i) === saved)
+                return i
+        }
+        return -1
     }
 
     function noteComputersChanged() {
@@ -167,8 +182,14 @@ Item {
             selectHost(-1, false)
             return
         }
-        if (selectedIndex < 0 || selectedIndex >= count || !appModel)
-            selectHost(selectedIndex < 0 || selectedIndex >= count ? 0 : selectedIndex, false)
+        if (selectedIndex < 0 || selectedIndex >= count || !appModel) {
+            var next = selectedIndex
+            if (next < 0 || next >= count) {
+                var saved = indexForSavedHost()
+                next = saved >= 0 ? saved : 0
+            }
+            selectHost(next, false)
+        }
     }
 
     function considerDirectLaunch() {

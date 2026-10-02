@@ -58,6 +58,7 @@
 #define SER_KEEPAWAKE "keepawake"
 #define SER_LANGUAGE "language"
 #define SER_UIVERSION "uiVersion"
+#define SER_LASTHOSTUUID "lastSelectedHostUuid"
 
 #define CURRENT_DEFAULT_VER 2
 
@@ -193,6 +194,7 @@ void StreamingPreferences::reload()
         const QString version = settings.value(SER_UIVERSION).toString().trimmed().toLower();
         m_UiVersion = (version == QLatin1String("v1")) ? QStringLiteral("v1") : QStringLiteral("v2");
     }
+    m_LastSelectedHostUuid = settings.value(SER_LASTHOSTUUID).toString();
     m_ShowTwilightHud = settings.value(SER_TWILIGHTHUD, true).toBool();
     publishHudSamplingFlag();
 
@@ -384,6 +386,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_KEEPAWAKE, keepAwake);
     settings.setValue(SER_UIVERSION, m_UiVersion);
     settings.setValue(SER_TWILIGHTHUD, m_ShowTwilightHud);
+    settings.setValue(SER_LASTHOSTUUID, m_LastSelectedHostUuid);
 }
 
 bool StreamingPreferences::hudWantsSamples()
@@ -409,6 +412,19 @@ void StreamingPreferences::setShowTwilightHud(bool show)
     QSettings settings;
     settings.setValue(SER_TWILIGHTHUD, m_ShowTwilightHud);
     emit showTwilightHudChanged();
+}
+
+void StreamingPreferences::setLastSelectedHostUuid(const QString& uuid)
+{
+    if (m_LastSelectedHostUuid == uuid) {
+        return;
+    }
+
+    m_LastSelectedHostUuid = uuid;
+
+    QSettings settings;
+    settings.setValue(SER_LASTHOSTUUID, m_LastSelectedHostUuid);
+    emit lastSelectedHostUuidChanged();
 }
 
 void StreamingPreferences::setUiVersion(const QString& version)

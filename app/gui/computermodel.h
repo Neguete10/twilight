@@ -47,6 +47,7 @@ public:
 
     Q_INVOKABLE int computerCount() const;
     Q_INVOKABLE QString computerNameAt(int row) const;
+    Q_INVOKABLE QString computerUuidAt(int row) const;
     Q_INVOKABLE bool computerOnlineAt(int row) const;
     Q_INVOKABLE bool computerPairedAt(int row) const;
     Q_INVOKABLE bool computerWakeableAt(int row) const;

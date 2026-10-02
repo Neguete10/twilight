@@ -179,6 +179,9 @@ public:
     // "v2" (Twilight, the starting shell) or "v1" (Classic).
     // Stored under the QSettings key "uiVersion". A missing key is v2.
     Q_PROPERTY(QString uiVersion READ uiVersion WRITE setUiVersion NOTIFY uiVersionChanged)
+    // UUID of the host last chosen in the Twilight shell. Empty if none.
+    // Stored under the QSettings key "lastSelectedHostUuid".
+    Q_PROPERTY(QString lastSelectedHostUuid READ lastSelectedHostUuid WRITE setLastSelectedHostUuid NOTIFY lastSelectedHostUuidChanged)
 
     Q_INVOKABLE bool retranslate();
 
@@ -188,6 +191,8 @@ public:
 
     QString uiVersion() const { return m_UiVersion; }
     void setUiVersion(const QString& version);
+    QString lastSelectedHostUuid() const { return m_LastSelectedHostUuid; }
+    void setLastSelectedHostUuid(const QString& uuid);
     bool showTwilightHud() const { return m_ShowTwilightHud; }
     void setShowTwilightHud(bool show);
 
@@ -285,6 +290,7 @@ signals:
     void keepAwakeChanged();
     void languageChanged();
     void uiVersionChanged();
+    void lastSelectedHostUuidChanged();
 
 private:
     explicit StreamingPreferences(QQmlEngine *qmlEngine);
@@ -292,6 +298,7 @@ private:
     void publishHudSamplingFlag();
 
     QString m_UiVersion;
+    QString m_LastSelectedHostUuid;
     bool m_ShowTwilightHud;
 
     QString getSuffixFromLanguage(Language lang);

@@ -134,6 +134,17 @@ QString ComputerModel::computerNameAt(int row) const
     return roleAt(row, NameRole).toString();
 }
 
+QString ComputerModel::computerUuidAt(int row) const
+{
+    if (row < 0 || row >= m_Computers.count()) {
+        return QString();
+    }
+
+    NvComputer* computer = m_Computers[row];
+    QReadLocker lock(&computer->lock);
+    return computer->uuid;
+}
+
 bool ComputerModel::computerOnlineAt(int row) const
 {
     return roleAt(row, OnlineRole).toBool();
