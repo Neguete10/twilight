@@ -10,6 +10,9 @@ Item {
 
     // Implementation items are assigned to `frame`, not the default property,
     // so callers can drop a switch or button into the trailing slot.
+    // labelBlock is filled from inside the frame so the row height does not
+    // depend on an id that Qt 5.9 cannot see from the outer object.
+    property real labelBlock: 0
     default property alias controls: slot.data
     property Item frame: Item {
         parent: row
@@ -44,6 +47,12 @@ Item {
             }
         }
 
+        Binding {
+            target: row
+            property: "labelBlock"
+            value: textCol.implicitHeight
+        }
+
         Item {
             id: slot
             anchors.right: parent.right
@@ -62,7 +71,7 @@ Item {
         }
     }
 
-    implicitHeight: Math.max(56, textCol.implicitHeight + 20)
+    implicitHeight: Math.max(56, labelBlock + 20)
     height: implicitHeight
     opacity: enabled ? 1 : 0.45
 }

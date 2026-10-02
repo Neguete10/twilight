@@ -65,13 +65,14 @@ Item {
             spacing: 8
 
             Repeater {
-                model: [
-                    { k: "FPS", v: chips.chipText(StreamHudStats.fpsText, "60") },
-                    { k: "RATE", v: chips.chipText(StreamHudStats.bitrateText, "18.4 Mb/s") },
-                    { k: "RTT", v: chips.chipText(StreamHudStats.latencyText, "4 ms") }
-                ]
+                model: 3
 
                 Rectangle {
+                    property string metricName: index === 0 ? "FPS" : (index === 1 ? "RATE" : "RTT")
+                    property string metricValue: index === 0 ? chips.chipText(StreamHudStats.fpsText, "60")
+                                              : (index === 1 ? chips.chipText(StreamHudStats.bitrateText, "18.4 Mb/s")
+                                                             : chips.chipText(StreamHudStats.latencyText, "4 ms"))
+
                     radius: 14
                     height: 32
                     width: metric.implicitWidth + 20
@@ -82,7 +83,7 @@ Item {
                         anchors.centerIn: parent
                         spacing: 6
                         Text {
-                            text: modelData.k
+                            text: metricName
                             color: chips.mute
                             font.pixelSize: 10
                             font.weight: Font.DemiBold
@@ -91,7 +92,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         Text {
-                            text: modelData.v
+                            text: metricValue
                             color: chips.ink
                             font.pixelSize: 13
                             font.weight: Font.DemiBold

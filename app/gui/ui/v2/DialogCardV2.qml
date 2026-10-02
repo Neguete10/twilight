@@ -51,6 +51,8 @@ Item {
         border.width: 1
         border.color: dialog.theme ? dialog.theme.stroke : "#333"
 
+        MouseArea { anchors.fill: parent }
+
         Column {
             id: column
             width: parent.width - 48

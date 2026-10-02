@@ -646,10 +646,16 @@ Item {
                     }
                 }
 
-                Column {
+                Item {
                     anchors.fill: parent
                     visible: shell.selectedIndex >= 0
-                    spacing: 16
+
+                    Column {
+                        id: libraryHeader
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: 16
 
                     Item {
                         width: parent.width
@@ -795,9 +801,14 @@ Item {
                         }
                     }
 
+                    }
+
                     Flickable {
-                        width: parent.width
-                        height: parent.height - y
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: libraryHeader.bottom
+                        anchors.bottom: parent.bottom
+                        anchors.topMargin: 16
                         visible: shell.selectedPaired
                         contentWidth: width
                         contentHeight: appColumn.implicitHeight
@@ -884,8 +895,7 @@ Item {
                             Grid {
                                 width: parent.width
                                 columns: Math.max(2, Math.floor(width / 196))
-                                columnSpacing: 16
-                                rowSpacing: 16
+                                spacing: 16
 
                                 Repeater {
                                     model: shell.appModel

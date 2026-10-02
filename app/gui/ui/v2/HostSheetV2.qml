@@ -49,10 +49,18 @@ Item {
         border.width: 1
         border.color: sheet.theme.stroke
 
-        Column {
+        MouseArea { anchors.fill: parent }
+
+        Item {
             anchors.fill: parent
             anchors.margins: 20
-            spacing: 8
+
+            Column {
+                id: hostHeader
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                spacing: 8
 
             Item {
                 width: parent.width
@@ -108,9 +116,14 @@ Item {
                       : qsTr("Offline")
             }
 
+            }
+
             Flickable {
-                width: parent.width
-                height: parent.height - y
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: hostHeader.bottom
+                anchors.bottom: parent.bottom
+                anchors.topMargin: 8
                 contentWidth: width
                 contentHeight: actions.implicitHeight
                 clip: true

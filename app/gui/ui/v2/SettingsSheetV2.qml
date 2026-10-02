@@ -132,6 +132,8 @@ Item {
         border.color: sheet.theme.stroke
         clip: true
 
+        MouseArea { anchors.fill: parent }
+
         Row {
             anchors.fill: parent
 
@@ -155,18 +157,18 @@ Item {
 
                     Repeater {
                         model: ListModel {
-                            ListElement { key: "video"; label: qsTr("Video"); symbol: "display" }
-                            ListElement { key: "audio"; label: qsTr("Audio"); symbol: "speaker.wave.3" }
-                            ListElement { key: "input"; label: qsTr("Input"); symbol: "gamecontroller" }
-                            ListElement { key: "network"; label: qsTr("Network"); symbol: "network" }
-                            ListElement { key: "advanced"; label: qsTr("Advanced"); symbol: "slider.horizontal.3" }
+                            ListElement { sectionId: "video"; label: qsTr("Video"); symbol: "display" }
+                            ListElement { sectionId: "audio"; label: qsTr("Audio"); symbol: "speaker.wave.3" }
+                            ListElement { sectionId: "input"; label: qsTr("Input"); symbol: "gamecontroller" }
+                            ListElement { sectionId: "network"; label: qsTr("Network"); symbol: "network" }
+                            ListElement { sectionId: "advanced"; label: qsTr("Advanced"); symbol: "slider.horizontal.3" }
                         }
 
                         Rectangle {
                             width: parent.width
                             height: 36
                             radius: 10
-                            color: sheet.section === model.key ? sheet.theme.selection : (navArea.containsMouse ? sheet.theme.fill : "transparent")
+                            color: sheet.section === model.sectionId ? sheet.theme.selection : (navArea.containsMouse ? sheet.theme.fill : "transparent")
                             Row {
                                 anchors.fill: parent
                                 anchors.leftMargin: 8
@@ -175,15 +177,15 @@ Item {
                                     symbol: model.symbol
                                     pointSize: 15
                                     theme: sheet.theme
-                                    tint: sheet.section === model.key ? sheet.theme.accent : sheet.theme.ink
+                                    tint: sheet.section === model.sectionId ? sheet.theme.accent : sheet.theme.ink
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                                 TwTextV2 {
                                     text: model.label
                                     theme: sheet.theme
                                     font.pixelSize: 13
-                                    font.weight: sheet.section === model.key ? Font.DemiBold : Font.Normal
-                                    color: sheet.section === model.key ? sheet.theme.accent : sheet.theme.ink
+                                    font.weight: sheet.section === model.sectionId ? Font.DemiBold : Font.Normal
+                                    color: sheet.section === model.sectionId ? sheet.theme.accent : sheet.theme.ink
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                             }
@@ -192,7 +194,7 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: sheet.section = model.key
+                                onClicked: sheet.section = model.sectionId
                             }
                         }
                     }
