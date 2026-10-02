@@ -1,0 +1,59 @@
+# Twilight UI V2
+
+Twilight keeps the classic Moonlight shell and adds a second one. The default is Classic, so existing users see the same window until they switch.
+
+## Toggle
+
+The main window toolbar has a **Classic / Twilight** control.
+
+- Classic is `uiVersion=v1` (the default when the key is missing).
+- Twilight is `uiVersion=v2`.
+- The key is `uiVersion` in the normal Moonlight `QSettings` store.
+- Switching saves immediately and reloads only the main shell. It does nothing while `streamActive` is set, and the toolbar is not available once a stream has hidden the window.
+- Command-line pair, quit, and stream windows stay on the classic path.
+
+## Screens
+
+| Screen | What it does |
+| --- | --- |
+| Shell | Sidebar of hosts, app library, search, one-click stream, Desktop hero |
+| Host sheet | Wake, pair, rename, remove, network test, show hidden apps |
+| Settings | Video, Audio (including spatial and head tracking), Input, Network, Advanced (codec and PyroWave GPU backend). Same `StreamingPreferences` object as Classic |
+| Stream start | Twilight launch card, then the existing `Session` |
+| In-stream HUD | Glass chips for FPS, bitrate, and RTT, plus End. Sample numbers in Settings → Advanced are a preview |
+
+Pin on an app tile is Moonlight's existing direct-launch flag (one app per host). Right-click a tile to hide or show it. That uses the same app model as Classic.
+
+## Icons and type
+
+On macOS 11 and later, `image://sfsymbol/<name>/<pointSize>/<hex>` draws a real SF Symbol with `NSImage imageWithSystemSymbolName` (`app/gui/sfsymbol_mac.mm`). Other platforms, and unknown names, use a small geometric stand-in from `twilightDrawFallbackSymbol`.
+
+Type uses `.AppleSystemUIFont` on Darwin, which is SF Pro on current macOS. The font is not bundled. Windows uses Segoe UI. Elsewhere the application font is left alone.
+
+Glass is a translucent fill, a hairline, and a 1px sheen. This tree does not link Qt GraphicalEffects, so there is no backdrop blur.
+
+Light and dark follow `SystemPalette`. Classic still forces the Material dark theme for its own controls. Twilight paints its own surfaces, so it does not retint Classic.
+
+## HUD stats
+
+When `uiVersion` is `v2`, the decoders still build the usual overlay string, but they do not enable the yellow SDL overlay unless **Classic performance overlay** is on. The HUD parses FPS, bitrate, and `Average network latency` and drops FEC lines. PyroWave's string has no FEC fields; the parser does not add any.
+
+The HUD is a separate frameless tool window. A fullscreen SDL stream can cover it. End asks once, then posts the same `SDL_QUIT` as Ctrl+Alt+Shift+Q.
+
+## Extending
+
+Add pages under `app/gui/ui/v2/` and list them in `app/qml.qrc`. The shell is `ShellV2.qml`, loaded by a `Loader` in `app/gui/main.qml` only after Twilight is selected. Do not edit Classic screens for V2-only layout. Bind new settings to `StreamingPreferences` and call `save()` when the sheet closes.
+
+## Known gaps
+
+- SF Symbols are real only on macOS 11+. Other platforms get the geometric stand-ins.
+- No backdrop blur.
+- The HUD is not parented to the SDL stream, so exclusive fullscreen can hide it. It anchors to the primary screen's available width.
+- Gamepad grid navigation stays on Classic. Twilight is pointer-first, with preferences, New, and Escape shortcuts.
+- Custom resolution, custom frame rate, and packet size stay in Classic. Twilight can show a custom size that was already saved, and offers 720p, 1080p, 1440p, 4K, and the current display mode.
+- Language list in Twilight is the set Classic exposes, not every enum value that is commented out upstream.
+- Linux CI can compile the HUD parser test without Qt (`tests/twilight_hud_parse_test.cpp`). Loading the QML still needs a Qt build of the app. This VM does not treat a missing full Moonlight link as a V2 failure.
+
+## Not in this pass
+
+CoreHID, picture in picture, mic uplink, DualSense adaptive triggers, and network profiles. Session, CoreAudio spatial, and PyroWave decode paths are unchanged except for publishing the overlay text the HUD already knows how to read.

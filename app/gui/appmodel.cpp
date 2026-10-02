@@ -39,6 +39,59 @@ QString AppModel::getRunningAppName()
     return nullptr;
 }
 
+int AppModel::appCount() const
+{
+    return m_VisibleApps.count();
+}
+
+QString AppModel::appNameAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count()) {
+        return QString();
+    }
+    return m_VisibleApps.at(row).name;
+}
+
+int AppModel::appIdAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count()) {
+        return 0;
+    }
+    return m_VisibleApps.at(row).id;
+}
+
+bool AppModel::appRunningAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count() || m_CurrentGameId == 0) {
+        return false;
+    }
+    return m_VisibleApps.at(row).id == m_CurrentGameId;
+}
+
+bool AppModel::appHiddenAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count()) {
+        return false;
+    }
+    return m_VisibleApps.at(row).hidden;
+}
+
+bool AppModel::appDirectLaunchAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count()) {
+        return false;
+    }
+    return m_VisibleApps.at(row).directLaunch;
+}
+
+QString AppModel::appBoxArtAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count()) {
+        return QString();
+    }
+    return data(index(row, 0), BoxArtRole).toString();
+}
+
 Session* AppModel::createSessionForApp(int appIndex)
 {
     Q_ASSERT(appIndex < m_VisibleApps.count());

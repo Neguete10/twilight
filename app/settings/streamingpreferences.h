@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QRect>
 #include <QQmlEngine>
+#include <QString>
 
 class StreamingPreferences : public QObject
 {
@@ -162,8 +163,18 @@ public:
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
+    // "v1" (classic Moonlight shell, the default) or "v2" (Twilight).
+    // Stored under the QSettings key "uiVersion".
+    Q_PROPERTY(QString uiVersion READ uiVersion WRITE setUiVersion NOTIFY uiVersionChanged)
 
     Q_INVOKABLE bool retranslate();
+
+    // Thread-safe read for the decoder thread. True only while the Twilight
+    // shell is selected, so the classic overlay path stays idle on V1.
+    static bool hudWantsSamples();
+
+    QString uiVersion() const { return m_UiVersion; }
+    void setUiVersion(const QString& version);
 
     // Directly accessible members for preferences
     int width;
@@ -243,9 +254,14 @@ signals:
     void captureSysKeysModeChanged();
     void keepAwakeChanged();
     void languageChanged();
+    void uiVersionChanged();
 
 private:
     explicit StreamingPreferences(QQmlEngine *qmlEngine);
+
+    void publishHudSamplingFlag();
+
+    QString m_UiVersion;
 
     QString getSuffixFromLanguage(Language lang);
 

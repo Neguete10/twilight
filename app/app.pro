@@ -220,6 +220,9 @@ SOURCES += \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
     gui/appmodel.cpp \
+    gui/streamhudparse.cpp \
+    gui/streamhudstats.cpp \
+    gui/sfsymbolprovider.cpp \
     streaming/streamutils.cpp \
     backend/autoupdatechecker.cpp \
     path.cpp \
@@ -255,6 +258,9 @@ HEADERS += \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
     gui/appmodel.h \
+    gui/streamhudparse.h \
+    gui/streamhudstats.h \
+    gui/sfsymbolprovider.h \
     streaming/video/decoder.h \
     streaming/streamutils.h \
     backend/autoupdatechecker.h \
@@ -470,9 +476,10 @@ win32:!winrt {
 macx {
     message(CoreAudio + VideoToolbox renderers selected)
 
-    DEFINES += HAVE_COREAUDIO
+    DEFINES += HAVE_COREAUDIO TWILIGHT_HAS_SF_SYMBOLS
 
     SOURCES += \
+        gui/sfsymbol_mac.mm \
         streaming/audio/renderers/coreaudio/au_spatial_renderer.mm \
         streaming/audio/renderers/coreaudio/coreaudio.cpp \
         streaming/audio/renderers/coreaudio/TPCircularBuffer.c \

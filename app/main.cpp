@@ -47,6 +47,8 @@
 #include "streaming/session.h"
 #include "settings/streamingpreferences.h"
 #include "gui/sdlgamepadkeynavigation.h"
+#include "gui/streamhudstats.h"
+#include "gui/sfsymbolprovider.h"
 
 #if defined(Q_OS_WIN32)
 #define IS_UNSPECIFIED_HANDLE(x) ((x) == INVALID_HANDLE_VALUE || (x) == NULL)
@@ -719,6 +721,14 @@ int main(int argc, char *argv[])
                                                    [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
                                                        return StreamingPreferences::get(qmlEngine);
                                                    });
+    StreamHudStats::create(&app);
+    qmlRegisterSingletonType<StreamHudStats>("StreamHudStats", 1, 0,
+                                             "StreamHudStats",
+                                             [](QQmlEngine*, QJSEngine*) -> QObject* {
+                                                 QObject* stats = StreamHudStats::instance();
+                                                 QQmlEngine::setObjectOwnership(stats, QQmlEngine::CppOwnership);
+                                                 return stats;
+                                             });
 
     // Create the identity manager on the main thread
     IdentityManager::get();
@@ -738,6 +748,7 @@ int main(int argc, char *argv[])
     }
 
     QQmlApplicationEngine engine;
+    engine.addImageProvider(QLatin1String("sfsymbol"), new SfSymbolImageProvider());
     QString initialView;
     bool hasGUI = true;
 

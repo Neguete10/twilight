@@ -1,6 +1,7 @@
 #include "streamingpreferences.h"
 #include "utils.h"
 
+#include <QAtomicInt>
 #include <QSettings>
 #include <QTranslator>
 #include <QCoreApplication>
@@ -52,8 +53,11 @@
 #define SER_CAPTURESYSKEYS "capturesyskeys"
 #define SER_KEEPAWAKE "keepawake"
 #define SER_LANGUAGE "language"
+#define SER_UIVERSION "uiVersion"
 
 #define CURRENT_DEFAULT_VER 2
+
+static QAtomicInt s_HudWantsSamples(0);
 
 static StreamingPreferences* s_GlobalPrefs;
 static QReadWriteLock s_GlobalPrefsLock;
@@ -176,6 +180,11 @@ void StreamingPreferences::reload()
                                                                                                                  : UIDisplayMode::UI_MAXIMIZED)).toInt());
     language = static_cast<Language>(settings.value(SER_LANGUAGE,
                                                     static_cast<int>(Language::LANG_AUTO)).toInt());
+    {
+        const QString version = settings.value(SER_UIVERSION, QStringLiteral("v1")).toString().trimmed().toLower();
+        m_UiVersion = (version == QLatin1String("v2")) ? QStringLiteral("v2") : QStringLiteral("v1");
+        publishHudSamplingFlag();
+    }
 
 
     // Perform default settings updates as required based on last default version
@@ -361,6 +370,34 @@ void StreamingPreferences::save()
     settings.setValue(SER_SWAPFACEBUTTONS, swapFaceButtons);
     settings.setValue(SER_CAPTURESYSKEYS, captureSysKeysMode);
     settings.setValue(SER_KEEPAWAKE, keepAwake);
+    settings.setValue(SER_UIVERSION, m_UiVersion);
+}
+
+bool StreamingPreferences::hudWantsSamples()
+{
+    return s_HudWantsSamples.loadAcquire() != 0;
+}
+
+void StreamingPreferences::publishHudSamplingFlag()
+{
+    s_HudWantsSamples.storeRelease(m_UiVersion == QLatin1String("v2") ? 1 : 0);
+}
+
+void StreamingPreferences::setUiVersion(const QString& version)
+{
+    const QString normalized = (version.trimmed().compare(QLatin1String("v2"), Qt::CaseInsensitive) == 0)
+            ? QStringLiteral("v2")
+            : QStringLiteral("v1");
+    if (m_UiVersion == normalized) {
+        return;
+    }
+
+    m_UiVersion = normalized;
+    publishHudSamplingFlag();
+
+    QSettings settings;
+    settings.setValue(SER_UIVERSION, m_UiVersion);
+    emit uiVersionChanged();
 }
 
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)

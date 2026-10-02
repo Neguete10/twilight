@@ -8,6 +8,7 @@
 #include "pyrowave_stats.h"
 #include "path.h"
 #include "streaming/session.h"
+#include "gui/streamhudstats.h"
 #include "streaming/streamutils.h"
 #include "streaming/bandwidth.h"
 
@@ -1036,15 +1037,28 @@ int PyroWaveMetalVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
         if (LiGetMicroseconds() > impl->activeStats.measurementStartUs + 1000000) {
             impl->activeStats.renderedFrames = impl->renderedFrames.exchange(0);
             impl->activeStats.totalRenderTimeUs = impl->totalRenderTimeUs.exchange(0);
-            if (Session::get() != nullptr &&
-                    Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug)) {
+            Session* session = Session::get();
+            const bool overlayOn = session != nullptr &&
+                    session->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug);
+            const bool hudOn = StreamingPreferences::hudWantsSamples();
+            if (session != nullptr && (overlayOn || hudOn)) {
                 VIDEO_STATS combined{};
                 addVideoStats(impl->lastStats, combined);
                 addVideoStats(impl->activeStats, combined);
-                stringifyVideoStats(impl, combined,
-                                    Session::get()->getOverlayManager().getOverlayText(Overlay::OverlayDebug),
-                                    Session::get()->getOverlayManager().getOverlayMaxTextLength());
-                Session::get()->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
+                char hudScratch[1024];
+                char* text = overlayOn
+                        ? session->getOverlayManager().getOverlayText(Overlay::OverlayDebug)
+                        : hudScratch;
+                const int textLen = overlayOn
+                        ? session->getOverlayManager().getOverlayMaxTextLength()
+                        : static_cast<int>(sizeof(hudScratch));
+                stringifyVideoStats(impl, combined, text, textLen);
+                if (overlayOn) {
+                    session->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
+                }
+                if (hudOn) {
+                    StreamHudStats::submitOverlayText(text);
+                }
             }
             addVideoStats(impl->activeStats, impl->globalStats);
             if (++impl->statsWindows >= 5) {

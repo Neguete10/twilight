@@ -18,6 +18,47 @@ ApplicationWindow {
     // a retranslate() because AppView breaks for some reason.
     property bool clearOnBack: false
 
+    // Twilight (V2) is opt-in. streamActive blocks a shell swap during a stream.
+    property bool v2Active: false
+    property bool streamActive: false
+    property string classicTitle: ""
+    readonly property bool allowShellSwitch: initialView === "qrc:/gui/PcView.qml"
+
+    function activateShell(version) {
+        if (streamActive || !allowShellSwitch) {
+            return
+        }
+
+        var next = version === "v2" ? "v2" : "v1"
+        if (((next === "v2") === v2Active) && StreamingPreferences.uiVersion === next) {
+            return
+        }
+
+        if (StreamingPreferences.uiVersion !== next) {
+            StreamingPreferences.uiVersion = next
+            StreamingPreferences.save()
+        }
+
+        v2Active = next === "v2"
+        title = v2Active ? "Twilight" : classicTitle
+
+        if (!v2Active && stackView.depth > 1) {
+            stackView.pop(null)
+        }
+
+        if (v2Active) {
+            if (width < 1100) {
+                width = 1180
+            }
+            if (height < 720) {
+                height = 800
+            }
+        }
+        else {
+            stackView.forceActiveFocus()
+        }
+    }
+
     id: window
     width: 1280
     height: 600
@@ -34,7 +75,18 @@ ApplicationWindow {
         SdlGamepadKeyNavigation.enable()
     }
 
+    onClosing: {
+        if (v2Active) {
+            StreamingPreferences.save()
+        }
+    }
+
     Component.onCompleted: {
+        classicTitle = title
+        if (allowShellSwitch && StreamingPreferences.uiVersion === "v2") {
+            activateShell("v2")
+        }
+
         // Show the window according to the user's preferences
         if (SystemProperties.hasDesktopEnvironment) {
             if (StreamingPreferences.uiDisplayMode == StreamingPreferences.UI_MAXIMIZED) {
@@ -87,7 +139,9 @@ ApplicationWindow {
     StackView {
         id: stackView
         anchors.fill: parent
-        focus: true
+        focus: !v2Active
+        visible: !v2Active
+        enabled: !v2Active
 
         Component.onCompleted: {
             // Perform our early initialization before constructing
@@ -131,6 +185,17 @@ ApplicationWindow {
         Keys.onHangupPressed: {
             settingsButton.clicked()
         }
+    }
+
+    // Loaded only after the user picks Twilight. Inactive while Classic is showing,
+    // so a V2 QML error cannot take down the default shell.
+    Loader {
+        id: v2Shell
+        anchors.fill: parent
+        active: v2Active
+        visible: v2Active
+        focus: v2Active
+        source: "qrc:/gui/ui/v2/ShellV2.qml"
     }
 
     // This timer keeps us polling for 5 minutes of inactivity
@@ -223,7 +288,8 @@ ApplicationWindow {
 
     header: ToolBar {
         id: toolBar
-        height: 60
+        visible: !v2Active
+        height: v2Active ? 0 : 60
         anchors.topMargin: 5
         anchors.bottomMargin: 5
 
@@ -316,6 +382,7 @@ ApplicationWindow {
                 Shortcut {
                     id: newPcShortcut
                     sequence: StandardKey.New
+                    enabled: !v2Active
                     onActivated: addPcButton.clicked()
                 }
 
@@ -380,6 +447,7 @@ ApplicationWindow {
                 Shortcut {
                     id: helpShortcut
                     sequence: StandardKey.HelpContents
+                    enabled: !v2Active
                     onActivated: helpButton.clicked()
                 }
 
@@ -409,6 +477,22 @@ ApplicationWindow {
                 }
             }
 
+            Loader {
+                id: versionToggleLoader
+                active: allowShellSwitch && !v2Active
+                visible: active
+                source: "qrc:/gui/ui/v2/UiVersionToggle.qml"
+                Layout.alignment: Qt.AlignVCenter
+                implicitWidth: item ? item.implicitWidth : 0
+                implicitHeight: item ? item.implicitHeight : 0
+
+                onLoaded: {
+                    item.darkChrome = true
+                    item.currentVersion = "v1"
+                    item.requestVersion.connect(activateShell)
+                }
+            }
+
             NavigableToolButton {
                 id: settingsButton
 
@@ -423,6 +507,7 @@ ApplicationWindow {
                 Shortcut {
                     id: settingsShortcut
                     sequence: StandardKey.Preferences
+                    enabled: !v2Active
                     onActivated: settingsButton.clicked()
                 }
 

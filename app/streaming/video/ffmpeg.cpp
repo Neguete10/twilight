@@ -1,6 +1,7 @@
 #include <Limelight.h>
 #include "ffmpeg.h"
 #include "streaming/session.h"
+#include "gui/streamhudstats.h"
 
 #include <h264_stream.h>
 
@@ -1786,16 +1787,30 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
 
     // Flip stats windows roughly every second
     if (LiGetMicroseconds() > m_ActiveWndVideoStats.measurementStartUs + 1000000) {
-        // Update overlay stats if it's enabled
-        if (Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug)) {
+        // Classic overlay when that toggle is on. Twilight also reads the same
+        // text for its quiet HUD, without turning the SDL overlay on.
+        const bool overlayOn = Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug);
+        const bool hudOn = StreamingPreferences::hudWantsSamples();
+        if (overlayOn || hudOn) {
             VIDEO_STATS lastTwoWndStats = {};
             addVideoStats(m_LastWndVideoStats, lastTwoWndStats);
             addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
 
-            stringifyVideoStats(lastTwoWndStats,
-                                Session::get()->getOverlayManager().getOverlayText(Overlay::OverlayDebug),
-                                Session::get()->getOverlayManager().getOverlayMaxTextLength());
-            Session::get()->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
+            char hudScratch[1024];
+            char* text = overlayOn
+                    ? Session::get()->getOverlayManager().getOverlayText(Overlay::OverlayDebug)
+                    : hudScratch;
+            const int textLen = overlayOn
+                    ? Session::get()->getOverlayManager().getOverlayMaxTextLength()
+                    : static_cast<int>(sizeof(hudScratch));
+
+            stringifyVideoStats(lastTwoWndStats, text, textLen);
+            if (overlayOn) {
+                Session::get()->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
+            }
+            if (hudOn) {
+                StreamHudStats::submitOverlayText(text);
+            }
         }
 
         // Accumulate these values into the global stats
