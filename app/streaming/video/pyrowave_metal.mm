@@ -5,6 +5,7 @@
 #include "pyrowave_color.h"
 #include "pyrowave_metal_api.h"
 #include "pyrowave_packets.h"
+#include "pyrowave_stats.h"
 #include "path.h"
 #include "streaming/session.h"
 #include "streaming/streamutils.h"
@@ -14,6 +15,7 @@
 #include <SDL_metal.h>
 
 #include <atomic>
+#include <cstring>
 #include <cstdlib>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
@@ -338,13 +340,20 @@ struct PyroWaveMetalVideoDecoder::Impl {
 
     VIDEO_STATS activeStats{};
     VIDEO_STATS lastStats{};
+    VIDEO_STATS globalStats{};
     BandwidthTracker bandwidth;
     uint32_t lastFrameNumber = 0;
     std::atomic<uint32_t> renderedFrames{0};
     std::atomic<uint64_t> totalRenderTimeUs{0};
+    int statsWindows = 0;
+    uint64_t decodeReadyUs = 0;
+    std::mutex statsLock;
+    PyroWaveSteadyState steady;
 };
 
 namespace {
+
+const char* metalPixelFormatName(MTLPixelFormat format);
 
 bool buildPipelines(PyroWaveMetalVideoDecoder::Impl* impl, const PyroWavePresentColor& color)
 {
@@ -446,14 +455,40 @@ bool buildPipelines(PyroWaveMetalVideoDecoder::Impl* impl, const PyroWavePresent
         return false;
     }
 
+    char colorDesc[96];
+    snprintf(colorDesc, sizeof(colorDesc), "%s %s %s%s",
+             pyroWaveMatrixName(color.matrix),
+             pyroWaveTransferName(color.transfer),
+             pyroWaveRangeName(color.range),
+             color.chromaLeft ? " left-sited chroma" : "");
+    const char* pixelName = metalPixelFormatName(impl->layer.pixelFormat);
+    const char* planeName = impl->tenBit ? "R16Unorm" : "R8Unorm";
+    char previous[96];
+    char previousPixel[64];
+    const bool firstPresent = !impl->presentValid;
+    {
+        std::lock_guard<std::mutex> lock(impl->statsLock);
+        PyroWaveSteadyState::set(previous, sizeof(previous), impl->steady.color);
+        PyroWaveSteadyState::set(previousPixel, sizeof(previousPixel), impl->steady.pixelFormat);
+        PyroWaveSteadyState::set(impl->steady.color, sizeof(impl->steady.color), colorDesc);
+        PyroWaveSteadyState::set(impl->steady.pixelFormat, sizeof(impl->steady.pixelFormat), pixelName);
+        PyroWaveSteadyState::set(impl->steady.planeFormat, sizeof(impl->steady.planeFormat), planeName);
+    }
     impl->present = color;
     impl->presentValid = true;
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PyroWave Metal present: %s %s %s%s",
-                pyroWaveMatrixName(color.matrix),
-                pyroWaveTransferName(color.transfer),
-                pyroWaveRangeName(color.range),
-                color.chromaLeft ? " left-sited chroma" : "");
+    if (firstPresent) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PyroWave Metal present: %s pixel=%s planes=%s",
+                    colorDesc, pixelName, planeName);
+    }
+    else {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PyroWave reconfigure: present %s pixel=%s -> %s pixel=%s",
+                    previous, previousPixel, colorDesc, pixelName);
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: color=%s", colorDesc);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: pixel_format=%s", pixelName);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: plane_format=%s", planeName);
     return true;
 }
 
@@ -481,6 +516,15 @@ bool updateVertices(PyroWaveMetalVideoDecoder::Impl* impl)
             drawableHeight == impl->drawableHeight) {
         return true;
     }
+    if (impl->drawableWidth == 0 && impl->drawableHeight == 0) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PyroWave Metal drawable: %dx%d", drawableWidth, drawableHeight);
+    }
+    else if (drawableWidth != impl->drawableWidth || drawableHeight != impl->drawableHeight) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PyroWave reconfigure: drawable %dx%d -> %dx%d",
+                    impl->drawableWidth, impl->drawableHeight, drawableWidth, drawableHeight);
+    }
 
     SDL_Rect src = {0, 0, impl->width, impl->height};
     SDL_Rect dst = {0, 0, drawableWidth, drawableHeight};
@@ -503,8 +547,119 @@ bool updateVertices(PyroWaveMetalVideoDecoder::Impl* impl)
     return impl->vertexBuffer != nil;
 }
 
+void addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst);
+void stringifyVideoStats(PyroWaveMetalVideoDecoder::Impl* impl, VIDEO_STATS& stats, char* output, int length);
+
+const char* metalPixelFormatName(MTLPixelFormat format)
+{
+    if (format == MTLPixelFormatBGRA8Unorm) {
+        return "BGRA8Unorm";
+    }
+    if (format == MTLPixelFormatBGR10A2Unorm) {
+        return "BGR10A2Unorm";
+    }
+    return "other";
+}
+
+void fillMetalIdentity(PyroWaveMetalVideoDecoder::Impl* impl, PDECODER_PARAMETERS params)
+{
+    snprintf(impl->steady.resolution, sizeof(impl->steady.resolution), "%dx%d", impl->width, impl->height);
+    snprintf(impl->steady.videoFormat, sizeof(impl->steady.videoFormat), "0x%X", params->videoFormat);
+    PyroWaveSteadyState::set(impl->steady.vsync, sizeof(impl->steady.vsync), params->enableVsync ? "on" : "off");
+    PyroWaveSteadyState::set(impl->steady.planeFormat, sizeof(impl->steady.planeFormat), impl->tenBit ? "R16Unorm" : "R8Unorm");
+    PyroWaveSteadyState::set(impl->steady.colorAdvertised, sizeof(impl->steady.colorAdvertised), "Rec.601 limited");
+}
+
+void logMetalIdentity(PyroWaveMetalVideoDecoder::Impl* impl, const char* phase)
+{
+    if (strcmp(impl->steady.gpu, "unknown") == 0 && phase != nullptr && strcmp(phase, "probe") == 0) {
+        PyroWaveSteadyState::set(impl->steady.gpu, sizeof(impl->steady.gpu), "not queried on probe");
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PyroWave Metal %s: %s %s planes=%s advertised=%s gpu=%s vsync=%s swapchain=%s",
+                phase != nullptr ? phase : "init",
+                impl->steady.resolution,
+                impl->steady.videoFormat,
+                impl->steady.planeFormat,
+                impl->steady.colorAdvertised,
+                impl->steady.gpu,
+                impl->steady.vsync,
+                impl->steady.swapchainDepth);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: backend=Metal");
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: gpu=%s", impl->steady.gpu);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: resolution=%s", impl->steady.resolution);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: video_format=%s", impl->steady.videoFormat);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: vsync=%s", impl->steady.vsync);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: swapchain_depth=%s", impl->steady.swapchainDepth);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: color_advertised=%s", impl->steady.colorAdvertised);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: plane_format=%s", impl->steady.planeFormat);
+}
+
+bool metalWindowHasSamples(const VIDEO_STATS& stats)
+{
+    return stats.receivedFrames != 0 || stats.decodedFrames != 0 || stats.renderedFrames != 0
+        || stats.networkDroppedFrames != 0 || stats.totalFrames != 0;
+}
+
+void flushMetalWindow(PyroWaveMetalVideoDecoder::Impl* impl)
+{
+    impl->activeStats.renderedFrames += impl->renderedFrames.exchange(0);
+    impl->activeStats.totalRenderTimeUs += impl->totalRenderTimeUs.exchange(0);
+    if (!metalWindowHasSamples(impl->activeStats)) {
+        return;
+    }
+    addVideoStats(impl->activeStats, impl->globalStats);
+    SDL_zero(impl->activeStats);
+}
+
+PyroWaveRateStats metalRates(const PyroWaveMetalVideoDecoder::Impl* impl)
+{
+    double elapsedSec = 0;
+    if (impl->globalStats.measurementStartUs != 0) {
+        uint64_t now = LiGetMicroseconds();
+        if (now > impl->globalStats.measurementStartUs) {
+            elapsedSec = (double)(now - impl->globalStats.measurementStartUs) / 1000000.0;
+        }
+    }
+    return pyroWaveMakeRates(impl->globalStats.receivedFrames,
+                             impl->globalStats.decodedFrames,
+                             impl->globalStats.renderedFrames,
+                             impl->globalStats.totalFrames,
+                             impl->globalStats.networkDroppedFrames,
+                             impl->globalStats.totalDecodeTimeUs,
+                             impl->globalStats.totalRenderTimeUs,
+                             impl->globalStats.totalReassemblyTimeUs,
+                             impl->globalStats.receivedVideoBytes,
+                             elapsedSec);
+}
+
+void logMetalSteady(PyroWaveMetalVideoDecoder::Impl* impl, const char* reason)
+{
+    const bool endOfSession = reason != nullptr && strcmp(reason, "end of session") == 0;
+    if (endOfSession) {
+        flushMetalWindow(impl);
+        char videoStats[2048];
+        stringifyVideoStats(impl, impl->globalStats, videoStats, sizeof(videoStats));
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "\nGlobal video stats\n------------------\n%s",
+                    videoStats);
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PyroWave steady-state (%s, Metal). First-packet wait is startup context only.",
+                reason != nullptr ? reason : "session");
+    PyroWaveSteadyState copy;
+    {
+        std::lock_guard<std::mutex> lock(impl->statsLock);
+        copy = impl->steady;
+    }
+    pyroWaveEmitMetrics("Metal", copy, metalRates(impl), [](const char* line) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "%s", line);
+    });
+}
+
 void addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst)
 {
+    dst.receivedVideoBytes += src.receivedVideoBytes;
     dst.receivedFrames += src.receivedFrames;
     dst.decodedFrames += src.decodedFrames;
     dst.renderedFrames += src.renderedFrames;
@@ -561,10 +716,35 @@ void stringifyVideoStats(PyroWaveMetalVideoDecoder::Impl* impl, VIDEO_STATS& sta
         }
         offset += wrote;
     }
+    if (stats.framesWithHostProcessingLatency > 0) {
+        int wrote = snprintf(output + offset, length - offset,
+                             "Host processing latency min/max/average: %.1f/%.1f/%.1f ms\n",
+                             (float)stats.minHostProcessingLatency / 10,
+                             (float)stats.maxHostProcessingLatency / 10,
+                             (float)stats.totalHostProcessingLatency / 10 / stats.framesWithHostProcessingLatency);
+        if (wrote < 0 || wrote >= length - offset) {
+            return;
+        }
+        offset += wrote;
+    }
     if (stats.renderedFrames != 0) {
+        char rttString[32];
+        if (stats.lastRtt != 0) {
+            snprintf(rttString, sizeof(rttString), "%u ms (variance: %u ms)", stats.lastRtt, stats.lastRttVariance);
+        }
+        else {
+            snprintf(rttString, sizeof(rttString), "N/A");
+        }
         snprintf(output + offset, length - offset,
-                 "Average rendering time: %.2f ms\n",
-                 (double)(stats.totalRenderTimeUs / 1000.0) / stats.renderedFrames);
+                 "Frames dropped by your network connection: %.2f%%\n"
+                 "Average network latency: %s\n"
+                 "Average reassembly/decoding time: %.2f/%.2f ms\n"
+                 "Average rendering time (including monitor V-sync latency): %.2f ms\n",
+                 stats.totalFrames ? (float)stats.networkDroppedFrames / stats.totalFrames * 100 : 0.0f,
+                 rttString,
+                 stats.decodedFrames ? (double)(stats.totalReassemblyTimeUs / 1000.0) / stats.decodedFrames : 0.0,
+                 stats.decodedFrames ? (double)(stats.totalDecodeTimeUs / 1000.0) / stats.decodedFrames : 0.0,
+                 stats.renderedFrames ? (double)(stats.totalRenderTimeUs / 1000.0) / stats.renderedFrames : 0.0);
     }
 }
 
@@ -580,6 +760,9 @@ PyroWaveMetalVideoDecoder::~PyroWaveMetalVideoDecoder()
 {
     if (m_Impl == nullptr) {
         return;
+    }
+    if (!m_TestOnly) {
+        logMetalSteady(m_Impl, "end of session");
     }
     @autoreleasepool {
         if (m_Impl->queue != nil) {
@@ -651,6 +834,7 @@ bool PyroWaveMetalVideoDecoder::initialize(PDECODER_PARAMETERS params)
         if (m_Impl->width < 2 || m_Impl->height < 2) {
             return false;
         }
+        fillMetalIdentity(m_Impl, params);
 
         MetalApi* api = metalApi();
         if (api == nullptr) {
@@ -662,9 +846,12 @@ bool PyroWaveMetalVideoDecoder::initialize(PDECODER_PARAMETERS params)
                          "PyroWave Metal: no supported GPU");
             return false;
         }
+        const char* gpuName = m_Impl->mtlDevice.name.UTF8String;
+        PyroWaveSteadyState::set(m_Impl->steady.gpu, sizeof(m_Impl->steady.gpu),
+                                 gpuName != nullptr ? gpuName : "unknown");
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "PyroWave Metal device: %s",
-                    m_Impl->mtlDevice.name.UTF8String);
+                    m_Impl->steady.gpu);
 
         pyro_metal::DeviceCreateInfo deviceInfo{};
         deviceInfo.mtlDevice = (void*)m_Impl->mtlDevice;
@@ -695,8 +882,7 @@ bool PyroWaveMetalVideoDecoder::initialize(PDECODER_PARAMETERS params)
         m_Impl->decoder = decoder;
 
         if (m_TestOnly) {
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "PyroWave Metal probe succeeded");
+            logMetalIdentity(m_Impl, "probe");
             return true;
         }
         if (params->window == nullptr) {
@@ -714,6 +900,7 @@ bool PyroWaveMetalVideoDecoder::initialize(PDECODER_PARAMETERS params)
         m_Impl->layer.device = m_Impl->mtlDevice;
         m_Impl->layer.maximumDrawableCount = 3;
         m_Impl->layer.displaySyncEnabled = params->enableVsync;
+        PyroWaveSteadyState::set(m_Impl->steady.swapchainDepth, sizeof(m_Impl->steady.swapchainDepth), "3");
 
         m_Impl->queue = [m_Impl->mtlDevice newCommandQueue];
         if (m_Impl->queue == nil) {
@@ -737,11 +924,14 @@ bool PyroWaveMetalVideoDecoder::initialize(PDECODER_PARAMETERS params)
             Session::get()->getOverlayManager().setOverlayRenderer(this);
         }
 
+        logMetalIdentity(m_Impl, "stream");
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "PyroWave Metal decoder ready: %dx%d %s %s",
+                    "PyroWave Metal decoder ready: %dx%d %s %s planes=%s advertised=%s",
                     m_Impl->width, m_Impl->height,
                     m_Impl->yuv444 ? "4:4:4" : "4:2:0",
-                    m_Impl->tenBit ? "10-bit" : "8-bit");
+                    m_Impl->tenBit ? "10-bit" : "8-bit",
+                    m_Impl->steady.planeFormat,
+                    m_Impl->steady.colorAdvertised);
         return true;
     }
 }
@@ -762,10 +952,15 @@ void PyroWaveMetalVideoDecoder::setHdrMode(bool enabled)
     m_Impl->hdr.store(enabled);
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "PyroWave Metal: HDR mode %s", enabled ? "enabled" : "disabled");
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PyroWave reconfigure: HDR mode %s", enabled ? "enabled" : "disabled");
 }
 
 bool PyroWaveMetalVideoDecoder::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info)
 {
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PyroWave reconfigure: window change flags=0x%x size=%dx%d display=%d (handled in place)",
+                info->stateChangeFlags, info->width, info->height, info->displayIndex);
     uint32_t unhandled = info->stateChangeFlags;
     unhandled &= ~WINDOW_STATE_CHANGE_SIZE;
     unhandled &= ~WINDOW_STATE_CHANGE_DISPLAY;
@@ -851,6 +1046,11 @@ int PyroWaveMetalVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
                                     Session::get()->getOverlayManager().getOverlayMaxTextLength());
                 Session::get()->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
             }
+            addVideoStats(impl->activeStats, impl->globalStats);
+            if (++impl->statsWindows >= 5) {
+                impl->statsWindows = 0;
+                logMetalSteady(impl, "session so far");
+            }
             impl->lastStats = impl->activeStats;
             SDL_zero(impl->activeStats);
             impl->activeStats.measurementStartUs = LiGetMicroseconds();
@@ -871,6 +1071,7 @@ int PyroWaveMetalVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
         impl->activeStats.totalHostProcessingLatency += du->frameHostProcessingLatency;
         impl->activeStats.receivedFrames++;
         impl->activeStats.totalFrames++;
+        impl->activeStats.receivedVideoBytes += (uint64_t)du->fullLength;
         impl->bandwidth.AddBytes(du->fullLength);
         impl->activeStats.totalReassemblyTimeUs += (du->enqueueTimeUs - du->receiveTimeUs);
 
@@ -910,16 +1111,29 @@ int PyroWaveMetalVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
         // Same queue as present. A later committed render sees these writes.
         [commandBuffer commit];
 
+        bool replaced = false;
+        uint64_t readyUs = 0;
         {
             std::lock_guard<std::mutex> lock(impl->frameLock);
             if (haveSequence) {
                 impl->sequence = sequence;
                 impl->haveSequence = true;
             }
+            replaced = impl->frameReady;
+            readyUs = LiGetMicroseconds();
+            impl->decodeReadyUs = readyUs;
             impl->frameReady = true;
         }
-        impl->activeStats.totalDecodeTimeUs += LiGetMicroseconds() - decodeStartUs;
+        uint64_t decodeUs = readyUs - decodeStartUs;
+        impl->activeStats.totalDecodeTimeUs += decodeUs;
         impl->activeStats.decodedFrames++;
+        {
+            std::lock_guard<std::mutex> lock(impl->statsLock);
+            impl->steady.decodeSubmitUs.add(decodeUs);
+            if (replaced) {
+                impl->steady.replacedBeforePresent++;
+            }
+        }
 
         SDL_Event event{};
         event.type = SDL_USEREVENT;
@@ -935,6 +1149,7 @@ void PyroWaveMetalVideoDecoder::renderFrameOnMainThread()
         Impl* impl = m_Impl;
         PyroWaveSequenceHeader sequence{};
         bool haveSequence = false;
+        uint64_t frameReadyUs = 0;
         {
             std::lock_guard<std::mutex> lock(impl->frameLock);
             if (!impl->frameReady) {
@@ -943,15 +1158,22 @@ void PyroWaveMetalVideoDecoder::renderFrameOnMainThread()
             impl->frameReady = false;
             haveSequence = impl->haveSequence;
             sequence = impl->sequence;
+            frameReadyUs = impl->decodeReadyUs;
         }
+        uint64_t renderStartUs = LiGetMicroseconds();
+        auto noteStall = [&]() {
+            std::lock_guard<std::mutex> lock(impl->statsLock);
+            impl->steady.stalledPresents++;
+        };
         if (impl->layer == nullptr || impl->queue == nullptr) {
+            noteStall();
             return;
         }
 
-        uint64_t renderStartUs = LiGetMicroseconds();
         const PyroWavePresentColor color = pyroWavePresentColor(impl->hdr.load(), haveSequence ? &sequence : nullptr);
         if (impl->videoPipeline == nil || !impl->presentValid || !pyroWavePresentColorEqual(color, impl->present)) {
             if (!buildPipelines(impl, color)) {
+                noteStall();
                 return;
             }
         }
@@ -962,6 +1184,7 @@ void PyroWaveMetalVideoDecoder::renderFrameOnMainThread()
             impl->layer.drawableSize = CGSizeMake(drawableWidth, drawableHeight);
         }
         if (!updateVertices(impl)) {
+            noteStall();
             return;
         }
 
@@ -969,6 +1192,7 @@ void PyroWaveMetalVideoDecoder::renderFrameOnMainThread()
         if (drawable == nil) {
             // Fullscreen transitions often have no drawable for a frame.
             // Put the frame back so the next event can present it.
+            noteStall();
             std::lock_guard<std::mutex> lock(impl->frameLock);
             impl->frameReady = true;
             return;
@@ -1029,8 +1253,17 @@ void PyroWaveMetalVideoDecoder::renderFrameOnMainThread()
         [commandBuffer presentDrawable:drawable];
         [commandBuffer commit];
 
+        uint64_t now = LiGetMicroseconds();
+        uint64_t presentUs = now - renderStartUs;
         impl->renderedFrames.fetch_add(1);
-        impl->totalRenderTimeUs.fetch_add(LiGetMicroseconds() - renderStartUs);
+        impl->totalRenderTimeUs.fetch_add(presentUs);
+        {
+            std::lock_guard<std::mutex> lock(impl->statsLock);
+            impl->steady.presentUs.add(presentUs);
+            if (frameReadyUs != 0 && now >= frameReadyUs) {
+                impl->steady.decodeToPresentUs.add(now - frameReadyUs);
+            }
+        }
     }
 }
 

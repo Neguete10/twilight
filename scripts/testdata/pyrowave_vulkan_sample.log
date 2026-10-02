@@ -1,0 +1,47 @@
+00:00:00.100: PyroWave backend request: vulkan (metal unavailable, vulkan available), candidate Vulkan
+00:00:00.120: PyroWave backend selected: Vulkan (probe)
+00:00:00.121: PyroWave Vulkan probe: 1920x1080 0x10 planes=R8Unorm advertised=Rec.601 limited gpu=Apple M2 vsync=off swapchain=unknown
+00:00:00.122: PyroWave metric: backend=Vulkan
+00:00:00.122: PyroWave metric: gpu=Apple M2
+00:00:01.000: PyroWave backend confirmed: Vulkan (stream)
+00:00:01.010: PyroWave backend selected: Vulkan (stream)
+00:00:01.020: PyroWave Vulkan stream: 1920x1080 0x10 planes=R8Unorm advertised=Rec.601 limited gpu=Apple M2 vsync=on swapchain=3
+00:00:01.500: Received first video packet after 900 ms
+00:00:01.501: First-packet wait is startup context only. Compare steady-state frame times (Global video stats), not this number.
+00:00:02.000: PyroWave present: Rec.601 BT.709 limited
+00:00:02.001: PyroWave metric: color=Rec.601 BT.709 limited
+00:00:02.010: PyroWave Vulkan pixel format: rgba8
+00:00:02.011: PyroWave metric: pixel_format=rgba8
+00:01:00.000: PyroWave reconfigure: drawable 1920x1080 -> 2560x1440
+00:05:00.000: 
+Global video stats
+------------------
+Video stream: 1920x1080 59.90 FPS (Codec: PyroWave Vulkan 4:2:0)
+00:05:00.010: PyroWave steady-state (end of session, Vulkan). First-packet wait is startup context only.
+00:05:00.011: PyroWave metric: backend=Vulkan
+00:05:00.012: PyroWave metric: gpu=Apple M2
+00:05:00.013: PyroWave metric: cpu=not sampled
+00:05:00.014: PyroWave metric: resolution=1920x1080
+00:05:00.015: PyroWave metric: video_format=0x10
+00:05:00.016: PyroWave metric: vsync=on
+00:05:00.017: PyroWave metric: swapchain_depth=3
+00:05:00.018: PyroWave metric: color_advertised=Rec.601 limited
+00:05:00.019: PyroWave metric: color=Rec.601 BT.709 limited
+00:05:00.020: PyroWave metric: pixel_format=rgba8
+00:05:00.021: PyroWave metric: plane_format=R8Unorm
+00:05:00.022: PyroWave metric: decode_submit_ms p50=1.20 p95=2.40 p99=4.80 n=5000 overflow=0
+00:05:00.023: PyroWave metric: present_ms p50=8.30 p95=16.70 p99=33.40 n=4988 overflow=2
+00:05:00.024: PyroWave metric: decode_to_present_ms p50=9.40 p95=18.20 p99=36.00 n=4988 overflow=2
+00:05:00.025: PyroWave metric: network_dropped=4
+00:05:00.026: PyroWave metric: stalled_presents=3
+00:05:00.027: PyroWave metric: replaced_before_present=1
+00:05:00.028: PyroWave metric: received_fps=60.02
+00:05:00.029: PyroWave metric: decoded_fps=59.94
+00:05:00.030: PyroWave metric: rendered_fps=59.80
+00:05:00.031: PyroWave metric: avg_decode_ms=1.35
+00:05:00.032: PyroWave metric: avg_present_ms=8.55
+00:05:00.033: PyroWave metric: avg_reassembly_ms=0.40
+00:05:00.034: PyroWave metric: avg_mbps=180.00
+00:05:00.035: PyroWave metric: decoded_frames=5000
+00:05:00.036: PyroWave metric: rendered_frames=4988
+00:05:00.037: PyroWave metric: timing_note=decode_submit is CPU time until the GPU command is queued, not GPU completion; present is CPU time inside the present call and can include a GPU wait; decode_to_present is present-return minus decode-submit-end; histogram buckets are 0.1 ms; not glass-to-glass and not the first-packet wait

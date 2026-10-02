@@ -21,6 +21,7 @@
   #include "decoder.h"
   #include "overlaymanager.h"
   #include "pyrowave_color.h"
+  #include "pyrowave_stats.h"
   #include "../bandwidth.h"
 
   #ifdef __APPLE__
@@ -78,6 +79,11 @@ private:
     static void overlayUploadComplete(void* opaque);
     void addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst);
     void stringifyVideoStats(VIDEO_STATS& stats, char* output, int length);
+    void logInitDiagnostics(const char* phase);
+    void logSteadyState(const char* reason);
+    void flushActiveWindowToGlobal();
+    bool activeWindowHasSamples() const;
+    PyroWaveRateStats currentRates() const;
     // One exportable R8 decode-plane image on PyroWave's device, imported into libplacebo.
     struct Plane {
         VkImage image = VK_NULL_HANDLE;
@@ -171,13 +177,22 @@ private:
 
     // Performance-overlay stats (compact version of FFmpegVideoDecoder's). Decode/network stats are
     // updated on the decode thread in submitDecodeUnit; render stats come from the main thread via
-    // atomics folded in at each 1-second window flip.
+    // atomics folded in at each 1-second window flip. Completed windows accumulate into
+    // m_GlobalVideoStats and are written on quit, same as FFmpeg's "Global video stats".
     VIDEO_STATS m_ActiveWndVideoStats = {};
     VIDEO_STATS m_LastWndVideoStats = {};
+    VIDEO_STATS m_GlobalVideoStats = {};
     BandwidthTracker m_BwTracker;
     uint32_t m_LastFrameNumber;
     std::atomic<uint32_t> m_RenderedFrames;
     std::atomic<uint64_t> m_TotalRenderTimeUs;
+    int m_StatsWindows = 0;
+    // Guarded by m_FrameLock. End of decode submit for the frame waiting to present.
+    uint64_t m_DecodeReadyUs = 0;
+    int m_LoggedDrawableW = 0;
+    int m_LoggedDrawableH = 0;
+    std::mutex m_StatsLock;
+    PyroWaveSteadyState m_Steady;
 
     // Performance/status overlay compositing (same model as PlVkRenderer): notifyOverlayUpdated
     // uploads text surfaces to staging textures; renderFrameOnMainThread promotes + composites them.

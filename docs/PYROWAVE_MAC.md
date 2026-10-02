@@ -480,7 +480,53 @@ g++ -std=c++17 -Wall -Wextra -Iapp/streaming/video \
 g++ -std=c++17 -Wall -Wextra -Iapp/streaming/video \
     tests/pyrowave_backend_test.cpp -o /tmp/pyrowave_backend_test
 /tmp/pyrowave_backend_test
+
+g++ -std=c++11 -Wall -Wextra -Iapp/streaming/video \
+    tests/pyrowave_stats_test.cpp -o /tmp/pyrowave_stats_test
+/tmp/pyrowave_stats_test
+
+python3 scripts/pyrowave_ab_summary.py --self-test
 ```
+
+## Comparing Vulkan and Metal
+
+The number `Received first video packet after X ms` stays in the log. It is
+how long the client waited for the first UDP datagram. That is startup
+context. A cold decoder, a paced host, or a late first packet moves it
+without saying anything about steady-state frame time. The next line says
+so. Do not use it as the Vulkan-vs-Metal result.
+
+Quit the stream. Both PyroWave decoders then write the same block HEVC
+already writes, `Global video stats`, plus `PyroWave metric:` lines:
+
+- decode-submit, present, and decode-submit-to-present-return p50/p95/p99
+  (0.1 ms histogram, CPU timestamps, not glass-to-glass, not GPU completion)
+- network-dropped frames, stalled presents, frames replaced before present
+- advertised color, the present color, the swapchain pixel format, and the
+  plane format (`R8Unorm` or `R16Unorm`)
+- backend, GPU name, and `cpu=not sampled` (this build has no process CPU
+  counter; a missing number is not zero)
+- the same lines every five seconds, labeled `session so far`, so a killed
+  process still has a partial record
+
+Probe and init log the backend that was actually selected, the advertised
+Rec.601 limited range, and the plane format. Present logs the color and
+pixel format again when they are known. Fallback, HDR, drawable size, and
+color changes log `PyroWave reconfigure:`.
+
+Matched runs use the same host, resolution, format, bitrate, and v-sync.
+Quit both so the end-of-session lines are the last ones:
+
+```bash
+moonlight stream <host> <app> --video-codec PyroWave --pyrowave-backend vulkan
+moonlight stream <host> <app> --video-codec PyroWave --pyrowave-backend metal
+python3 scripts/pyrowave_ab_summary.py ~/path/Moonlight-vulkan.log ~/path/Moonlight-metal.log
+```
+
+The script prints a side-by-side table of the steady-state lines and puts
+the first-packet waits under Context. It warns if resolution, format, or
+v-sync differ. `python3 scripts/pyrowave_ab_summary.py --self-test` checks
+that layout against `scripts/testdata/`.
 
 ## Blockers for a live Mac proof
 
