@@ -9,7 +9,7 @@
 	<key>CFBundleIconFile</key>
 	<string>moonlight</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.moonlight-stream.Moonlight</string>
+	<string>BUNDLE_ID</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>CFBundlePackageType</key>
@@ -45,6 +45,6 @@
 	<key>CFBundleShortVersionString</key>
 	<string>VERSION</string>
 	<key>CFBundleDisplayName</key>
-	<string>Moonlight</string>
+	<string>DISPLAY_NAME</string>
 </dict>
 </plist>

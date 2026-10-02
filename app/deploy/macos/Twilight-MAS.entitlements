@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Twilight Mac App Store entitlements.
+  Applied only for qmake CONFIG+=twilight-mas
+  (scripts/generate-dmg.sh with TWILIGHT_MAS=1).
+  Desktop / Developer ID DMG builds leave this file unused.
+  Hardened Runtime flag: codesign -o runtime
+  (pass this file with the entitlements flag on the MAS path only).
+  Do not submit the result to App Store review.
+  The key com.apple.developer.audio.spatial-audio is intentionally absent.
+-->
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.developer.spatial-audio.profile-access</key>
+	<true/>
+	<key>com.apple.developer.coremotion.head-pose</key>
+	<true/>
+</dict>
+</plist>
