@@ -58,3 +58,16 @@ inline const char* pyroWaveBackendName(PyroWaveGpuBackend backend)
         return "none";
     }
 }
+
+inline const char* pyroWaveBackendRequestName(PyroWaveBackendRequest request)
+{
+    switch (request) {
+    case PyroWaveBackendRequest::Auto:
+        return "auto";
+    case PyroWaveBackendRequest::Metal:
+        return "metal";
+    case PyroWaveBackendRequest::Vulkan:
+        return "vulkan";
+    }
+    return "unknown";
+}

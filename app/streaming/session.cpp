@@ -319,6 +319,20 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
         const PyroWaveGpuBackend primary = alreadyProbed
                 ? m_PyroWaveBackend
                 : selectPyroWaveBackend(request, availability);
+        if (!alreadyProbed) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave backend request: %s (metal %s, vulkan %s), candidate %s",
+                        pyroWaveBackendRequestName(request),
+                        availability.metal ? "available" : "unavailable",
+                        availability.vulkan ? "available" : "unavailable",
+                        pyroWaveBackendName(primary));
+        }
+        else {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave backend confirmed: %s (%s)",
+                        pyroWaveBackendName(primary),
+                        testOnly ? "probe" : "stream");
+        }
 
         auto tryBackend = [&](PyroWaveGpuBackend which) -> bool {
             if (which == PyroWaveGpuBackend::None) {
@@ -343,8 +357,9 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
                 chosenDecoder = decoder;
                 m_PyroWaveBackend = which;
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "PyroWave %s video decoder chosen",
-                            pyroWaveBackendName(which));
+                            "PyroWave backend selected: %s (%s)",
+                            pyroWaveBackendName(which),
+                            testOnly ? "probe" : "stream");
                 return true;
             }
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -354,6 +369,11 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
             return false;
         };
 
+        if (primary == PyroWaveGpuBackend::None) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "PyroWave backend unavailable for request %s",
+                         pyroWaveBackendRequestName(request));
+        }
         if (tryBackend(primary)) {
             return true;
         }
@@ -367,7 +387,7 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
             }
             if (fallback != PyroWaveGpuBackend::None) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "PyroWave %s failed; trying %s",
+                            "PyroWave reconfigure: fallback %s -> %s after initialize failed",
                             pyroWaveBackendName(primary),
                             pyroWaveBackendName(fallback));
                 if (tryBackend(fallback)) {

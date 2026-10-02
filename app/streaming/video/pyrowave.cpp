@@ -69,6 +69,12 @@ PyroWaveVideoDecoder::PyroWaveVideoDecoder(bool testOnly)
       m_OverlayLock(0) {}
 
 PyroWaveVideoDecoder::~PyroWaveVideoDecoder() {
+    // Log before any GPU wait. A hung device teardown must not swallow the
+    // session stats, and a testOnly probe has no frames to report.
+    if (!m_TestOnly) {
+        logSteadyState("end of session");
+    }
+
     // Stop overlay updates before we tear down the libplacebo GPU that owns the overlay textures.
     // Only the real (non-testOnly) decoder registers itself, and only while a Session is active
     // (the testOnly probe runs during validateLaunch before Session::get() is set).
@@ -154,6 +160,10 @@ bool PyroWaveVideoDecoder::createPyroDevice() {
         return false;
     }
     pyrowave_device_get_vk_device_handles(m_PyroDevice, nullptr, &m_VkPhys, &m_VkDev);
+    VkPhysicalDeviceProperties nameProps{};
+    vkGetPhysicalDeviceProperties(m_VkPhys, &nameProps);
+    PyroWaveSteadyState::set(m_Steady.gpu, sizeof(m_Steady.gpu), nameProps.deviceName);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave Vulkan device: %s", m_Steady.gpu);
     m_GetMemoryFd = (PFN_vkGetMemoryFdKHR) vkGetDeviceProcAddr(m_VkDev, "vkGetMemoryFdKHR");
     m_GetImgMod = (PFN_vkGetImageDrmFormatModifierPropertiesEXT) vkGetDeviceProcAddr(m_VkDev, "vkGetImageDrmFormatModifierPropertiesEXT");
     if (!m_GetMemoryFd || !m_GetImgMod) {
@@ -410,6 +420,8 @@ bool PyroWaveVideoDecoder::createSharedDevice() {
     }
     VkPhysicalDeviceProperties props;
     pfn_vkGetPhysicalDeviceProperties(m_VkPhys, &props);
+    PyroWaveSteadyState::set(m_Steady.gpu, sizeof(m_Steady.gpu), props.deviceName);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave Vulkan device: %s", props.deviceName);
     if (props.apiVersion < VK_API_VERSION_1_3) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "PyroWave: GPU only supports Vulkan 0x%x, need 1.3", props.apiVersion);
         return false;
@@ -589,6 +601,14 @@ bool PyroWaveVideoDecoder::createLibplacebo(PDECODER_PARAMETERS params) {
     if (!m_Vulkan) {
         return false;
     }
+    VkPhysicalDeviceProperties presentProps{};
+    vkGetPhysicalDeviceProperties(m_Vulkan->phys_device, &presentProps);
+    if (presentProps.deviceName[0] != '\0' && strcmp(presentProps.deviceName, m_Steady.gpu) != 0) {
+        char decodeName[160];
+        PyroWaveSteadyState::set(decodeName, sizeof(decodeName), m_Steady.gpu);
+        snprintf(m_Steady.gpu, sizeof(m_Steady.gpu), "decode=%s present=%s", decodeName, presentProps.deviceName);
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave Vulkan present device: %s", presentProps.deviceName);
+    }
 #endif
 
     pl_vulkan_swapchain_params sp = {};
@@ -601,6 +621,7 @@ bool PyroWaveVideoDecoder::createLibplacebo(PDECODER_PARAMETERS params) {
     if (!m_Swapchain) {
         return false;
     }
+    PyroWaveSteadyState::set(m_Steady.swapchainDepth, sizeof(m_Steady.swapchainDepth), "3");
     m_Renderer = pl_renderer_create(m_Log, m_Vulkan->gpu);
     return m_Renderer != nullptr;
 }
@@ -694,6 +715,12 @@ bool PyroWaveVideoDecoder::initialize(PDECODER_PARAMETERS params) {
     m_Width = params->width & ~1;
     m_Height = params->height & ~1;
     m_Window = params->window;
+    snprintf(m_Steady.resolution, sizeof(m_Steady.resolution), "%dx%d", m_Width, m_Height);
+    snprintf(m_Steady.videoFormat, sizeof(m_Steady.videoFormat), "0x%X", params->videoFormat);
+    PyroWaveSteadyState::set(m_Steady.vsync, sizeof(m_Steady.vsync), params->enableVsync ? "on" : "off");
+    PyroWaveSteadyState::set(m_Steady.planeFormat, sizeof(m_Steady.planeFormat), m_TenBit ? "R16Unorm" : "R8Unorm");
+    // Same advertisement as getDecoderColorspace/getDecoderColorRange (VT Metal HEVC).
+    PyroWaveSteadyState::set(m_Steady.colorAdvertised, sizeof(m_Steady.colorAdvertised), "Rec.601 limited");
 
 #ifdef __APPLE__
     // Shared-device mode: the pyrowave device is created inside createLibplacebo (it wraps the
@@ -726,6 +753,7 @@ bool PyroWaveVideoDecoder::initialize(PDECODER_PARAMETERS params) {
     }
 
     if (m_TestOnly) {
+        logInitDiagnostics("probe");
         return true;
     }
 
@@ -749,7 +777,11 @@ bool PyroWaveVideoDecoder::initialize(PDECODER_PARAMETERS params) {
         Session::get()->getOverlayManager().setOverlayRenderer(this);
     }
 
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave Vulkan decoder ready: %dx%d %s %s", m_Width, m_Height, m_YUV444 ? "4:4:4" : "4:2:0", m_TenBit ? "10-bit" : "8-bit");
+    logInitDiagnostics("stream");
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PyroWave Vulkan decoder ready: %dx%d %s %s planes=%s advertised=%s",
+                m_Width, m_Height, m_YUV444 ? "4:4:4" : "4:2:0", m_TenBit ? "10-bit" : "8-bit",
+                m_Steady.planeFormat, m_Steady.colorAdvertised);
     return true;
 }
 
@@ -836,18 +868,111 @@ void PyroWaveVideoDecoder::setHdrMode(bool enabled) {
     // Consumed on the render thread: switches the pl_frame colorspace + swapchain hint.
     m_HdrEnabled.store(enabled);
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave: HDR mode %s", enabled ? "enabled" : "disabled");
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave reconfigure: HDR mode %s", enabled ? "enabled" : "disabled");
 }
 bool PyroWaveVideoDecoder::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info) {
     // pl_swapchain_resize in renderFrameOnMainThread applies size and display
     // changes. Recreating the shared MoltenVK device on those events flashes
     // the window and drops frames, which HEVC does not do.
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PyroWave reconfigure: window change flags=0x%x size=%dx%d display=%d (handled in place)",
+                info->stateChangeFlags, info->width, info->height, info->displayIndex);
     uint32_t unhandled = info->stateChangeFlags;
     unhandled &= ~WINDOW_STATE_CHANGE_SIZE;
     unhandled &= ~WINDOW_STATE_CHANGE_DISPLAY;
     return unhandled == 0;
 }
 
+bool PyroWaveVideoDecoder::activeWindowHasSamples() const {
+    return m_ActiveWndVideoStats.receivedFrames != 0
+        || m_ActiveWndVideoStats.decodedFrames != 0
+        || m_ActiveWndVideoStats.renderedFrames != 0
+        || m_ActiveWndVideoStats.networkDroppedFrames != 0
+        || m_ActiveWndVideoStats.totalFrames != 0;
+}
+
+void PyroWaveVideoDecoder::flushActiveWindowToGlobal() {
+    m_ActiveWndVideoStats.renderedFrames += m_RenderedFrames.exchange(0);
+    m_ActiveWndVideoStats.totalRenderTimeUs += m_TotalRenderTimeUs.exchange(0);
+    if (!activeWindowHasSamples()) {
+        return;
+    }
+    addVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
+    SDL_zero(m_ActiveWndVideoStats);
+}
+
+PyroWaveRateStats PyroWaveVideoDecoder::currentRates() const {
+    double elapsedSec = 0;
+    if (m_GlobalVideoStats.measurementStartUs != 0) {
+        uint64_t now = LiGetMicroseconds();
+        if (now > m_GlobalVideoStats.measurementStartUs) {
+            elapsedSec = (double)(now - m_GlobalVideoStats.measurementStartUs) / 1000000.0;
+        }
+    }
+    return pyroWaveMakeRates(m_GlobalVideoStats.receivedFrames,
+                             m_GlobalVideoStats.decodedFrames,
+                             m_GlobalVideoStats.renderedFrames,
+                             m_GlobalVideoStats.totalFrames,
+                             m_GlobalVideoStats.networkDroppedFrames,
+                             m_GlobalVideoStats.totalDecodeTimeUs,
+                             m_GlobalVideoStats.totalRenderTimeUs,
+                             m_GlobalVideoStats.totalReassemblyTimeUs,
+                             m_GlobalVideoStats.receivedVideoBytes,
+                             elapsedSec);
+}
+
+void PyroWaveVideoDecoder::logInitDiagnostics(const char* phase) {
+    if (strcmp(m_Steady.gpu, "unknown") == 0 && phase != nullptr && strcmp(phase, "probe") == 0) {
+        PyroWaveSteadyState::set(m_Steady.gpu, sizeof(m_Steady.gpu), "not queried on probe");
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PyroWave Vulkan %s: %s %s planes=%s advertised=%s gpu=%s vsync=%s swapchain=%s",
+                phase != nullptr ? phase : "init",
+                m_Steady.resolution,
+                m_Steady.videoFormat,
+                m_Steady.planeFormat,
+                m_Steady.colorAdvertised,
+                m_Steady.gpu,
+                m_Steady.vsync,
+                m_Steady.swapchainDepth);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: backend=Vulkan");
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: gpu=%s", m_Steady.gpu);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: resolution=%s", m_Steady.resolution);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: video_format=%s", m_Steady.videoFormat);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: vsync=%s", m_Steady.vsync);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: swapchain_depth=%s", m_Steady.swapchainDepth);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: color_advertised=%s", m_Steady.colorAdvertised);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: plane_format=%s", m_Steady.planeFormat);
+}
+
+void PyroWaveVideoDecoder::logSteadyState(const char* reason) {
+    const bool endOfSession = reason != nullptr && strcmp(reason, "end of session") == 0;
+    if (endOfSession) {
+        flushActiveWindowToGlobal();
+    }
+    if (endOfSession) {
+        char videoStats[2048];
+        stringifyVideoStats(m_GlobalVideoStats, videoStats, sizeof(videoStats));
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "\nGlobal video stats\n------------------\n%s",
+                    videoStats);
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PyroWave steady-state (%s, Vulkan). First-packet wait is startup context only.",
+                reason != nullptr ? reason : "session");
+    PyroWaveSteadyState copy;
+    {
+        std::lock_guard<std::mutex> lock(m_StatsLock);
+        copy = m_Steady;
+    }
+    auto emit = [](const char* line) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "%s", line);
+    };
+    pyroWaveEmitMetrics("Vulkan", copy, currentRates(), emit);
+}
+
 void PyroWaveVideoDecoder::addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
+    dst.receivedVideoBytes += src.receivedVideoBytes;
     dst.receivedFrames += src.receivedFrames;
     dst.decodedFrames += src.decodedFrames;
     dst.renderedFrames += src.renderedFrames;
@@ -888,7 +1013,7 @@ void PyroWaveVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output,
 
     if (stats.receivedFps > 0) {
         ret = snprintf(&output[offset], length - offset,
-                       "Video stream: %dx%d %.2f FPS (Codec: PyroWave %s%s)\n"
+                       "Video stream: %dx%d %.2f FPS (Codec: PyroWave Vulkan %s%s)\n"
                        "Bitrate: %.1f Mbps, Peak (%us): %.1f\n"
                        "Incoming frame rate from network: %.2f FPS\n"
                        "Decoding frame rate: %.2f FPS\n"
@@ -957,6 +1082,12 @@ int PyroWaveVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
             Session::get()->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
         }
 
+        addVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
+        if (++m_StatsWindows >= 5) {
+            m_StatsWindows = 0;
+            logSteadyState("session so far");
+        }
+
         SDL_memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(m_ActiveWndVideoStats));
         SDL_zero(m_ActiveWndVideoStats);
         m_ActiveWndVideoStats.measurementStartUs = LiGetMicroseconds();
@@ -974,6 +1105,7 @@ int PyroWaveVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
     m_ActiveWndVideoStats.totalHostProcessingLatency += du->frameHostProcessingLatency;
     m_ActiveWndVideoStats.receivedFrames++;
     m_ActiveWndVideoStats.totalFrames++;
+    m_ActiveWndVideoStats.receivedVideoBytes += (uint64_t)du->fullLength;
 
     m_BwTracker.AddBytes(du->fullLength);
     // Reassembly (receive-to-enqueue) happens on the receive thread and is otherwise invisible here.
@@ -1030,6 +1162,8 @@ int PyroWaveVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
     acquire.sync = {m_PwSem, waitVal};
     pyrowave_gpu_sync_operation release{};
     release.sync = {m_PwSem, sigVal};
+    bool replaced = false;
+    uint64_t readyUs = 0;
     {
         std::lock_guard<std::mutex> lock(m_FrameLock);
         if (pyrowave_decoder_decode_gpu_buffer(m_Decoder, &acquire, &release, &gb) != PYROWAVE_SUCCESS) {
@@ -1040,11 +1174,22 @@ int PyroWaveVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
             m_Sequence = sequence;
             m_HaveSequence = true;
         }
+        replaced = m_FrameReady;
+        readyUs = LiGetMicroseconds();
+        m_DecodeReadyUs = readyUs;
         m_FrameReady = true;
     }
 
-    m_ActiveWndVideoStats.totalDecodeTimeUs += LiGetMicroseconds() - decodeStartUs;
+    uint64_t decodeUs = readyUs - decodeStartUs;
+    m_ActiveWndVideoStats.totalDecodeTimeUs += decodeUs;
     m_ActiveWndVideoStats.decodedFrames++;
+    {
+        std::lock_guard<std::mutex> lock(m_StatsLock);
+        m_Steady.decodeSubmitUs.add(decodeUs);
+        if (replaced) {
+            m_Steady.replacedBeforePresent++;
+        }
+    }
 
     SDL_Event event;
     SDL_zero(event);
@@ -1058,6 +1203,7 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
     uint64_t renderStartUs = LiGetMicroseconds();
     PyroWaveSequenceHeader sequence{};
     bool haveSequence = false;
+    uint64_t frameReadyUs = 0;
     {
         std::lock_guard<std::mutex> lock(m_FrameLock);
         if (!m_FrameReady) {
@@ -1066,6 +1212,7 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
         m_FrameReady = false;
         haveSequence = m_HaveSequence;
         sequence = m_Sequence;
+        frameReadyUs = m_DecodeReadyUs;
     }
 
     // Reacquire the plane textures from external (PyroWave) use, GPU-waiting on the decode-done
@@ -1087,14 +1234,29 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
     const bool hdr = m_HdrEnabled.load();
     const PyroWavePresentColor present = pyroWavePresentColor(hdr, haveSequence ? &sequence : nullptr);
     if (!m_HavePresentColor || !pyroWavePresentColorEqual(present, m_LastPresentColor)) {
+        const bool firstPresent = !m_HavePresentColor;
         m_LastPresentColor = present;
         m_HavePresentColor = true;
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "PyroWave present: %s %s %s%s",
-                    pyroWaveMatrixName(present.matrix),
-                    pyroWaveTransferName(present.transfer),
-                    pyroWaveRangeName(present.range),
-                    present.chromaLeft ? " left-sited chroma" : "");
+        char desc[96];
+        snprintf(desc, sizeof(desc), "%s %s %s%s",
+                 pyroWaveMatrixName(present.matrix),
+                 pyroWaveTransferName(present.transfer),
+                 pyroWaveRangeName(present.range),
+                 present.chromaLeft ? " left-sited chroma" : "");
+        char previous[96];
+        {
+            std::lock_guard<std::mutex> lock(m_StatsLock);
+            PyroWaveSteadyState::set(previous, sizeof(previous), m_Steady.color);
+            PyroWaveSteadyState::set(m_Steady.color, sizeof(m_Steady.color), desc);
+        }
+        if (firstPresent) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave present: %s", desc);
+        }
+        else {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave reconfigure: present %s -> %s", previous, desc);
+        }
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: color=%s", desc);
     }
 
     struct pl_color_space csp = {};
@@ -1157,9 +1319,48 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
 
     int dw = 0, dh = 0;
     SDL_Vulkan_GetDrawableSize(m_Window, &dw, &dh);
+    if (dw != m_LoggedDrawableW || dh != m_LoggedDrawableH) {
+        if (m_LoggedDrawableW != 0 || m_LoggedDrawableH != 0) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave reconfigure: drawable %dx%d -> %dx%d",
+                        m_LoggedDrawableW, m_LoggedDrawableH, dw, dh);
+        }
+        else if (dw > 0 && dh > 0) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave Vulkan drawable: %dx%d", dw, dh);
+        }
+        m_LoggedDrawableW = dw;
+        m_LoggedDrawableH = dh;
+    }
+    bool presented = false;
     if (pl_swapchain_resize(m_Swapchain, &dw, &dh)) {
         struct pl_swapchain_frame scFrame;
         if (pl_swapchain_start_frame(m_Swapchain, &scFrame)) {
+            char formatName[64];
+            PyroWaveSteadyState::set(formatName, sizeof(formatName), "unknown");
+            if (scFrame.fbo != nullptr && scFrame.fbo->params.format != nullptr &&
+                scFrame.fbo->params.format->name != nullptr) {
+                PyroWaveSteadyState::set(formatName, sizeof(formatName), scFrame.fbo->params.format->name);
+            }
+            char previousFormat[64];
+            bool formatChanged = false;
+            {
+                std::lock_guard<std::mutex> lock(m_StatsLock);
+                formatChanged = strcmp(m_Steady.pixelFormat, formatName) != 0;
+                PyroWaveSteadyState::set(previousFormat, sizeof(previousFormat), m_Steady.pixelFormat);
+                if (formatChanged) {
+                    PyroWaveSteadyState::set(m_Steady.pixelFormat, sizeof(m_Steady.pixelFormat), formatName);
+                }
+            }
+            if (formatChanged) {
+                if (strcmp(previousFormat, "unknown") == 0) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave Vulkan pixel format: %s", formatName);
+                }
+                else {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "PyroWave reconfigure: pixel format %s -> %s", previousFormat, formatName);
+                }
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave metric: pixel_format=%s", formatName);
+            }
             struct pl_frame target;
             pl_frame_from_swapchain(&target, &scFrame);
 
@@ -1222,6 +1423,7 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
             pl_render_image(m_Renderer, &src, &target, &pl_render_fast_params);
             pl_swapchain_submit_frame(m_Swapchain);
             pl_swapchain_swap_buffers(m_Swapchain);
+            presented = true;
 
             for (auto t : overlayTexToDestroy) {
                 pl_tex_destroy(m_Vulkan->gpu, &t);
@@ -1242,8 +1444,21 @@ void PyroWaveVideoDecoder::renderFrameOnMainThread() {
         m_LastHoldVal.store(v);
     }
 
-    m_TotalRenderTimeUs.fetch_add(LiGetMicroseconds() - renderStartUs);
-    m_RenderedFrames.fetch_add(1);
+    if (presented) {
+        uint64_t now = LiGetMicroseconds();
+        uint64_t presentUs = now - renderStartUs;
+        m_TotalRenderTimeUs.fetch_add(presentUs);
+        m_RenderedFrames.fetch_add(1);
+        std::lock_guard<std::mutex> lock(m_StatsLock);
+        m_Steady.presentUs.add(presentUs);
+        if (frameReadyUs != 0 && now >= frameReadyUs) {
+            m_Steady.decodeToPresentUs.add(now - frameReadyUs);
+        }
+    }
+    else {
+        std::lock_guard<std::mutex> lock(m_StatsLock);
+        m_Steady.stalledPresents++;
+    }
 }
 
 #endif  // HAVE_PYROWAVE

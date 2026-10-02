@@ -8,6 +8,9 @@ base, so retargeting the submodule would drop those macOS fixes.
 
 qmake runs this before compiling. It is idempotent: a tree that already
 has VIDEO_FORMAT_PYROWAVE is left alone.
+
+It also keeps "Received first video packet after %d ms" and adds a second
+line so that wait is startup context, not the steady-state comparison.
 """
 
 from pathlib import Path
@@ -184,6 +187,25 @@ def main() -> None:
             LC_ASSERT_VT(decodeUnit->bufferList->bufferType == BUFFER_TYPE_PICDATA);
         }""",
         "VIDEO_FORMAT_MASK_PYROWAVE",
+    )
+    # Keep the original sentence. The second line tells a reader not to treat
+    # that wait as the Vulkan-vs-Metal result. Steady-state numbers are the
+    # Global video stats block and the PyroWave metric lines.
+    ensure(
+        SRC / "VideoStream.c",
+        """            Limelog("Received first video packet after %d ms\\n", waitingForVideoMs);
+
+            firstDataTimeMs = PltGetMillis();
+""",
+        """            Limelog("Received first video packet after %d ms\\n", waitingForVideoMs);
+            // Startup context only. The wait until the first UDP datagram is not
+            // a frame time. Steady-state numbers are "Global video stats" and
+            // "PyroWave metric:" lines written on quit.
+            Limelog("First-packet wait is startup context only. Compare steady-state frame times (Global video stats), not this number.\\n");
+
+            firstDataTimeMs = PltGetMillis();
+""",
+        "startup context only",
     )
 
 

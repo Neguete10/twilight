@@ -304,7 +304,8 @@ pyrowave {
         streaming/bandwidth.h \
         streaming/video/pyrowave.h \
         streaming/video/pyrowave_backend.h \
-        streaming/video/pyrowave_packets.h
+        streaming/video/pyrowave_packets.h \
+        streaming/video/pyrowave_stats.h
 
     macx {
         # MoltenVK has no dmabuf. Vulkan entry points come from SDL at runtime.
