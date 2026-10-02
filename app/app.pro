@@ -352,6 +352,8 @@ pyrowave {
         # the same C names as libpyrowave-shared (pyrowave_decoder_create, …)
         # with different signatures. Do not bump the pyrowave submodule to the
         # metal/ tree; 263ef100 is the Vulkan API this file calls.
+        # libpyrowave-metal comes from the pyrowave-metal submodule (89f7e47).
+        # The macOS makefile below builds it and copies it into the bundle.
         DEFINES += HAVE_PYROWAVE_METAL
         SOURCES += streaming/video/pyrowave_metal.mm
         HEADERS += \
@@ -676,6 +678,31 @@ macx {
     # leave that path as Moonlight.app rather than pointing the product
     # reference at a different folder than Xcode writes.
     !macx-xcode: QMAKE_APPLICATION_BUNDLE_NAME = Twilight
+
+    # Makefile builds (qmake CONFIG+=pyrowave && make) compile libpyrowave-metal
+    # from the pyrowave-metal submodule before linking, then copy the dylib
+    # into the app bundle. $$files() further down only sees a dylib that
+    # already exists when qmake runs, so a fresh tree still gets the copy
+    # here. The dylib is not committed. The Xcode generator is left alone:
+    # it names the product Moonlight.app.
+    !macx-xcode:pyrowave {
+        PYROWAVE_METAL_SRC = $$PWD/../pyrowave-metal/metal
+        PYROWAVE_METAL_STAMP = $$PWD/../pyrowave-metal/build/.twilight-built
+        !exists($$PYROWAVE_METAL_SRC/CMakeLists.txt) {
+            error("pyrowave-metal is not checked out. Run: git submodule update --init pyrowave-metal")
+        }
+        pyrowave_metal.target = $$PYROWAVE_METAL_STAMP
+        pyrowave_metal.depends = $$PYROWAVE_METAL_SRC/CMakeLists.txt \
+            $$files($$PYROWAVE_METAL_SRC/*.mm) \
+            $$files($$PYROWAVE_METAL_SRC/*.cpp) \
+            $$files($$PYROWAVE_METAL_SRC/*.hpp) \
+            $$files($$PYROWAVE_METAL_SRC/*.h) \
+            $$files($$PYROWAVE_METAL_SRC/shaders/*)
+        pyrowave_metal.commands = \"$$PWD/../scripts/build-pyrowave-metal.sh\" build && touch \"$$PYROWAVE_METAL_STAMP\"
+        QMAKE_EXTRA_TARGETS += pyrowave_metal
+        PRE_TARGETDEPS += $$PYROWAVE_METAL_STAMP
+        QMAKE_POST_LINK += \"$$PWD/../scripts/build-pyrowave-metal.sh\" install \"$$OUT_PWD/$${QMAKE_APPLICATION_BUNDLE_NAME}.app/Contents/Frameworks\"
+    }
     # Hardened Runtime signing is: codesign --options runtime
     system(cp $$PWD/Info.plist $$OUT_PWD/Info.plist)
     system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$OUT_PWD/Info.plist)
@@ -719,6 +746,8 @@ macx {
     !disable-prebuilts {
         APP_BUNDLE_FRAMEWORKS.files = $$files(../libs/mac/Frameworks/*.framework, true) $$files(../libs/mac/lib/*.dylib, true)
         pyrowave: APP_BUNDLE_FRAMEWORKS.files += $$files(../pyrowave/build/libpyrowave-shared*.dylib)
+        # Present only when the dylib was already built before this qmake.
+        # The makefile post-link step copies a dylib produced during make.
         pyrowave: APP_BUNDLE_FRAMEWORKS.files += $$files(../pyrowave-metal/build/libpyrowave-metal*.dylib)
         APP_BUNDLE_FRAMEWORKS.path = Contents/Frameworks
 

@@ -20,3 +20,7 @@
 [submodule "pyrowave"]
 	path = pyrowave
 	url = https://github.com/andygrundman/pyrowave.git
+[submodule "pyrowave-metal"]
+	path = pyrowave-metal
+	url = https://github.com/andygrundman/pyrowave.git
+	ignore = untracked

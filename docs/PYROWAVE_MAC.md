@@ -14,8 +14,10 @@ integration for macOS using MoltenVK”), ported forward without removing
 
 `CONFIG+=pyrowave` on macOS now compiles two PyroWave decoders. Vulkan
 (MoltenVK, `PyroWaveVideoDecoder`) stays linked to `libpyrowave-shared` from
-submodule pin `263ef100`. Metal (`PyroWaveMetalVideoDecoder`) dlopens a
-separately built `libpyrowave-metal` and does not replace that pin. Settings
+submodule pin `263ef100`. Metal (`PyroWaveMetalVideoDecoder`) dlopens
+`libpyrowave-metal` from the `pyrowave-metal` submodule (`89f7e47`) and does
+not replace that pin. `qmake CONFIG+=pyrowave && make` builds that dylib and
+copies it into the app. Settings
 → Advanced → PyroWave GPU backend is Automatic / Metal / Vulkan when both
 are compiled. Automatic prefers Metal when that dylib and an Apple7 GPU are
 present, and otherwise uses Vulkan. H.264, HEVC, and AV1 stay on
@@ -373,8 +375,9 @@ or minor. Patch may differ. Search order for the dylib:
    directory
 4. `libpyrowave-metal.dylib` on the default loader path
 
-`qmake CONFIG+=pyrowave` on macOS copies a dylib from `pyrowave-metal/build/`
-into the app bundle when that directory exists. It does not link it.
+`qmake CONFIG+=pyrowave && make` on macOS builds `libpyrowave-metal` from
+the `pyrowave-metal` submodule and copies the dylib into
+`Twilight.app/Contents/Frameworks`. It does not link it.
 
 Decode matches the length-prefix path the Vulkan decoder already uses
 (`pyroWaveUnpackLengthPrefixedFrame`, then `pyrowave_decoder_push_packet`).
@@ -443,28 +446,38 @@ qmake CONFIG+=pyrowave
 make
 ```
 
-That qmake line on macOS also compiles the Metal client. Without
-`libpyrowave-metal` the Automatic setting uses Vulkan, which is the previous
-behavior plus `SDL_WINDOW_VULKAN` on the stream window.
+That qmake line on macOS also compiles the Metal client and, on a makefile
+build, `libpyrowave-metal` itself.
 
-PyroWave Metal library (separate tree, not the submodule):
+PyroWave Metal library (submodule `pyrowave-metal`, same GitHub repo as
+`pyrowave`, pinned commit, not a second checkout of the Vulkan pin):
+
+A fresh clone does not fill submodules until init. This checks out
+[andygrundman/pyrowave](https://github.com/andygrundman/pyrowave) at
+`89f7e47d4abbf650c91fae766728af866c5e32a0` (“Fix .def file”, API 0.5.0):
 
 ```bash
-git clone https://github.com/andygrundman/pyrowave.git pyrowave-metal
-cd pyrowave-metal
-git checkout 89f7e47d4abbf650c91fae766728af866c5e32a0
-cmake -S metal -B build
-cmake --build build
-cd ..
-# optional: export PYROWAVE_METAL_LIBRARY=$PWD/pyrowave-metal/build/libpyrowave-metal.dylib
+git submodule update --init pyrowave-metal
+# Vulkan libpyrowave-shared is still the cmake steps above, then:
 qmake CONFIG+=pyrowave
 make
 ```
 
+`make` runs `scripts/build-pyrowave-metal.sh`, which is
+`cmake -S pyrowave-metal/metal -B pyrowave-metal/build` and
+`cmake --build pyrowave-metal/build`, then copies
+`libpyrowave-metal*.dylib` into `Twilight.app/Contents/Frameworks`.
+Do not commit that dylib. It is cmake output under `pyrowave-metal/build/`
+and is not part of the pinned commit. The submodule is marked
+`ignore = untracked` so that directory does not show up as a change to
+the pin. Do not check `89f7e47` out over the `pyrowave` submodule.
+Vulkan stays at `263ef100`.
+
 `metal/CMakeLists.txt` at that commit builds `libpyrowave-metal` (API 0.5.0)
-and links Metal and IOSurface. It does not need Granite or MoltenVK. Do not
-check this clone out over the `pyrowave` submodule. `pyrowave-metal/` is a
-build directory, not a git submodule.
+and links Metal and IOSurface. It does not need Granite or MoltenVK.
+`git submodule update --init --recursive` from a fresh clone fetches this
+checkout together with the other submodules. Optional:
+`PYROWAVE_METAL_LIBRARY` still overrides the dlopen path.
 
 Linux uses the same `CONFIG+=pyrowave` switch, compiles only the Vulkan
 decoder, and links `-lvulkan` plus `libdrm` and `libplacebo` via pkg-config.
