@@ -1,5 +1,6 @@
 #import "au_spatial_renderer.h"
 #import "coreaudio_helpers.h"
+#import "coreaudio_playback.h"
 #import "AllocatedAudioBufferList.h"
 #include "settings/streamingpreferences.h"
 
@@ -10,6 +11,8 @@
 AUSpatialRenderer::AUSpatialRenderer()
     : m_HeadTracking(0),
       m_PersonalizedHRTF(0),
+      m_Mixer(nullptr),
+      m_Initialized(false),
       m_AudioUnitLatency(0.0)
 {
     DEBUG_TRACE("AUSpatialRenderer construct");
@@ -34,7 +37,14 @@ AUSpatialRenderer::~AUSpatialRenderer()
     DEBUG_TRACE("AUSpatialRenderer destruct");
 
     if (m_Mixer) {
+        // setup() is the only AudioUnitInitialize. Skip it when spatial
+        // mode was never started, and don't uninitialize twice.
+        if (m_Initialized) {
+            AudioUnitUninitialize(m_Mixer);
+            m_Initialized = false;
+        }
         AudioComponentInstanceDispose(m_Mixer);
+        m_Mixer = nullptr;
     }
 }
 
@@ -97,9 +107,9 @@ OSStatus inputCallback(void *inRefCon,
     AUSpatialRenderer *me = (AUSpatialRenderer *)inRefCon;
 
     // Clear the buffer
+    const vDSP_Length planarSamples = coreAudioPlanarSampleCount(inNumberFrames);
     for (uint32_t i = 0; i < ioData->mNumberBuffers; i++) {
-        // faster version of memset((float *)ioData->mBuffers[i].mData, 0, inNumberFrames * 4);
-        vDSP_vclr((float *)ioData->mBuffers[i].mData, 1, inNumberFrames * 4);
+        vDSP_vclr((float *)ioData->mBuffers[i].mData, 1, planarSamples);
     }
 
     // Pull audio from playthrough buffer
@@ -309,6 +319,7 @@ bool AUSpatialRenderer::setup(AUSpatialMixerOutputType outputType, float sampleR
         CA_LogError(status, "Failed to initialize AUSpatialRenderer");
         return false;
     }
+    m_Initialized = true;
 
 #if TARGET_OS_OSX
     // you can set HRTF in 13 but only check the status in 14

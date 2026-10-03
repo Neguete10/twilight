@@ -4,6 +4,7 @@
 #include "au_spatial_renderer.h"
 #include "AllocatedAudioBufferList.h"
 #include "TPCircularBuffer.h"
+#include "coreaudio_playback.h"
 
 #include <AudioUnit/AudioUnit.h>
 #include <AudioToolbox/AudioToolbox.h>
@@ -34,6 +35,9 @@ private:
     bool initListeners();
     void deinitListeners();
     bool setCallback(AURenderCallback);
+    bool readInitializedOutputLatency();
+    CoreAudioPlaybackState playbackState() const;
+    void applyTeardown(const CoreAudioTeardownStep& step);
     void stop();
     void cleanup();
     AUSpatialMixerOutputType getSpatialMixerOutputType();
@@ -62,6 +66,9 @@ private:
     double m_OutputSoftwareLatencyMax;
 
     // internal device state
+    bool m_OutputInitialized;
+    bool m_OutputStarted;
+    bool m_RingReady;
     bool m_needsReinit;
     bool m_Spatial;
     uint32_t m_SpatialOutputType;
