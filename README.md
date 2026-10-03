@@ -1,102 +1,150 @@
 # Twilight
 
-Twilight is this fork of [Moonlight Qt](https://github.com/moonlight-stream/moonlight-qt) via [Andy Grundman's moonlight-qt](https://github.com/andygrundman/moonlight-qt), including the CoreAudio spatial-audio work on `andyg.coreaudio-spatial-mixer`. Twilight stays under GPL-3.0, the same license as Moonlight. The Moonlight README below is unchanged.
+Twilight is a Mac client for streaming a game from another computer. It is a GPL-3.0 fork of [Moonlight Qt](https://github.com/moonlight-stream/moonlight-qt) through [Andy Grundman's moonlight-qt](https://github.com/andygrundman/moonlight-qt), including the CoreAudio spatial-audio work from `andyg.coreaudio-spatial-mixer`. The same license as Moonlight applies. See `LICENSE`.
 
-DualSense adaptive triggers and the in-stream gamepad overlay are described in [docs/DUALSENSE_MAC.md](docs/DUALSENSE_MAC.md).
+Upstream Moonlight is a PC client for NVIDIA GameStream and [Sunshine](https://github.com/LizardByte/Sunshine). Twilight keeps that client and adds a Mac app, a second launcher shell, a CoreAudio spatial mixer, optional PyroWave decode, and a picture-in-picture mini player. This repository does not publish the upstream Windows, Snap, Flatpak, Steam Link, or Raspberry Pi packages, and it does not ship translation catalogs.
 
-# Moonlight PC
+The interface in this tree is English. Strings are wrapped for Qt translation, but there are no `.ts` or `.qm` catalogs and no translator is loaded. The Mac bundle's development region is `en`, and the only localized bundle strings are `app/deploy/macos/en.lproj`.
 
-[Moonlight PC](https://moonlight-stream.org) is an open source PC client for NVIDIA GameStream and [Sunshine](https://github.com/LizardByte/Sunshine).
+## What this tree ships
 
-Moonlight also has mobile versions for [Android](https://github.com/moonlight-stream/moonlight-android) and [iOS](https://github.com/moonlight-stream/moonlight-ios).
+The product is the Mac app. A makefile build names the bundle `Twilight.app`. `CFBundleName` and `CFBundleDisplayName` are Twilight. The executable stays `Twilight.app/Contents/MacOS/Moonlight`, the bundle id stays `com.moonlight-stream.Moonlight` unless `CONFIG+=twilight-mas`, and `QSettings` stay under the Moonlight name. The bundle's minimum system version is macOS 11.
 
-You can follow development on our [Discord server](https://moonlight-stream.org/discord) and help translate Moonlight into your language on [Weblate](https://hosted.weblate.org/projects/moonlight/moonlight-qt/).
+Two shells share one settings object:
 
- [![AppVeyor Build Status](https://ci.appveyor.com/api/projects/status/glj5cxqwy2w3bglv/branch/master?svg=true)](https://ci.appveyor.com/project/cgutman/moonlight-qt/branch/master)
- [![Downloads](https://img.shields.io/github/downloads/moonlight-stream/moonlight-qt/total)](https://github.com/moonlight-stream/moonlight-qt/releases)
- [![Translation Status](https://hosted.weblate.org/widgets/moonlight/-/moonlight-qt/svg-badge.svg)](https://hosted.weblate.org/projects/moonlight/moonlight-qt/)
+- **Twilight** is the starting shell (`uiVersion` `v2`, including when the key is missing). It is a host sidebar, an app library, and its own settings sheet.
+- **Classic** is the Moonlight shell (`uiVersion` `v1`). The toolbar switches shells. The choice is saved and is not offered while a stream is open.
 
-## Features
- - Hardware accelerated video decoding on Windows, Mac, and Linux
- - H.264, HEVC, and AV1 codec support (AV1 requires Sunshine and a supported host GPU)
- - YUV 4:4:4 support (Sunshine only)
- - HDR streaming support
- - 7.1 surround sound audio support
- - 10-point multitouch support (Sunshine only)
- - Gamepad support with force feedback and motion controls for up to 16 players
- - Support for both pointer capture (for games) and direct mouse control (for remote desktop)
- - Support for passing system-wide keyboard shortcuts like Alt+Tab to the host
- 
-## Downloads
-- [Windows, macOS, and Steam Link](https://github.com/moonlight-stream/moonlight-qt/releases)
-- [Snap (for Ubuntu-based Linux distros)](https://snapcraft.io/moonlight)
-- [Flatpak (for other Linux distros)](https://flathub.org/apps/details/com.moonlight_stream.Moonlight)
-- [AppImage](https://github.com/moonlight-stream/moonlight-qt/releases)
-- [Raspberry Pi 4 and 5](https://github.com/moonlight-stream/moonlight-docs/wiki/Installing-Moonlight-Qt-on-Raspberry-Pi-4)
-- [Generic ARM 32-bit and 64-bit Debian packages](https://github.com/moonlight-stream/moonlight-docs/wiki/Installing-Moonlight-Qt-on-ARM%E2%80%90based-Single-Board-Computers) (not for Raspberry Pi)
-- [Experimental RISC-V Debian packages](https://github.com/moonlight-stream/moonlight-docs/wiki/Installing-Moonlight-Qt-on-RISC%E2%80%90V-Single-Board-Computers)
-- [NVIDIA Jetson and Nintendo Switch (Ubuntu L4T)](https://github.com/moonlight-stream/moonlight-docs/wiki/Installing-Moonlight-Qt-on-Linux4Tegra-(L4T)-Ubuntu)
+H.264, HEVC, and AV1 decode with VideoToolbox. HDR and YUV 4:4:4 remain host-dependent, as in Moonlight.
 
-#### Special Thanks
+### PyroWave
 
-[![Hosted By: Cloudsmith](https://img.shields.io/badge/OSS%20hosting%20by-cloudsmith-blue?logo=cloudsmith&style=flat-square)](https://cloudsmith.com)
+[PyroWave](https://github.com/Themaister/pyrowave) is an intra-only GPU wavelet codec. Twilight can decode it. A normal GameStream or Sunshine host does not send it. A host that advertises it (Vibeshine or a Vibepollo build that does) can.
 
-Hosting for Moonlight's Debian and L4T package repositories is graciously provided for free by [Cloudsmith](https://cloudsmith.com).
+The decoders are compiled only when qmake is run with `CONFIG+=pyrowave`. That Mac build has two backends:
 
-## Building
+- **Vulkan** uses MoltenVK and links `libpyrowave-shared` from the `pyrowave` submodule, pin `263ef100`.
+- **Metal** does not link that library. It `dlopen`s `libpyrowave-metal` (API 0.5.0) from the `pyrowave-metal` submodule, pin `89f7e47`. The two libraries export the same C names with different signatures, so they stay separate.
 
-### Windows Build Requirements
-* Qt 6.7 SDK or later (earlier versions may work but are not officially supported)
-* [Visual Studio 2022](https://visualstudio.microsoft.com/downloads/) (Community edition is fine)
-* Select **MSVC** option during Qt installation. MinGW is not supported.
-* [7-Zip](https://www.7-zip.org/) (only if building installers for non-development PCs)
-* Graphics Tools (only if running debug builds)
-  * Install "Graphics Tools" in the Optional Features page of the Windows Settings app.
-  * Alternatively, run `dism /online /add-capability /capabilityname:Tools.Graphics.DirectX~~~~0.0.1.0` and reboot.
+When both backends are compiled, Advanced settings offer **PyroWave GPU backend**: Automatic, Metal, or Vulkan. Automatic uses Metal when the dylib loads and the GPU is Apple7, and otherwise uses Vulkan. Choosing Metal or Vulkan uses only that backend. Intel and AMD Macs fail the Metal device check, so Automatic on those machines uses Vulkan. H.264, HEVC, and AV1 stay on VideoToolbox either way.
 
-### macOS Build Requirements
-* Qt 6.7 SDK or later (earlier versions may work but are not officially supported)
-* Xcode 14 or later (earlier versions may work but are not officially supported)
-* [create-dmg](https://github.com/sindresorhus/create-dmg) (only if building DMGs for use on non-development Macs)
+The current release includes both backends. See [PyroWave on Twilight](docs/PYROWAVE_MAC.md) for the bitstream, the host framing, and what has not been proven on a live stream.
 
-### Linux/Unix Build Requirements
-* Qt 6 is recommended, but Qt 5.9 or later is also supported (replace `qmake6` with `qmake` when using Qt 5).
-* GCC or Clang
-* FFmpeg 4.0 or later
-* Install the required packages:
-  * Debian/Ubuntu:
-    * Base Requirements: `libegl1-mesa-dev libgl1-mesa-dev libopus-dev libsdl2-dev libsdl2-ttf-dev libssl-dev libavcodec-dev libavformat-dev libswscale-dev libva-dev libvdpau-dev libxkbcommon-dev wayland-protocols libdrm-dev`
-    * Qt 6 (Recommended): `qt6-base-dev qt6-declarative-dev libqt6svg6-dev qml6-module-qtquick-controls qml6-module-qtquick-templates qml6-module-qtquick-layouts qml6-module-qtqml-workerscript qml6-module-qtquick-window qml6-module-qtquick`
-    * Qt 5: `qtbase5-dev qt5-qmake qtdeclarative5-dev qtquickcontrols2-5-dev qml-module-qtquick-controls2 qml-module-qtquick-layouts qml-module-qtquick-window2 qml-module-qtquick2 qtwayland5`
-  * RedHat/Fedora (RPM Fusion repo required):
-    * Base Requirements: `openssl-devel SDL2-devel SDL2_ttf-devel ffmpeg-devel libva-devel libvdpau-devel opus-devel pulseaudio-libs-devel alsa-lib-devel libdrm-devel`
-    * Qt 6 (Recommended): `qt6-qtsvg-devel qt6-qtdeclarative-devel`
-    * Qt 5: `qt5-qtsvg-devel qt5-qtquickcontrols2-devel`
-* Building the Vulkan renderer requires a `libplacebo-dev`/`libplacebo-devel` version of at least v7.349.0 and FFmpeg 6.1 or later.
+### Spatial audio
 
-### Steam Link Build Requirements
-* [Steam Link SDK](https://github.com/ValveSoftware/steamlink-sdk) cloned on your build system
-* STEAMLINK_SDK_PATH environment variable set to the Steam Link SDK path
+On macOS, playback tries `CoreAudioRenderer` before SDL. `app/app.pro` always defines `HAVE_COREAUDIO`.
 
-### Build Setup Steps
-1. Install the latest Qt SDK (and optionally, the Qt Creator IDE) from https://www.qt.io/download
-    * You can install Qt via Homebrew on macOS, but you will need to use `brew install qt --with-debug` to be able to create debug builds of Moonlight.
-    * You may also use your Linux distro's package manager for the Qt SDK as long as the packages are Qt 5.9 or later.
-    * This step is not required for building on Steam Link, because the Steam Link SDK includes Qt 5.14.
-2. Run `git submodule update --init --recursive` from within `moonlight-qt/`
-3. Open the project in Qt Creator or build from qmake on the command line.
-    * To build a binary for use on non-development machines, use the scripts in the `scripts` folder.
-        * For Windows builds, use `scripts\build-arch.bat` and `scripts\generate-bundle.bat`. Execute these scripts from the root of the repository within a Qt command prompt. Ensure  7-Zip binary directory is on your `%PATH%`.
-        * For macOS builds, use `scripts/generate-dmg.sh`. Execute this script from the root of the repository and ensure Qt's `bin` folder is in your `$PATH`.
-        * For Steam Link builds, run `scripts/build-steamlink-app.sh` from the root of the repository.
-    * To build from the command line for development use on macOS or Linux, run `qmake6 moonlight-qt.pro` then `make debug` or `make release`
-    * To create an embedded build for a single-purpose device, use `qmake6 "CONFIG+=embedded" moonlight-qt.pro` and build normally.
-        * This build will lack windowed mode, Discord/Help links, and other features that don't make sense on an embedded device.
-        * For platforms with poor GPU performance, add `"CONFIG+=gpuslow"` to prefer direct KMSDRM rendering over GL/Vulkan renderers. Direct KMSDRM rendering can use dedicated YUV/RGB conversion and scaling hardware rather than slower GPU shaders for these operations.
+The settings sheet says the mixer is used on headphones, built-in MacBook speakers, and 2-channel USB devices, and that stereo skips it. In the renderer, a stream with more than two channels uses the mixer unless spatial audio is disabled or the output is classified as external speakers. USB and Bluetooth transports are classified as headphones. HDMI is classified as external speakers and is passed through. The mixer renders binaural audio for headphones and Apple's built-in-speaker processing for the laptop speakers.
 
-## Contribute
-1. Fork us
-2. Write code
-3. Send Pull Requests
+**Spatial audio** in settings is Enabled or Disabled. Enabled is the stored default (`SAC_AUTO`). Stereo hides the control. **Head tracking** is off unless you turn it on. The renderer writes `kAudioUnitProperty_SpatialMixerEnableHeadTracking` only for headphones. The settings line says that requires supported Apple or Beats headphones. Signed desktop builds pass `com.apple.developer.coremotion.head-pose` in `app/deploy/macos/spatial-audio.entitlements`.
 
-Check out our [website](https://moonlight-stream.org) for project links and information.
+### Performance stats
+
+Two overlays are independent. Turning one off does not remove the other.
+
+**Classic performance overlay.** Yellow video stats drawn on the stream by the same overlay path Moonlight uses (`OverlayDebug`, color `0xD0D000`). The preference is `showPerformanceOverlay`, stored as `showperfoverlay`. A missing key is off. The Twilight settings sheet calls this switch **Classic performance overlay**. On H.264, HEVC, and AV1 the text includes FEC lines. PyroWave's stats string has no FEC fields, and this overlay does not add any. The same shortcut also toggles the audio stats overlay (`OverlayDebugAudio`).
+
+While a stream is open:
+
+- **Ctrl+Alt+Shift+S** toggles it. On a Mac keyboard that is Control+Option+Shift+S. The key is handled before it is sent to the host.
+- **Select+L1+R1+X** does the same thing on a gamepad.
+
+The session starts from `showperfoverlay`. The shortcut flips the live overlay. It does not delete the Twilight HUD, and it does not change the Twilight performance-overlay switch.
+
+**Twilight HUD.** Glass chips for FPS, bitrate, and average network latency, plus End, while a Twilight stream is open. The preference is `showTwilightHud`. A missing key is off. The chips are shown only when the Twilight shell is selected and this switch is on. End asks once, then quits the stream the same way Ctrl+Alt+Shift+Q does. On macOS the HUD is a child of the stream window, including fullscreen and steady-state picture-in-picture. It is not the yellow Classic overlay.
+
+### Picture in picture
+
+On macOS, **Ctrl+Alt+Shift+P** (Control+Option+Shift+P) turns the SDL stream window into a floating mini player at the bottom-right of the current display. **Window → Enter Picture in Picture** does the same thing. Press the shortcut again, use the menu, or press **Ctrl+Alt+Shift+X** to leave. X restores the window you entered from, including fullscreen.
+
+This is not system Picture in Picture. There is no `AVPictureInPictureController` and no second video path. The same decoder keeps presenting into that window, which is what lets Metal and Vulkan streams use it. Closing the window still ends the stream. Behavior and limits are in [Picture in Picture](docs/PIP_MAC.md).
+
+### Other Mac behavior
+
+These are in the tree and documented on their own pages. They are not part of upstream Moonlight Qt.
+
+- [DualSense adaptive triggers and the on-stream pad overlay](docs/DUALSENSE_MAC.md). Local preview is Ctrl+Alt+Shift+T or Select+L1+R1+A. The pad overlay is Ctrl+Alt+Shift+G or Select+L1+R1+Y.
+- [CoreHID mouse capture](docs/COREHID_MAC.md). Off unless you enable it. Trackpads stay on SDL.
+- [Microphone to the host](docs/MICROPHONE_MAC.md). macOS only, on the encrypted control stream. A Vibepollo build with Vibelight passthrough can play it. Stock Sunshine does not. Ctrl+Alt+Shift+N mutes it during a stream.
+- [Network profiles](docs/NETWORK_PROFILES.md) in Classic settings.
+- [Mac App Store scaffolding](docs/TWILIGHT_MAS.md). `CONFIG+=twilight-mas` is local signing config. This tree does not submit a build.
+
+## Release
+
+The current release is [v6.1.1](https://github.com/Neguete10/twilight/releases/tag/v6.1.1). The asset is `Twilight-6.1.1.dmg`. That build is ad-hoc signed and not notarized. Its note says it fixes the picture-in-picture crash in the audio decoder, and that the Mac build includes PyroWave Vulkan and Metal (`libpyrowave-metal` 0.5.0, source `89f7e47`). `app/version.txt` in this tree is `6.1.1`.
+
+## Building the Mac app
+
+Run `qmake app.pro` inside `app/`. `app/app.pro` links the static libraries with `-L$$OUT_PWD/../…`. `OUT_PWD` is the directory where that qmake writes the Makefile, so the command has to run in `app/` for those lines to land on the sibling projects. Running `qmake app/app.pro` from the repository root sets `OUT_PWD` to the root and points the link lines outside the tree.
+
+`scripts/generate-dmg.sh` is a different configure. It runs qmake on `moonlight-qt.pro` in a build directory and does not pass `CONFIG+=pyrowave`.
+
+`CONFIG+=pyrowave` is what compiles the Vulkan and Metal decoders. On macOS the qmake line also needs `CONFIG+=sdk_no_version_check` and `CONFIG+=release`. The Metal dylib has to exist before that qmake. `app/app.pro` adds it with `$$files(../pyrowave-metal/build/libpyrowave-metal*.dylib)`, and `$$files()` expands when qmake runs. A dylib produced only later is not in that bundle file list. The makefile still builds and copies one when the app target is built. The file list itself only contains a dylib that was already there.
+
+### Tools
+
+- Xcode, for the macOS SDK and Metal.
+- Qt 6's `qmake` and `macdeployqt` on `PATH`.
+- CMake, and Python 3. qmake runs the `scripts/apply_*.py` patches before compiling.
+- `libplacebo` where the linker will see it. The PyroWave link line is `-lplacebo` with no Homebrew `-L` of its own, so the app link uses `LIBRARY_PATH=/opt/homebrew/lib`.
+
+### Submodules and static libraries
+
+From the repository root:
+
+```sh
+git submodule update --init --recursive
+```
+
+That checks out every submodule in `.gitmodules`, including `pyrowave-metal`, `pyrowave`, `libs` (the Mac FFmpeg, SDL, and OpenSSL prebuilts), and `app/SDL_GameControllerDB` (embedded by `app/resources.qrc`). If `pyrowave-metal` is missing, qmake with `CONFIG+=pyrowave` stops and tells you to run:
+
+```sh
+git submodule update --init pyrowave-metal
+```
+
+`app/app.pro` links `libmoonlight-common-c`, `libqmdnsengine`, `libh264bitstream`, and `libsoundio` from the directories next to `app/`. Build those qmake projects first:
+
+```sh
+cd moonlight-common-c && qmake moonlight-common-c.pro CONFIG+=release && make release && cd ..
+cd qmdnsengine && qmake qmdnsengine.pro CONFIG+=release && make release && cd ..
+cd h264bitstream && qmake h264bitstream.pro CONFIG+=release && make release && cd ..
+cd soundio && qmake soundio.pro CONFIG+=release && make release && cd ..
+```
+
+The archives `app/app.pro` looks for are `moonlight-common-c/libmoonlight-common-c.a`, `qmdnsengine/libqmdnsengine.a`, `h264bitstream/libh264bitstream.a`, and `soundio/libsoundio.a`.
+
+### PyroWave libraries
+
+Vulkan shared library, submodule pin `263ef100`. Leave that pin where it is. Do not check the Metal commit out over `pyrowave`.
+
+```sh
+git submodule update --init pyrowave
+cd pyrowave && bash checkout_granite.sh && cd ..
+cmake -S pyrowave -B pyrowave/build -DPYROWAVE_SHARED=ON
+cmake --build pyrowave/build --target pyrowave-shared
+```
+
+Metal dylib, before the app qmake. `checkout_granite.sh` is not part of this submodule. The script below is `cmake -S pyrowave-metal/metal -B pyrowave-metal/build` and `cmake --build`.
+
+```sh
+git submodule update --init pyrowave-metal
+scripts/build-pyrowave-metal.sh build
+```
+
+That writes `pyrowave-metal/build/libpyrowave-metal*.dylib`. Do not commit it.
+
+### qmake, make, macdeployqt
+
+From `app/`:
+
+```sh
+cd app
+LIBRARY_PATH=/opt/homebrew/lib qmake app.pro \
+  CONFIG+=sdk_no_version_check CONFIG+=release CONFIG+=pyrowave
+make release
+macdeployqt Twilight.app -qmldir=gui
+```
+
+`qmake app.pro` has to be that command, in that directory, and the Metal dylib has to already be in `pyrowave-metal/build/`. `make release` produces `app/Twilight.app`. `macdeployqt` copies Qt into the bundle. `scripts/generate-dmg.sh` runs `macdeployqt` with `-qmldir` pointed at `app/gui` and with `-appstore-compliant`. That script is a separate configure, as noted above.
+
+Open `app/Twilight.app`. The process name is still Moonlight.
