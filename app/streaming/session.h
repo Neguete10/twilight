@@ -95,6 +95,12 @@ public:
     }
 };
 
+// AudioDec calls this directly. The moonlight-common-c patch replaces the
+// indirect load of AudioCallbacks.decodeAndPlaySample with a bl to this
+// symbol, so a later write into that global is not executed. Defined in
+// streaming/audio/audio.cpp on every platform.
+extern "C" void TwilightAudioDecodeAndPlaySample(char* sampleData, int sampleLength);
+
 class Session : public QObject
 {
     Q_OBJECT
@@ -103,6 +109,7 @@ class Session : public QObject
     friend class DeferredSessionCleanupTask;
     friend class AsyncConnectionStartThread;
     friend class ExecThread;
+    friend void TwilightAudioDecodeAndPlaySample(char* sampleData, int sampleLength);
 
 public:
     explicit Session(NvComputer* computer, NvApp& app, StreamingPreferences *preferences = nullptr);

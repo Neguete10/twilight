@@ -47,23 +47,26 @@ NSWindow* nativeWindowFor(QWindow* window)
     return view != nil ? view.window : nil;
 }
 
-void applyHudChrome(NSWindow* nativeWindow, bool setLevel)
+void applyHudChrome(NSWindow* nativeWindow, bool willBeStreamChild)
 {
-    // Same mask as the raise that previously drew the chips over fullscreen.
+    [nativeWindow setOpaque:NO];
+    [nativeWindow setBackgroundColor:[NSColor clearColor]];
+    [nativeWindow setHasShadow:NO];
+    [nativeWindow setHidesOnDeactivate:NO];
+    // A child inherits the stream window's level and collection behavior.
+    // setLevel detaches the child. setCollectionBehavior with this mask
+    // (IgnoresCycle) fights picture-in-picture, which uses ParticipatesInCycle
+    // on the parent. Skip both whenever this window is or will be a child.
+    if (willBeStreamChild) {
+        return;
+    }
+
     const NSWindowCollectionBehavior behavior =
         NSWindowCollectionBehaviorCanJoinAllSpaces |
         NSWindowCollectionBehaviorFullScreenAuxiliary |
         NSWindowCollectionBehaviorStationary |
         NSWindowCollectionBehaviorIgnoresCycle;
-
-    [nativeWindow setOpaque:NO];
-    [nativeWindow setBackgroundColor:[NSColor clearColor]];
-    [nativeWindow setHasShadow:NO];
-    [nativeWindow setHidesOnDeactivate:NO];
-    // Changing the level of a child window detaches it from the stream.
-    if (setLevel) {
-        [nativeWindow setLevel:NSFloatingWindowLevel];
-    }
+    [nativeWindow setLevel:NSFloatingWindowLevel];
     [nativeWindow setCollectionBehavior:behavior];
 }
 
@@ -137,7 +140,7 @@ void twilightHudSync(QWindow* window, void* sdlWindow, bool raise)
     }
 
     const bool alreadyChild = streamWindow != nil && nativeWindow.parentWindow == streamWindow;
-    applyHudChrome(nativeWindow, !alreadyChild);
+    applyHudChrome(nativeWindow, streamWindow != nil);
 
     if (streamWindow != nil && !alreadyChild) {
         if (nativeWindow.parentWindow != nil) {

@@ -24,8 +24,8 @@ Wiring system PiP would be a second video path next to the one SDL is
 already drawing, and it would not cover PyroWave.
 
 The slice here keeps that presenter and turns the same SDL window into a
-floating mini player. Audio is unchanged because it is not owned by the
-window.
+floating mini player. Audio keeps the existing CoreAudio renderer. It is
+not a second player owned by the window.
 
 ## How to try it
 
@@ -84,6 +84,37 @@ window is put back to a normal document window (`Managed`,
 
 SDL can drop that chrome on resize or deactivation. While PiP is active,
 window events call `Session::reapplyPictureInPictureChrome()`.
+
+## HUD while the window changes
+
+The Twilight HUD stays a child of this SDL window during steady-state
+picture-in-picture, including the 640-point frame. Entering, leaving, and
+reapplying PiP chrome detach that child first
+(`StreamHudStats::beginStreamWindowMutation`). AppKit is not given a
+child while the parent changes level, collection behavior, fullscreen, or
+frame. The HUD is attached again after those calls return.
+
+While the HUD is a child it does not set its own window level or
+collection behavior. A child inherits the parent. The previous HUD mask
+used `IgnoresCycle`. PiP uses `ParticipatesInCycle` on the stream window,
+and follow used to set the child's behavior on every sync, including
+across that parent change.
+
+The v6.1.0 crash (binary UUID `10BFCCE9-43FD-37A7-85B5-6B8F15DD1145`,
+load address `0x100ed8000`) is AudioDec fetching a non-executable
+address. The faulting program counter is `0x7b14d6c300`, which is the
+value loaded from `AudioCallbacks.decodeAndPlaySample`
+(`decodeInputData` + 436, return into `AudioDecoderThreadProc` + 72,
+`ThreadProc` + 32). That slot is copied in `LiStartConnection` and
+Twilight does not store it again. The audio renderer and its ring buffer
+are not on this stack. Entering picture-in-picture is when the stream
+window's level, collection behavior, fullscreen, and frame change while
+the HUD is still attached.
+
+AudioDec now calls `TwilightAudioDecodeAndPlaySample` directly. qmake
+applies `scripts/apply_audio_decode_direct.py` to the pinned
+moonlight-common-c tree. The call target is in the instruction stream, so
+a later write into that callback global is not fetched as code.
 
 ## Build and test
 
