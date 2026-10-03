@@ -181,6 +181,11 @@ void Session::arCleanup()
     s_ActiveSession->m_OpusDecoder = nullptr;
 }
 
+extern "C" void TwilightAudioDecodeAndPlaySample(char* sampleData, int sampleLength)
+{
+    Session::arDecodeAndPlaySample(sampleData, sampleLength);
+}
+
 void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
 {
     int samplesDecoded;

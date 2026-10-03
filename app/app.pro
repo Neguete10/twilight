@@ -2,9 +2,10 @@ QT += core quick network quickcontrols2 svg
 CONFIG += c++11
 
 # Teach moonlight-common-c the PyroWave capability bits, adaptive triggers,
-# and the microphone control-stream send before either project compiles
-# against Limelight.h. Idempotent. See docs/PYROWAVE_MAC.md,
-# docs/DUALSENSE_MAC.md, and docs/MICROPHONE_MAC.md.
+# the microphone control-stream send, and a direct audio-decode call before
+# either project compiles against Limelight.h. Idempotent. See
+# docs/PYROWAVE_MAC.md, docs/DUALSENSE_MAC.md, docs/MICROPHONE_MAC.md,
+# and docs/PIP_MAC.md.
 !system(python3 $$PWD/../scripts/apply_pyrowave_protocol.py) {
     error("Failed to apply the PyroWave protocol patch to moonlight-common-c")
 }
@@ -13,6 +14,9 @@ CONFIG += c++11
 }
 !system(python3 $$PWD/../scripts/apply_mic_control_packet.py) {
     error("Failed to apply the microphone control-stream patch to moonlight-common-c")
+}
+!system(python3 $$PWD/../scripts/apply_audio_decode_direct.py) {
+    error("Failed to apply the direct audio-decode patch to moonlight-common-c")
 }
 
 unix:!macx {

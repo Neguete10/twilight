@@ -52,6 +52,14 @@ public:
     // Safe to call from the main thread during Session::execInternal().
     Q_INVOKABLE static void orderFront();
 
+    // Detach the HUD while the stream window's level, collection behavior,
+    // fullscreen state, or frame is changing, then reattach when the matching
+    // end runs. Nested. followStream and orderFront during the mutation are
+    // deferred until the outermost end. macOS picture-in-picture uses this
+    // so AppKit is not asked to restyle a parent that still has a child.
+    static void beginStreamWindowMutation();
+    static void endStreamWindowMutation();
+
 signals:
     void streamingChanged();
     void statsChanged();

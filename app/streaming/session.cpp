@@ -1789,6 +1789,23 @@ static bool usableBoundsForPictureInPicture(SDL_Window* window, SDL_Rect* bounds
     return SDL_GetDisplayBounds(displayIndex, bounds) == 0;
 }
 
+// Holds the Twilight HUD off the stream window while PiP changes level,
+// collection behavior, fullscreen, or frame. AppKit child windows are not
+// safe across those calls. A follow or raise requested while this is live
+// is applied from the destructor, after the parent has no child.
+struct PipHudMutationGuard
+{
+    PipHudMutationGuard()
+    {
+        StreamHudStats::beginStreamWindowMutation();
+    }
+
+    ~PipHudMutationGuard()
+    {
+        StreamHudStats::endStreamWindowMutation();
+    }
+};
+
 bool Session::displayCoversWindow(int width, int height) const
 {
     int displayIndex = SDL_GetWindowDisplayIndex(m_Window);
@@ -1806,34 +1823,38 @@ void Session::reapplyPictureInPictureChrome(bool orderFront)
     }
     m_PipReapplying = true;
 
-    if (m_PipSnapBackUntil != 0 && SDL_TICKS_PASSED(SDL_GetTicks(), m_PipSnapBackUntil)) {
-        m_PipSnapBackUntil = 0;
-    }
+    {
+        PipHudMutationGuard hudDetached;
 
-    if (m_PipSnapBackUntil != 0 && m_PipFrameW > 0 && m_PipFrameH > 0) {
-        int width = 0;
-        int height = 0;
-        SDL_GetWindowSize(m_Window, &width, &height);
-        const bool fullscreen = (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN) != 0;
-        if (fullscreen || displayCoversWindow(width, height)) {
-            if (fullscreen) {
-                SDL_SetWindowFullscreen(m_Window, 0);
-            }
-#if SDL_VERSION_ATLEAST(2, 0, 5)
-            SDL_SetWindowBordered(m_Window, SDL_TRUE);
-#endif
-            SDL_SetWindowSize(m_Window, m_PipFrameW, m_PipFrameH);
-            SDL_SetWindowPosition(m_Window, m_PipFrameX, m_PipFrameY);
+        if (m_PipSnapBackUntil != 0 && SDL_TICKS_PASSED(SDL_GetTicks(), m_PipSnapBackUntil)) {
+            m_PipSnapBackUntil = 0;
         }
-    }
 
-    // Floating chrome first, then SDL's always-on-top flag. The flag setter
-    // only changes the level; doing it first would let the snapshot below
-    // record NSFloatingWindowLevel as the window's original level.
-    MacPipApplyFloating(m_Window, orderFront);
+        if (m_PipSnapBackUntil != 0 && m_PipFrameW > 0 && m_PipFrameH > 0) {
+            int width = 0;
+            int height = 0;
+            SDL_GetWindowSize(m_Window, &width, &height);
+            const bool fullscreen = (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN) != 0;
+            if (fullscreen || displayCoversWindow(width, height)) {
+                if (fullscreen) {
+                    SDL_SetWindowFullscreen(m_Window, 0);
+                }
 #if SDL_VERSION_ATLEAST(2, 0, 5)
-    SDL_SetWindowAlwaysOnTop(m_Window, SDL_TRUE);
+                SDL_SetWindowBordered(m_Window, SDL_TRUE);
 #endif
+                SDL_SetWindowSize(m_Window, m_PipFrameW, m_PipFrameH);
+                SDL_SetWindowPosition(m_Window, m_PipFrameX, m_PipFrameY);
+            }
+        }
+
+        // Floating chrome first, then SDL's always-on-top flag. The flag setter
+        // only changes the level; doing it first would let the snapshot below
+        // record NSFloatingWindowLevel as the window's original level.
+        MacPipApplyFloating(m_Window, orderFront);
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+        SDL_SetWindowAlwaysOnTop(m_Window, SDL_TRUE);
+#endif
+    }
     if (orderFront) {
         StreamHudStats::orderFront();
     }
@@ -1867,46 +1888,50 @@ void Session::enterPictureInPicture()
         return;
     }
 
-    const bool wasFullscreen = (SDL_GetWindowFlags(m_Window) & m_FullScreenFlag) != 0;
-    m_PipRestoreFullscreen = wasFullscreen;
-    if (!wasFullscreen) {
-        SDL_GetWindowPosition(m_Window, &m_PipRestoreX, &m_PipRestoreY);
-        SDL_GetWindowSize(m_Window, &m_PipRestoreW, &m_PipRestoreH);
-    }
-    else {
-        // The live fullscreen size is not the window to restore. This is
-        // the same windowed rect the session uses at startup.
-        getWindowDimensions(m_PipRestoreX, m_PipRestoreY, m_PipRestoreW, m_PipRestoreH);
-        releaseVideoDecoder();
-        SDL_SetWindowFullscreen(m_Window, 0);
-    }
+    {
+        PipHudMutationGuard hudDetached;
 
-    const char* currentTitle = SDL_GetWindowTitle(m_Window);
-    m_PipRestoreTitle = QString::fromUtf8(currentTitle != nullptr ? currentTitle : "");
-    m_PipFrameX = frame.x;
-    m_PipFrameY = frame.y;
-    m_PipFrameW = frame.w;
-    m_PipFrameH = frame.h;
-    // macOS fullscreen Spaces animate out. Keep correcting a display-sized
-    // window for a bit longer than that animation.
-    m_PipSnapBackUntil = wasFullscreen ? SDL_GetTicks() + 1500 : 0;
+        const bool wasFullscreen = (SDL_GetWindowFlags(m_Window) & m_FullScreenFlag) != 0;
+        m_PipRestoreFullscreen = wasFullscreen;
+        if (!wasFullscreen) {
+            SDL_GetWindowPosition(m_Window, &m_PipRestoreX, &m_PipRestoreY);
+            SDL_GetWindowSize(m_Window, &m_PipRestoreW, &m_PipRestoreH);
+        }
+        else {
+            // The live fullscreen size is not the window to restore. This is
+            // the same windowed rect the session uses at startup.
+            getWindowDimensions(m_PipRestoreX, m_PipRestoreY, m_PipRestoreW, m_PipRestoreH);
+            releaseVideoDecoder();
+            SDL_SetWindowFullscreen(m_Window, 0);
+        }
 
-    // Snapshot the current level before raising it. Fullscreen has already
-    // been left, so this is the windowed chrome SDL restored.
-    MacPipApplyFloating(m_Window, false);
+        const char* currentTitle = SDL_GetWindowTitle(m_Window);
+        m_PipRestoreTitle = QString::fromUtf8(currentTitle != nullptr ? currentTitle : "");
+        m_PipFrameX = frame.x;
+        m_PipFrameY = frame.y;
+        m_PipFrameW = frame.w;
+        m_PipFrameH = frame.h;
+        // macOS fullscreen Spaces animate out. Keep correcting a display-sized
+        // window for a bit longer than that animation.
+        m_PipSnapBackUntil = wasFullscreen ? SDL_GetTicks() + 1500 : 0;
+
+        // Snapshot the current level before raising it. Fullscreen has already
+        // been left, so this is the windowed chrome SDL restored.
+        MacPipApplyFloating(m_Window, false);
 #if SDL_VERSION_ATLEAST(2, 0, 5)
-    SDL_SetWindowBordered(m_Window, SDL_TRUE);
+        SDL_SetWindowBordered(m_Window, SDL_TRUE);
 #endif
-    SDL_SetWindowMinimumSize(m_Window, 160, 90);
-    SDL_SetWindowSize(m_Window, frame.w, frame.h);
-    SDL_SetWindowPosition(m_Window, frame.x, frame.y);
-    MacPipApplyFloating(m_Window, true);
+        SDL_SetWindowMinimumSize(m_Window, 160, 90);
+        SDL_SetWindowSize(m_Window, frame.w, frame.h);
+        SDL_SetWindowPosition(m_Window, frame.x, frame.y);
+        MacPipApplyFloating(m_Window, true);
 #if SDL_VERSION_ATLEAST(2, 0, 5)
-    SDL_SetWindowAlwaysOnTop(m_Window, SDL_TRUE);
+        SDL_SetWindowAlwaysOnTop(m_Window, SDL_TRUE);
 #endif
 
-    const QString pipTitle = m_PipRestoreTitle + QStringLiteral(" - Picture in Picture");
-    SDL_SetWindowTitle(m_Window, pipTitle.toUtf8().constData());
+        const QString pipTitle = m_PipRestoreTitle + QStringLiteral(" - Picture in Picture");
+        SDL_SetWindowTitle(m_Window, pipTitle.toUtf8().constData());
+    }
 
     m_PipActive = true;
     MacPipUpdateMenu(true);
@@ -1936,25 +1961,29 @@ void Session::exitPictureInPicture()
     m_PipRestoreFullscreen = false;
     MacPipUpdateMenu(false);
 
+    {
+        PipHudMutationGuard hudDetached;
+
 #if SDL_VERSION_ATLEAST(2, 0, 5)
-    SDL_SetWindowAlwaysOnTop(m_Window, SDL_FALSE);
+        SDL_SetWindowAlwaysOnTop(m_Window, SDL_FALSE);
 #endif
-    MacPipClearFloating(m_Window);
-    SDL_SetWindowMinimumSize(m_Window, 0, 0);
+        MacPipClearFloating(m_Window);
+        SDL_SetWindowMinimumSize(m_Window, 0, 0);
 
-    if (!m_PipRestoreTitle.isNull()) {
-        SDL_SetWindowTitle(m_Window, m_PipRestoreTitle.toUtf8().constData());
-        m_PipRestoreTitle.clear();
-    }
+        if (!m_PipRestoreTitle.isNull()) {
+            SDL_SetWindowTitle(m_Window, m_PipRestoreTitle.toUtf8().constData());
+            m_PipRestoreTitle.clear();
+        }
 
-    if (m_PipRestoreW > 0 && m_PipRestoreH > 0) {
-        SDL_SetWindowSize(m_Window, m_PipRestoreW, m_PipRestoreH);
-        SDL_SetWindowPosition(m_Window, m_PipRestoreX, m_PipRestoreY);
-    }
+        if (m_PipRestoreW > 0 && m_PipRestoreH > 0) {
+            SDL_SetWindowSize(m_Window, m_PipRestoreW, m_PipRestoreH);
+            SDL_SetWindowPosition(m_Window, m_PipRestoreX, m_PipRestoreY);
+        }
 
-    if (restoreFullscreen) {
-        releaseVideoDecoder();
-        SDL_SetWindowFullscreen(m_Window, m_FullScreenFlag);
+        if (restoreFullscreen) {
+            releaseVideoDecoder();
+            SDL_SetWindowFullscreen(m_Window, m_FullScreenFlag);
+        }
     }
 
     if (m_InputHandler != nullptr) {

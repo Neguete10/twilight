@@ -17,6 +17,9 @@ void twilightHudDetach(QWindow* window);
 
 static QPointer<QWindow> s_HudWindow;
 static void* s_StreamWindow = nullptr;
+static int s_StreamMutationDepth = 0;
+static bool s_PendingHudOrderFront = false;
+static bool s_PendingHudFollow = false;
 
 #ifndef Q_OS_DARWIN
 void twilightHudSync(QWindow* window, void* sdlWindow, bool raise)
@@ -180,6 +183,10 @@ static bool hudShouldSync()
 
 void StreamHudStats::followStream()
 {
+    if (s_StreamMutationDepth > 0) {
+        s_PendingHudFollow = true;
+        return;
+    }
     if (!hudShouldSync()) {
         twilightHudDetach(s_HudWindow.data());
         return;
@@ -189,11 +196,46 @@ void StreamHudStats::followStream()
 
 void StreamHudStats::orderFront()
 {
+    if (s_StreamMutationDepth > 0) {
+        s_PendingHudOrderFront = true;
+        return;
+    }
     if (!hudShouldSync()) {
         twilightHudDetach(s_HudWindow.data());
         return;
     }
     twilightHudSync(s_HudWindow.data(), s_StreamWindow, true);
+}
+
+void StreamHudStats::beginStreamWindowMutation()
+{
+    if (s_StreamMutationDepth == 0) {
+        twilightHudDetach(s_HudWindow.data());
+    }
+    s_StreamMutationDepth++;
+}
+
+void StreamHudStats::endStreamWindowMutation()
+{
+    if (s_StreamMutationDepth <= 0) {
+        s_StreamMutationDepth = 0;
+        return;
+    }
+    s_StreamMutationDepth--;
+    if (s_StreamMutationDepth > 0) {
+        return;
+    }
+
+    const bool orderFrontPending = s_PendingHudOrderFront;
+    const bool followPending = s_PendingHudFollow;
+    s_PendingHudOrderFront = false;
+    s_PendingHudFollow = false;
+    if (orderFrontPending) {
+        orderFront();
+    }
+    else if (followPending) {
+        followStream();
+    }
 }
 
 void StreamHudStats::requestDisconnect()
