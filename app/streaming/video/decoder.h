@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Limelight.h>
-#include "SDL_compat.h"
+#include <SDL.h>
 #include "settings/streamingpreferences.h"
 
 #define SDL_CODE_FRAME_READY 0
@@ -9,6 +9,7 @@
 #define MAX_SLICES 4
 
 typedef struct _VIDEO_STATS {
+    uint64_t receivedVideoBytes;
     uint32_t receivedFrames;
     uint32_t decodedFrames;
     uint32_t renderedFrames;
@@ -20,9 +21,10 @@ typedef struct _VIDEO_STATS {
     uint32_t totalHostProcessingLatency;       // low-res from RTP
     uint32_t framesWithHostProcessingLatency;  // low-res from RTP
     uint64_t totalReassemblyTimeUs;            // high-res (1us)
-    uint64_t totalDecodeTimeUs;                // high-res (1us)
+    uint64_t totalDecodeTimeUs;                // high-res from moonlight-common-c (1us)
+    uint64_t totalRenderTimeUs;                // high-res (1us), PyroWave present path
     uint64_t totalPacerTimeUs;                 // high-res (1us)
-    uint64_t totalRenderTimeUs;                // high-res (1us)
+    uint64_t totaldecodeTimeUs;                // high-res (1us)
     uint32_t lastRtt;                          // low-res from enet (1ms)
     uint32_t lastRttVariance;                  // low-res from enet (1ms)
     double totalFps;                           // high-res

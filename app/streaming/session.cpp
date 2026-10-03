@@ -4,15 +4,28 @@
 #include "backend/richpresencemanager.h"
 
 #include <Limelight.h>
-#include "SDL_compat.h"
+#include <SDL.h>
 #include "utils.h"
+#include "gui/streamhudstats.h"
 
 #ifdef HAVE_FFMPEG
 #include "video/ffmpeg.h"
 #endif
 
+#ifdef HAVE_PYROWAVE
+#include "video/pyrowave.h"
+#endif
+#ifdef HAVE_PYROWAVE_METAL
+#include "video/pyrowave_metal.h"
+#endif
+
 #ifdef HAVE_SLVIDEO
 #include "video/slvid.h"
+#endif
+
+#ifdef Q_OS_DARWIN
+#include "streaming/mac/pip_frame.h"
+#include "streaming/mac/pip_window.h"
 #endif
 
 #ifdef Q_OS_WIN32
@@ -21,6 +34,19 @@
 #else
 #define ICON_SIZE 64
 #endif
+
+// HACK: Remove once proper Dark Mode support lands in SDL
+#ifdef Q_OS_WIN32
+#include <SDL_syswm.h>
+#include <dwmapi.h>
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE_OLD
+#define DWMWA_USE_IMMERSIVE_DARK_MODE_OLD 19
+#endif
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+#endif
+
 
 #define SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER 100
 #define SDL_CODE_GAMECONTROLLER_RUMBLE 101
@@ -31,6 +57,8 @@
 
 #include <openssl/rand.h>
 
+#include <cstring>
+
 #include <QtEndian>
 #include <QCoreApplication>
 #include <QThreadPool>
@@ -39,11 +67,8 @@
 #include <QImage>
 #include <QGuiApplication>
 #include <QCursor>
+#include <QWindow>
 #include <QScreen>
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-#include <QQuickOpenGLUtils>
-#endif
 
 #define CONN_TEST_SERVER "qt.conntest.moonlight-stream.org"
 
@@ -60,7 +85,7 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clRumbleTriggers,
     Session::clSetMotionEventState,
     Session::clSetControllerLED,
-    Session::clSetAdaptiveTriggers
+    Session::clSetAdaptiveTriggers,
 };
 
 Session* Session::s_ActiveSession;
@@ -203,12 +228,12 @@ void Session::clSetHdrMode(bool enabled)
     // If we're in the process of recreating our decoder when we get
     // this callback, we'll drop it. The main thread will make the
     // callback when it finishes creating the new decoder.
-    if (SDL_TryLockMutex(s_ActiveSession->m_DecoderLock) == 0) {
+    if (SDL_AtomicTryLock(&s_ActiveSession->m_DecoderLock)) {
         IVideoDecoder* decoder = s_ActiveSession->m_VideoDecoder;
         if (decoder != nullptr) {
             decoder->setHdrMode(enabled);
         }
-        SDL_UnlockMutex(s_ActiveSession->m_DecoderLock);
+        SDL_AtomicUnlock(&s_ActiveSession->m_DecoderLock);
     }
 }
 
@@ -251,29 +276,40 @@ void Session::clSetControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g
     SDL_PushEvent(&setControllerLEDEvent);
 }
 
-void Session::clSetAdaptiveTriggers(uint16_t controllerNumber, uint8_t eventFlags, uint8_t typeLeft, uint8_t typeRight, uint8_t *left, uint8_t *right){
-    // We push an event for the main thread to handle in order to properly synchronize
-    // with the removal of game controllers that could result in our game controller
-    // going away during this callback.
-    SDL_Event setControllerLEDEvent = {};
-    setControllerLEDEvent.type = SDL_USEREVENT;
-    setControllerLEDEvent.user.code = SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS;
-    setControllerLEDEvent.user.data1 = (void*)(uintptr_t)controllerNumber;
+void Session::clSetAdaptiveTriggers(uint16_t controllerNumber, uint8_t eventFlags, uint8_t typeLeft, uint8_t typeRight, uint8_t* left, uint8_t* right)
+{
+    DualSenseAdaptivePacket packet;
+    DualSenseOutputReport* report;
 
-    // Based on the following SDL code:
-    // https://github.com/libsdl-org/SDL/blob/120c76c84bbce4c1bfed4e9eb74e10678bd83120/test/testgamecontroller.c#L286-L307
-    DualSenseOutputReport *state = (DualSenseOutputReport *) SDL_malloc(sizeof(DualSenseOutputReport));
-    SDL_zero(*state);
-    state->validFlag0 = (eventFlags & DS_EFFECT_RIGHT_TRIGGER) | (eventFlags & DS_EFFECT_LEFT_TRIGGER);
-    state->rightTriggerEffectType = typeRight;
-    SDL_memcpy(state->rightTriggerEffect, right, sizeof(state->rightTriggerEffect));
-    state->leftTriggerEffectType = typeLeft;
-    SDL_memcpy(state->leftTriggerEffect, left, sizeof(state->leftTriggerEffect));
+    // The control thread must not touch the gamepad list. Copy the effect
+    // into an SDL event and let the main thread apply it.
+    if (left == nullptr || right == nullptr) {
+        return;
+    }
 
-    setControllerLEDEvent.user.data2 = (void *) state;
-    SDL_PushEvent(&setControllerLEDEvent);
+    memset(&packet, 0, sizeof(packet));
+    packet.controllerNumber = controllerNumber;
+    packet.eventFlags = eventFlags;
+    packet.typeLeft = typeLeft;
+    packet.typeRight = typeRight;
+    memcpy(packet.left, left, sizeof(packet.left));
+    memcpy(packet.right, right, sizeof(packet.right));
+
+    report = (DualSenseOutputReport*)SDL_malloc(sizeof(*report));
+    if (report == nullptr) {
+        return;
+    }
+    dualSenseFillHostReport(&packet, report);
+
+    SDL_Event event = {};
+    event.type = SDL_USEREVENT;
+    event.user.code = SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS;
+    event.user.data1 = (void*)(uintptr_t)controllerNumber;
+    event.user.data2 = report;
+    if (SDL_PushEvent(&event) < 0) {
+        SDL_free(report);
+    }
 }
-
 
 bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
                             SDL_Window* window, int videoFormat, int width, int height,
@@ -299,6 +335,127 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "V-sync %s",
                 enableVsync ? "enabled" : "disabled");
+
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
+    if (videoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+        static_assert(static_cast<int>(StreamingPreferences::PWBC_AUTO) == static_cast<int>(PyroWaveBackendRequest::Auto),
+                      "PyroWave backend enums diverged");
+        static_assert(static_cast<int>(StreamingPreferences::PWBC_METAL) == static_cast<int>(PyroWaveBackendRequest::Metal),
+                      "PyroWave backend enums diverged");
+        static_assert(static_cast<int>(StreamingPreferences::PWBC_VULKAN) == static_cast<int>(PyroWaveBackendRequest::Vulkan),
+                      "PyroWave backend enums diverged");
+
+        // chooseDecoder is static; preferences and the chosen backend live on the active session.
+        Session* session = s_ActiveSession;
+        if (session == nullptr || session->m_Preferences == nullptr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "PyroWave: no active session for backend selection");
+            chosenDecoder = nullptr;
+            return false;
+        }
+
+        PyroWaveBackendAvailability availability{};
+#ifdef HAVE_PYROWAVE
+        availability.vulkan = true;
+#endif
+        const auto request = static_cast<PyroWaveBackendRequest>(session->m_Preferences->pyroWaveBackend);
+#ifdef HAVE_PYROWAVE_METAL
+        // Skip the dlopen when the user asked for Vulkan so a missing Metal
+        // dylib does not log on the MoltenVK path.
+        if (request != PyroWaveBackendRequest::Vulkan) {
+            availability.metal = PyroWaveMetalVideoDecoder::runtimeAvailable();
+        }
+#endif
+        // The stream window is created from the backend this probe records.
+        // Once that is set, stay on it: Vulkan present needs SDL_WINDOW_VULKAN
+        // and Metal present needs SDL_WINDOW_METAL.
+        const bool alreadyProbed = session->m_PyroWaveBackend != PyroWaveGpuBackend::None;
+        const PyroWaveGpuBackend primary = alreadyProbed
+                ? session->m_PyroWaveBackend
+                : selectPyroWaveBackend(request, availability);
+        if (!alreadyProbed) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave backend request: %s (metal %s, vulkan %s), candidate %s",
+                        pyroWaveBackendRequestName(request),
+                        availability.metal ? "available" : "unavailable",
+                        availability.vulkan ? "available" : "unavailable",
+                        pyroWaveBackendName(primary));
+        }
+        else {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave backend confirmed: %s (%s)",
+                        pyroWaveBackendName(primary),
+                        testOnly ? "probe" : "stream");
+        }
+
+        auto tryBackend = [&](PyroWaveGpuBackend which) -> bool {
+            if (which == PyroWaveGpuBackend::None) {
+                return false;
+            }
+            IVideoDecoder* decoder = nullptr;
+            if (which == PyroWaveGpuBackend::Metal) {
+#ifdef HAVE_PYROWAVE_METAL
+                decoder = new PyroWaveMetalVideoDecoder(testOnly);
+#else
+                return false;
+#endif
+            }
+            else if (which == PyroWaveGpuBackend::Vulkan) {
+#ifdef HAVE_PYROWAVE
+                decoder = new PyroWaveVideoDecoder(testOnly);
+#else
+                return false;
+#endif
+            }
+            if (decoder != nullptr && decoder->initialize(&params)) {
+                chosenDecoder = decoder;
+                session->m_PyroWaveBackend = which;
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "PyroWave backend selected: %s (%s)",
+                            pyroWaveBackendName(which),
+                            testOnly ? "probe" : "stream");
+                return true;
+            }
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Unable to load PyroWave %s decoder",
+                         pyroWaveBackendName(which));
+            delete decoder;
+            return false;
+        };
+
+        if (primary == PyroWaveGpuBackend::None) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "PyroWave backend unavailable for request %s",
+                         pyroWaveBackendRequestName(request));
+        }
+        if (tryBackend(primary)) {
+            return true;
+        }
+        if (!alreadyProbed && request == PyroWaveBackendRequest::Auto) {
+            PyroWaveGpuBackend fallback = PyroWaveGpuBackend::None;
+            if (primary == PyroWaveGpuBackend::Metal && availability.vulkan) {
+                fallback = PyroWaveGpuBackend::Vulkan;
+            }
+            else if (primary == PyroWaveGpuBackend::Vulkan && availability.metal) {
+                fallback = PyroWaveGpuBackend::Metal;
+            }
+            if (fallback != PyroWaveGpuBackend::None) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "PyroWave reconfigure: fallback %s -> %s after initialize failed",
+                            pyroWaveBackendName(primary),
+                            pyroWaveBackendName(fallback));
+                if (tryBackend(fallback)) {
+                    return true;
+                }
+            }
+        }
+        chosenDecoder = nullptr;
+        // FFmpeg has no PyroWave decoder. Returning here lets the caller drop
+        // the codec and try H.264, HEVC, or AV1 instead of hitting the
+        // FFmpeg format assert.
+        return false;
+    }
+#endif
 
 #ifdef HAVE_SLVIDEO
     chosenDecoder = new SLVideoDecoder(testOnly);
@@ -365,15 +522,15 @@ int Session::drSubmitDecodeUnit(PDECODE_UNIT du)
     // safely return DR_OK and wait for the IDR frame request by
     // the decoder reinitialization code.
 
-    if (SDL_TryLockMutex(s_ActiveSession->m_DecoderLock) == 0) {
+    if (SDL_AtomicTryLock(&s_ActiveSession->m_DecoderLock)) {
         IVideoDecoder* decoder = s_ActiveSession->m_VideoDecoder;
         if (decoder != nullptr) {
             int ret = decoder->submitDecodeUnit(du);
-            SDL_UnlockMutex(s_ActiveSession->m_DecoderLock);
+            SDL_AtomicUnlock(&s_ActiveSession->m_DecoderLock);
             return ret;
         }
         else {
-            SDL_UnlockMutex(s_ActiveSession->m_DecoderLock);
+            SDL_AtomicUnlock(&s_ActiveSession->m_DecoderLock);
             return DR_OK;
         }
     }
@@ -520,22 +677,28 @@ bool Session::populateDecoderProperties(SDL_Window* window)
         m_VideoCallbacks.submitDecodeUnit = drSubmitDecodeUnit;
     }
 
-    if (Utils::getEnvironmentVariableOverride("COLOR_SPACE_OVERRIDE", &m_StreamConfig.colorSpace)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Using colorspace override: %d",
-                    m_StreamConfig.colorSpace);
-    }
-    else {
-        m_StreamConfig.colorSpace = decoder->getDecoderColorspace();
-    }
+    {
+        bool ok;
 
-    if (Utils::getEnvironmentVariableOverride("COLOR_RANGE_OVERRIDE", &m_StreamConfig.colorRange)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Using color range override: %d",
-                    m_StreamConfig.colorRange);
-    }
-    else {
-        m_StreamConfig.colorRange = decoder->getDecoderColorRange();
+        m_StreamConfig.colorSpace = qEnvironmentVariableIntValue("COLOR_SPACE_OVERRIDE", &ok);
+        if (ok) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Using colorspace override: %d",
+                        m_StreamConfig.colorSpace);
+        }
+        else {
+            m_StreamConfig.colorSpace = decoder->getDecoderColorspace();
+        }
+
+        m_StreamConfig.colorRange = qEnvironmentVariableIntValue("COLOR_RANGE_OVERRIDE", &ok);
+        if (ok) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Using color range override: %d",
+                        m_StreamConfig.colorRange);
+        }
+        else {
+            m_StreamConfig.colorRange = decoder->getDecoderColorRange();
+        }
     }
 
     if (decoder->isAlwaysFullScreen()) {
@@ -554,35 +717,39 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_App(app),
       m_Window(nullptr),
       m_VideoDecoder(nullptr),
-      m_DecoderLock(SDL_CreateMutex()),
+      m_DecoderLock(0),
       m_AudioMuted(false),
       m_QtWindow(nullptr),
       m_UnexpectedTermination(true), // Failure prior to streaming is unexpected
       m_InputHandler(nullptr),
       m_MouseEmulationRefCount(0),
       m_FlushingWindowEventsRef(0),
-      m_ShouldExit(false),
       m_AsyncConnectionSuccess(false),
       m_PortTestResults(0),
       m_OpusDecoder(nullptr),
       m_AudioRenderer(nullptr),
       m_AudioSampleCount(0),
-      m_DropAudioEndTime(0)
+      m_DropAudioEndTime(0),
+      m_PyroWaveBackend(PyroWaveGpuBackend::None)
+#ifdef Q_OS_DARWIN
+      , m_PipActive(false),
+      m_PipRestoreFullscreen(false),
+      m_PipRestoreX(0),
+      m_PipRestoreY(0),
+      m_PipRestoreW(0),
+      m_PipRestoreH(0),
+      m_PipFrameX(0),
+      m_PipFrameY(0),
+      m_PipFrameW(0),
+      m_PipFrameH(0),
+      m_PipSnapBackUntil(0),
+      m_PipReapplying(false)
+#endif
 {
 }
 
-Session::~Session()
+bool Session::initialize()
 {
-    // NB: This may not get destroyed for a long time! Don't put any non-trivial cleanup here.
-    // Use Session::exec() or DeferredSessionCleanupTask instead.
-
-    SDL_DestroyMutex(m_DecoderLock);
-}
-
-bool Session::initialize(QQuickWindow* qtWindow)
-{
-    m_QtWindow = qtWindow;
-
 #ifdef Q_OS_DARWIN
     if (qEnvironmentVariableIntValue("I_WANT_BUGGY_FULLSCREEN") == 0) {
         // If we have a notch and the user specified one of the two native display modes
@@ -632,12 +799,6 @@ bool Session::initialize(QQuickWindow* qtWindow)
         return false;
     }
 
-    // Stop text input. SDL enables it by default
-    // when we initialize the video subsystem, but this
-    // causes an IME popup when certain keys are held down
-    // on macOS.
-    SDL_StopTextInput();
-
     LiInitializeStreamConfiguration(&m_StreamConfig);
     m_StreamConfig.width = m_Preferences->width;
     m_StreamConfig.height = m_Preferences->height;
@@ -646,13 +807,21 @@ bool Session::initialize(QQuickWindow* qtWindow)
     getWindowDimensions(x, y, width, height);
 
     // Create a hidden window to use for decoder initialization tests
-    SDL_Window* testWindow = StreamUtils::createTestWindow();
+    SDL_Window* testWindow = SDL_CreateWindow("", x, y, width, height,
+                                              SDL_WINDOW_HIDDEN | StreamUtils::getPlatformWindowFlags());
     if (!testWindow) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Failed to create window for hardware decode test: %s",
-                     SDL_GetError());
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        return false;
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to create test window with platform flags: %s",
+                    SDL_GetError());
+
+        testWindow = SDL_CreateWindow("", x, y, width, height, SDL_WINDOW_HIDDEN);
+        if (!testWindow) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Failed to create window for hardware decode test: %s",
+                         SDL_GetError());
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            return false;
+        }
     }
 
     qInfo() << "Server GPU:" << m_Computer->gpuModel;
@@ -713,7 +882,18 @@ bool Session::initialize(QQuickWindow* qtWindow)
                 "Audio channel mask: %X",
                 CHANNEL_MASK_FROM_AUDIO_CONFIGURATION(m_StreamConfig.audioConfiguration));
 
-    // Start with all codecs and profiles in priority order
+    // Start with all codecs and profiles in priority order.
+    // PyroWave is first only when this build can decode it. The rest of the
+    // list stays so a host without SCM_PYROWAVE still gets H.264/HEVC/AV1.
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
+    // 8-bit before 10-bit. HDR below still promotes 10-bit, because an
+    // 8-bit PQ frame from this host looks banded. A host that only
+    // advertises 10-bit is selected in the RTSP handshake.
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE_444);
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE);
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_444);
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_420);
+#endif
     m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_HIGH10_444);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_MAIN10);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_H265_REXT10_444);
@@ -729,6 +909,22 @@ bool Session::initialize(QQuickWindow* qtWindow)
     {
     case StreamingPreferences::VCC_AUTO:
     {
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
+        // Offer PyroWave only when the GPU decoder actually comes up. A failed
+        // probe leaves H.264/HEVC/AV1 in their existing order.
+        if (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE ||
+                getDecoderAvailability(testWindow,
+                                       m_Preferences->videoDecoderSelection,
+                                       VIDEO_FORMAT_PYROWAVE,
+                                       m_StreamConfig.width,
+                                       m_StreamConfig.height,
+                                       m_StreamConfig.fps) == DecoderAvailability::None) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave decoder unavailable; not advertising it");
+            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_PYROWAVE);
+        }
+#endif
+
         // Codecs are checked in order of ascending decode complexity to ensure
         // the the deprioritized list prefers lighter codecs for software decoding
 
@@ -779,42 +975,31 @@ bool Session::initialize(QQuickWindow* qtWindow)
             }
         }
 
-        // Deprioritize AV1 unless we can't hardware decode HEVC, and have HDR enabled
-        // or we're on Windows or a non-x86 Linux/BSD.
-        //
-        // Normally, we'd assume hardware that can't decode HEVC definitely can't decode
-        // AV1 either, and we wouldn't even bother probing for AV1 support. However, some
-        // Windows business systems have HEVC support disabled in firmware from the factory,
-        // yet they can still decode AV1 in hardware. To avoid falling back to H.264 on
-        // these systems, we don't deprioritize AV1. This firmware-based HEVC licensing
-        // behavior seems to be unique to Windows, and Linux on the same system is able
-        // to decode HEVC in hardware normally using VAAPI.
-        // https://www.reddit.com/r/GeForceNOW/comments/1omsckt/psa_be_wary_of_purchasing_dell_computers_with/
-        //
-        // Some embedded Linux platforms have incomplete V4L2 decoding support which can
-        // lead to unusual cases where a system might support H.264 and AV1 but not HEVC,
-        // even if the underlying hardware supports all three. RK3588 is an example of
-        // such a SoC. To handle this situation, we will also probe for AV1 if we're on
-        // a non-x86 non-macOS UNIX system.
-        //
+#if 0
+        // TODO: Determine if AV1 is better depending on the decoder
+        if (getDecoderAvailability(testWindow,
+                                   m_Preferences->videoDecoderSelection,
+                                   m_Preferences->enableYUV444 ?
+                                        (m_Preferences->enableHdr ? VIDEO_FORMAT_AV1_HIGH10_444 : VIDEO_FORMAT_AV1_HIGH8_444) :
+                                        (m_Preferences->enableHdr ? VIDEO_FORMAT_AV1_MAIN10 : VIDEO_FORMAT_AV1_MAIN8),
+                                   m_StreamConfig.width,
+                                   m_StreamConfig.height,
+                                   m_StreamConfig.fps) != DecoderAvailability::Hardware) {
+            // Deprioritize AV1 unless we can't hardware decode HEVC and have HDR enabled.
+            // We want to keep AV1 at the top of the list for HDR with software decoding
+            // because dav1d is higher performance than FFmpeg's HEVC software decoder.
+            if (hevcDA == DecoderAvailability::Hardware || !m_Preferences->enableHdr) {
+                m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_AV1);
+            }
+        }
+#else
+        // Deprioritize AV1 unless we can't hardware decode HEVC and have HDR enabled.
         // We want to keep AV1 at the top of the list for HDR with software decoding
         // because dav1d is higher performance than FFmpeg's HEVC software decoder.
-        if (hevcDA == DecoderAvailability::Hardware
-#if !defined(Q_OS_WIN32) && (!(defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN)) || defined(Q_PROCESSOR_X86))
-            || !m_Preferences->enableHdr
+        if (hevcDA == DecoderAvailability::Hardware || !m_Preferences->enableHdr) {
+            m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_AV1);
+        }
 #endif
-            ) {
-            m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_AV1);
-        }
-        else if (!m_Preferences->enableHdr &&
-                   getDecoderAvailability(testWindow,
-                                          m_Preferences->videoDecoderSelection,
-                                          m_Preferences->enableYUV444 ? VIDEO_FORMAT_AV1_HIGH8_444 : VIDEO_FORMAT_AV1_MAIN8,
-                                          m_StreamConfig.width,
-                                          m_StreamConfig.height,
-                                          m_StreamConfig.fps) != DecoderAvailability::Hardware) {
-            m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_AV1);
-        }
 
 #ifdef Q_OS_DARWIN
         {
@@ -834,6 +1019,17 @@ bool Session::initialize(QQuickWindow* qtWindow)
 #endif
         break;
     }
+    case StreamingPreferences::VCC_FORCE_PYROWAVE:
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
+        // Do not strip H.264/HEVC/AV1. PyroWave wins only while it remains at
+        // the front of the list; validateLaunch() removes it when the host
+        // does not advertise SCM_PYROWAVE.
+        break;
+#else
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "PyroWave was requested but this build has no PyroWave decoder; using H.264/HEVC/AV1");
+        break;
+#endif
     case StreamingPreferences::VCC_FORCE_H264:
         m_SupportedVideoFormats.removeByMask(~VIDEO_FORMAT_MASK_H264);
         break;
@@ -879,14 +1075,6 @@ bool Session::initialize(QQuickWindow* qtWindow)
     switch (m_Preferences->windowMode)
     {
     default:
-        // Normally we'd default to fullscreen desktop when starting in windowed
-        // mode, but in the case of a slow GPU, we want to use real fullscreen
-        // to allow the display to assist with the video scaling work.
-        if (WMUtils::isGpuSlow()) {
-            m_FullScreenFlag = SDL_WINDOW_FULLSCREEN;
-            break;
-        }
-        // Fall-through
     case StreamingPreferences::WM_FULLSCREEN_DESKTOP:
         // Only use full-screen desktop mode if we're running a desktop environment
         if (WMUtils::isRunningDesktopEnvironment()) {
@@ -925,12 +1113,30 @@ bool Session::initialize(QQuickWindow* qtWindow)
     bool ret = validateLaunch(testWindow);
 
     if (ret) {
-        // Video format is now locked in
-        m_StreamConfig.supportedVideoFormats = m_SupportedVideoFormats.front();
-
-        // Populate decoder-dependent properties.
-        // Must be done after validateLaunch() since m_StreamConfig is finalized.
-        ret = populateDecoderProperties(testWindow);
+        // Lock the highest-priority format whose decoder initializes.
+        // PyroWave is optional: a failed GPU init drops it and retries
+        // H.264, HEVC, or AV1. Other codecs still fail the launch if they
+        // cannot be created, which matches the previous behavior.
+        while (!m_SupportedVideoFormats.isEmpty()) {
+            m_StreamConfig.supportedVideoFormats = m_SupportedVideoFormats.front();
+            if (populateDecoderProperties(testWindow)) {
+                break;
+            }
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
+            if (m_SupportedVideoFormats.front() & VIDEO_FORMAT_MASK_PYROWAVE) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "PyroWave decoder failed to initialize; falling back");
+                emitLaunchWarning(tr("PyroWave decode is unavailable. Falling back to another video codec."));
+                m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_PYROWAVE);
+                continue;
+            }
+#endif
+            ret = false;
+            break;
+        }
+        if (m_SupportedVideoFormats.isEmpty()) {
+            ret = false;
+        }
     }
 
     SDL_DestroyWindow(testWindow);
@@ -940,16 +1146,35 @@ bool Session::initialize(QQuickWindow* qtWindow)
         return false;
     }
 
+    // Display launch warnings in Qt only after destroying SDL's window.
+    // This avoids conflicts between the windows on display subsystems
+    // such as KMSDRM that only support a single window.
+    for (const auto &text : m_LaunchWarnings) {
+        // Emit the warning to the UI
+        emit displayLaunchWarning(text);
+
+        // Wait a little bit so the user can actually read what we just said.
+        // This wait is a little longer than the actual toast timeout (3 seconds)
+        // to allow it to transition off the screen before continuing.
+        uint32_t start = SDL_GetTicks();
+        while (!SDL_TICKS_PASSED(SDL_GetTicks(), start + 3500)) {
+            SDL_Delay(5);
+
+            if (!m_ThreadedExec) {
+                // Pump the UI loop while we wait if we're on the main thread
+                QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+                QCoreApplication::sendPostedEvents();
+            }
+        }
+    }
+
     return true;
 }
 
 void Session::emitLaunchWarning(QString text)
 {
-    if (m_Preferences->configurationWarnings) {
-        // Queue this launch warning to be displayed after validation
-        m_LaunchWarnings.append(text);
-        emit launchWarningsChanged();
-    }
+    // Queue this launch warning to be displayed after validation
+    m_LaunchWarnings.append(text);
 }
 
 bool Session::validateLaunch(SDL_Window* testWindow)
@@ -967,6 +1192,23 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         emitLaunchWarning(tr("Your settings selection to force software decoding may cause poor streaming performance."));
     }
 
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
+    if (m_SupportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) {
+        const bool hostSupports = (m_Computer->serverCodecModeSupport & SCM_PYROWAVE) != 0;
+        const bool forceSoftware = m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE;
+        if (!hostSupports || forceSoftware) {
+            if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_FORCE_PYROWAVE) {
+                emitLaunchWarning(tr("PyroWave is not available for this host or decoder setting. Falling back to H.264, HEVC, or AV1."));
+            }
+            else if (!hostSupports) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Host does not advertise PyroWave; using H.264/HEVC/AV1");
+            }
+            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_PYROWAVE);
+        }
+    }
+#endif
+
     if (m_SupportedVideoFormats & VIDEO_FORMAT_MASK_AV1) {
         if (m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport & SCM_MASK_AV1) == 0) {
             if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_FORCE_AV1) {
@@ -978,8 +1220,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
             // check below.
             m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_AV1);
         }
-        else {
-            if (!m_Preferences->enableHdr && // HDR is checked below
+        else if (!m_Preferences->enableHdr && // HDR is checked below
                  m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_AUTO && // Force hardware decoding checked below
                  m_Preferences->videoCodecConfig != StreamingPreferences::VCC_AUTO && // Auto VCC is already checked in initialize()
                  getDecoderAvailability(testWindow,
@@ -988,12 +1229,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
                                         m_StreamConfig.width,
                                         m_StreamConfig.height,
                                         m_StreamConfig.fps) != DecoderAvailability::Hardware) {
-                emitLaunchWarning(tr("Using software decoding due to your selection to force AV1 without GPU support. This may cause poor streaming performance."));
-            }
-
-            if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_FORCE_AV1) {
-                m_SupportedVideoFormats.removeByMask(~VIDEO_FORMAT_MASK_AV1);
-            }
+            emitLaunchWarning(tr("Using software decoding due to your selection to force AV1 without GPU support. This may cause poor streaming performance."));
         }
     }
 
@@ -1008,8 +1244,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
             // check below.
             m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_H265);
         }
-        else {
-            if (!m_Preferences->enableHdr && // HDR is checked below
+        else if (!m_Preferences->enableHdr && // HDR is checked below
                  m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_AUTO && // Force hardware decoding checked below
                  m_Preferences->videoCodecConfig != StreamingPreferences::VCC_AUTO && // Auto VCC is already checked in initialize()
                  getDecoderAvailability(testWindow,
@@ -1018,16 +1253,11 @@ bool Session::validateLaunch(SDL_Window* testWindow)
                                         m_StreamConfig.width,
                                         m_StreamConfig.height,
                                         m_StreamConfig.fps) != DecoderAvailability::Hardware) {
-                emitLaunchWarning(tr("Using software decoding due to your selection to force HEVC without GPU support. This may cause poor streaming performance."));
-            }
-
-            if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_FORCE_HEVC) {
-                m_SupportedVideoFormats.removeByMask(~VIDEO_FORMAT_MASK_H265);
-            }
+            emitLaunchWarning(tr("Using software decoding due to your selection to force HEVC without GPU support. This may cause poor streaming performance."));
         }
     }
 
-    if (!(m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_H264) &&
+    if (!(m_SupportedVideoFormats & VIDEO_FORMAT_MASK_H265) &&
             m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_AUTO &&
             getDecoderAvailability(testWindow,
                                    m_Preferences->videoDecoderSelection,
@@ -1271,6 +1501,10 @@ private:
         // LiStartConnection() and LiStopConnection().
         SDL_assert(m_Session->m_VideoDecoder == nullptr);
 
+        // Stop the microphone before LiStopConnection() so the encoder
+        // thread is not inside a control-stream send when ENet is torn down.
+        m_Session->stopMicrophone();
+
         // Finish cleanup of the connection state
         LiStopConnection();
 
@@ -1287,11 +1521,6 @@ private:
 
             // Session is finished now
             emit m_Session->sessionFinished(m_Session->m_PortTestResults);
-        }
-
-        // Exit the entire program if requested
-        if (m_Session->m_ShouldExit) {
-            QCoreApplication::instance()->quit();
         }
     }
 
@@ -1348,23 +1577,26 @@ void Session::getWindowDimensions(int& x, int& y,
 
     SDL_Rect usableBounds;
     if (SDL_GetDisplayUsableBounds(displayIndex, &usableBounds) == 0) {
-        // If the stream resolution fits within the usable display area, use it directly
-        if (m_StreamConfig.width <= usableBounds.w &&
-            m_StreamConfig.height <= usableBounds.h) {
+        // Don't use more than 80% of the display to leave room for system UI
+        // and ensure the target size is not odd (otherwise one of the sides
+        // of the image will have a one-pixel black bar next to it).
+        SDL_Rect src, dst;
+        src.x = src.y = dst.x = dst.y = 0;
+        src.w = m_StreamConfig.width;
+        src.h = m_StreamConfig.height;
+        dst.w = ((int)SDL_ceilf(usableBounds.w * 0.80f) & ~0x1);
+        dst.h = ((int)SDL_ceilf(usableBounds.h * 0.80f) & ~0x1);
+
+        // Scale the window size while preserving aspect ratio
+        StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
+
+        // If the stream window can fit within the usable drawing area with 1:1
+        // scaling, do that rather than filling the screen.
+        if (m_StreamConfig.width < dst.w && m_StreamConfig.height < dst.h) {
             width = m_StreamConfig.width;
             height = m_StreamConfig.height;
-        } else {
-            // Otherwise, use 80% of usable bounds and preserve aspect ratio
-            SDL_Rect src, dst;
-            src.x = src.y = dst.x = dst.y = 0;
-            src.w = m_StreamConfig.width;
-            src.h = m_StreamConfig.height;
-
-            dst.w = ((int)(usableBounds.w * 0.80f)) & ~0x1;  // even width
-            dst.h = ((int)(usableBounds.h * 0.80f)) & ~0x1;  // even height
-
-            StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
-
+        }
+        else {
             width = dst.w;
             height = dst.h;
         }
@@ -1405,33 +1637,19 @@ void Session::updateOptimalWindowDisplayMode()
         return;
     }
 
-    // On devices with slow GPUs, we will try to match the display mode
-    // to the video stream to offload the scaling work to the display.
-    //
-    // We also try to match the video resolution if we're using KMSDRM,
-    // because scaling on the display is generally higher quality than
-    // scaling performed by drmModeSetPlane().
-    bool matchVideo;
-    if (!Utils::getEnvironmentVariableOverride("MATCH_DISPLAY_MODE_TO_VIDEO", &matchVideo)) {
-        matchVideo = WMUtils::isGpuSlow() || QString(SDL_GetCurrentVideoDriver()) == "KMSDRM";
-    }
-
+    // Start with the native desktop resolution and try to find
+    // the highest refresh rate that our stream FPS evenly divides.
     bestMode = desktopMode;
     bestMode.refresh_rate = 0;
-    if (!matchVideo) {
-        // Start with the native desktop resolution and try to find
-        // the highest refresh rate that our stream FPS evenly divides.
-        int numDisplayModes = SDL_GetNumDisplayModes(displayIndex);
-        for (int i = 0; i < numDisplayModes; i++) {
-            if (SDL_GetDisplayMode(displayIndex, i, &mode) == 0) {
-                if (mode.w == desktopMode.w && mode.h == desktopMode.h &&
+    for (int i = 0; i < SDL_GetNumDisplayModes(displayIndex); i++) {
+        if (SDL_GetDisplayMode(displayIndex, i, &mode) == 0) {
+            if (mode.w == desktopMode.w && mode.h == desktopMode.h &&
                     mode.refresh_rate % m_StreamConfig.fps == 0) {
-                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                                "Found display mode with desktop resolution: %dx%dx%d",
-                                mode.w, mode.h, mode.refresh_rate);
-                    if (mode.refresh_rate > bestMode.refresh_rate) {
-                        bestMode = mode;
-                    }
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Found display mode with desktop resolution: %dx%dx%d",
+                            mode.w, mode.h, mode.refresh_rate);
+                if (mode.refresh_rate > bestMode.refresh_rate) {
+                    bestMode = mode;
                 }
             }
         }
@@ -1445,8 +1663,7 @@ void Session::updateOptimalWindowDisplayMode()
     if (bestMode.refresh_rate == 0) {
         float bestModeAspectRatio = 0;
         float videoAspectRatio = (float)m_ActiveVideoWidth / (float)m_ActiveVideoHeight;
-        int numDisplayModes = SDL_GetNumDisplayModes(displayIndex);
-        for (int i = 0; i < numDisplayModes; i++) {
+        for (int i = 0; i < SDL_GetNumDisplayModes(displayIndex); i++) {
             if (SDL_GetDisplayMode(displayIndex, i, &mode) == 0) {
                 float modeAspectRatio = (float)mode.w / (float)mode.h;
                 if (mode.w >= m_ActiveVideoWidth && mode.h >= m_ActiveVideoHeight &&
@@ -1487,6 +1704,18 @@ void Session::updateOptimalWindowDisplayMode()
 
 void Session::toggleFullscreen()
 {
+#ifdef Q_OS_DARWIN
+    // Ctrl+Alt+Shift+X while the mini player is up restores the window
+    // picture-in-picture was entered from, including fullscreen. It does
+    // not also toggle fullscreen; press X again after leaving PiP for that.
+    if (m_PipActive) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Picture-in-picture is active; restoring the previous window");
+        exitPictureInPicture();
+        return;
+    }
+#endif
+
     bool fullScreen = !(SDL_GetWindowFlags(m_Window) & m_FullScreenFlag);
 
 #if defined(Q_OS_WIN32) || defined(Q_OS_DARWIN)
@@ -1498,10 +1727,10 @@ void Session::toggleFullscreen()
     // On Apple Silicon Macs, the AVSampleBufferDisplayLayer may cause WindowServer
     // to deadlock when transitioning out of fullscreen. Destroy the decoder before
     // exiting fullscreen as a workaround. See issue #973.
-    SDL_LockMutex(m_DecoderLock);
+    SDL_AtomicLock(&m_DecoderLock);
     delete m_VideoDecoder;
     m_VideoDecoder = nullptr;
-    SDL_UnlockMutex(m_DecoderLock);
+    SDL_AtomicUnlock(&m_DecoderLock);
 #endif
 
     // Actually enter/leave fullscreen
@@ -1525,6 +1754,230 @@ void Session::toggleFullscreen()
     // Input handler might need stop/stop mouse grab after changing modes
     m_InputHandler->updatePointerRegionLock();
 }
+
+#ifdef Q_OS_DARWIN
+static void macPipMenuToggle()
+{
+    if (Session::get() != nullptr) {
+        Session::get()->togglePictureInPicture();
+    }
+}
+
+void Session::releaseVideoDecoder()
+{
+    // Same teardown as toggleFullscreen(). On Apple Silicon the
+    // AVSampleBufferDisplayLayer path can deadlock WindowServer if the
+    // decoder is alive across a fullscreen transition (moonlight-qt #973).
+    SDL_AtomicLock(&m_DecoderLock);
+    delete m_VideoDecoder;
+    m_VideoDecoder = nullptr;
+    SDL_AtomicUnlock(&m_DecoderLock);
+}
+
+static bool usableBoundsForPictureInPicture(SDL_Window* window, SDL_Rect* bounds)
+{
+    int displayIndex = SDL_GetWindowDisplayIndex(window);
+    if (displayIndex < 0) {
+        displayIndex = 0;
+    }
+    if (SDL_GetDisplayUsableBounds(displayIndex, bounds) == 0) {
+        return true;
+    }
+    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "SDL_GetDisplayUsableBounds() failed: %s",
+                SDL_GetError());
+    return SDL_GetDisplayBounds(displayIndex, bounds) == 0;
+}
+
+bool Session::displayCoversWindow(int width, int height) const
+{
+    int displayIndex = SDL_GetWindowDisplayIndex(m_Window);
+    SDL_Rect bounds;
+    if (displayIndex < 0 || SDL_GetDisplayBounds(displayIndex, &bounds) != 0) {
+        return false;
+    }
+    return width >= bounds.w - 2 && height >= bounds.h - 2;
+}
+
+void Session::reapplyPictureInPictureChrome(bool orderFront)
+{
+    if (!m_PipActive || m_Window == nullptr || m_PipReapplying) {
+        return;
+    }
+    m_PipReapplying = true;
+
+    if (m_PipSnapBackUntil != 0 && SDL_TICKS_PASSED(SDL_GetTicks(), m_PipSnapBackUntil)) {
+        m_PipSnapBackUntil = 0;
+    }
+
+    if (m_PipSnapBackUntil != 0 && m_PipFrameW > 0 && m_PipFrameH > 0) {
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowSize(m_Window, &width, &height);
+        const bool fullscreen = (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN) != 0;
+        if (fullscreen || displayCoversWindow(width, height)) {
+            if (fullscreen) {
+                SDL_SetWindowFullscreen(m_Window, 0);
+            }
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+            SDL_SetWindowBordered(m_Window, SDL_TRUE);
+#endif
+            SDL_SetWindowSize(m_Window, m_PipFrameW, m_PipFrameH);
+            SDL_SetWindowPosition(m_Window, m_PipFrameX, m_PipFrameY);
+        }
+    }
+
+    // Floating chrome first, then SDL's always-on-top flag. The flag setter
+    // only changes the level; doing it first would let the snapshot below
+    // record NSFloatingWindowLevel as the window's original level.
+    MacPipApplyFloating(m_Window, orderFront);
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+    SDL_SetWindowAlwaysOnTop(m_Window, SDL_TRUE);
+#endif
+    if (orderFront) {
+        StreamHudStats::orderFront();
+    }
+    else {
+        StreamHudStats::followStream();
+    }
+    m_PipReapplying = false;
+}
+
+void Session::enterPictureInPicture()
+{
+    if (m_Window == nullptr || m_PipActive) {
+        return;
+    }
+
+    const int videoW = m_ActiveVideoWidth > 0 ? m_ActiveVideoWidth : m_StreamConfig.width;
+    const int videoH = m_ActiveVideoHeight > 0 ? m_ActiveVideoHeight : m_StreamConfig.height;
+
+    SDL_Rect usable;
+    if (!usableBoundsForPictureInPicture(m_Window, &usable)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Picture-in-picture could not read the display bounds");
+        return;
+    }
+
+    const PipFrame frame = suggestPictureInPictureFrame(
+        {usable.x, usable.y, usable.w, usable.h}, videoW, videoH);
+    if (frame.w <= 0 || frame.h <= 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Picture-in-picture frame was empty");
+        return;
+    }
+
+    const bool wasFullscreen = (SDL_GetWindowFlags(m_Window) & m_FullScreenFlag) != 0;
+    m_PipRestoreFullscreen = wasFullscreen;
+    if (!wasFullscreen) {
+        SDL_GetWindowPosition(m_Window, &m_PipRestoreX, &m_PipRestoreY);
+        SDL_GetWindowSize(m_Window, &m_PipRestoreW, &m_PipRestoreH);
+    }
+    else {
+        // The live fullscreen size is not the window to restore. This is
+        // the same windowed rect the session uses at startup.
+        getWindowDimensions(m_PipRestoreX, m_PipRestoreY, m_PipRestoreW, m_PipRestoreH);
+        releaseVideoDecoder();
+        SDL_SetWindowFullscreen(m_Window, 0);
+    }
+
+    const char* currentTitle = SDL_GetWindowTitle(m_Window);
+    m_PipRestoreTitle = QString::fromUtf8(currentTitle != nullptr ? currentTitle : "");
+    m_PipFrameX = frame.x;
+    m_PipFrameY = frame.y;
+    m_PipFrameW = frame.w;
+    m_PipFrameH = frame.h;
+    // macOS fullscreen Spaces animate out. Keep correcting a display-sized
+    // window for a bit longer than that animation.
+    m_PipSnapBackUntil = wasFullscreen ? SDL_GetTicks() + 1500 : 0;
+
+    // Snapshot the current level before raising it. Fullscreen has already
+    // been left, so this is the windowed chrome SDL restored.
+    MacPipApplyFloating(m_Window, false);
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+    SDL_SetWindowBordered(m_Window, SDL_TRUE);
+#endif
+    SDL_SetWindowMinimumSize(m_Window, 160, 90);
+    SDL_SetWindowSize(m_Window, frame.w, frame.h);
+    SDL_SetWindowPosition(m_Window, frame.x, frame.y);
+    MacPipApplyFloating(m_Window, true);
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+    SDL_SetWindowAlwaysOnTop(m_Window, SDL_TRUE);
+#endif
+
+    const QString pipTitle = m_PipRestoreTitle + QStringLiteral(" - Picture in Picture");
+    SDL_SetWindowTitle(m_Window, pipTitle.toUtf8().constData());
+
+    m_PipActive = true;
+    MacPipUpdateMenu(true);
+
+    // Leave the cursor free so the mini player can sit beside another app.
+    // A click in the video captures again, same as a windowed stream.
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->setCaptureActive(false);
+    }
+
+    StreamHudStats::orderFront();
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Entered picture-in-picture at %d,%d %dx%d",
+                frame.x, frame.y, frame.w, frame.h);
+}
+
+void Session::exitPictureInPicture()
+{
+    if (m_Window == nullptr || !m_PipActive) {
+        return;
+    }
+
+    const bool restoreFullscreen = m_PipRestoreFullscreen;
+    m_PipActive = false;
+    m_PipSnapBackUntil = 0;
+    m_PipRestoreFullscreen = false;
+    MacPipUpdateMenu(false);
+
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+    SDL_SetWindowAlwaysOnTop(m_Window, SDL_FALSE);
+#endif
+    MacPipClearFloating(m_Window);
+    SDL_SetWindowMinimumSize(m_Window, 0, 0);
+
+    if (!m_PipRestoreTitle.isNull()) {
+        SDL_SetWindowTitle(m_Window, m_PipRestoreTitle.toUtf8().constData());
+        m_PipRestoreTitle.clear();
+    }
+
+    if (m_PipRestoreW > 0 && m_PipRestoreH > 0) {
+        SDL_SetWindowSize(m_Window, m_PipRestoreW, m_PipRestoreH);
+        SDL_SetWindowPosition(m_Window, m_PipRestoreX, m_PipRestoreY);
+    }
+
+    if (restoreFullscreen) {
+        releaseVideoDecoder();
+        SDL_SetWindowFullscreen(m_Window, m_FullScreenFlag);
+    }
+
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->updateKeyboardGrabState();
+        m_InputHandler->updatePointerRegionLock();
+    }
+
+    StreamHudStats::orderFront();
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Exited picture-in-picture");
+}
+
+void Session::togglePictureInPicture()
+{
+    if (m_PipActive) {
+        exitPictureInPicture();
+    }
+    else {
+        enterPictureInPicture();
+    }
+}
+#endif
 
 void Session::notifyMouseEmulationMode(bool enabled)
 {
@@ -1562,6 +2015,10 @@ public:
 // Called in a non-main thread
 bool Session::startConnectionAsync()
 {
+    // Wait 1.5 seconds before connecting to let the user
+    // have time to read any messages present on the segue
+    SDL_Delay(1500);
+
     // The UI should have ensured the old game was already quit
     // if we decide to stream a different game.
     Q_ASSERT(m_Computer->currentGameId == 0 ||
@@ -1573,7 +2030,7 @@ bool Session::startConnectionAsync()
         // the chosen resolution. Avoid that by disabling SOPS when it
         // is not streaming a supported resolution.
         enableGameOptimizations = false;
-        for (const NvDisplayMode &mode : std::as_const(m_Computer->displayModes)) {
+        for (const NvDisplayMode &mode : m_Computer->displayModes) {
             if (mode.width == m_StreamConfig.width &&
                     mode.height == m_StreamConfig.height) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -1610,8 +2067,8 @@ bool Session::startConnectionAsync()
         return false;
     }
 
-    QByteArray hostnameStr = m_Computer->activeAddress.address().toUtf8();
-    QByteArray siAppVersion = m_Computer->appVersion.toUtf8();
+    QByteArray hostnameStr = m_Computer->activeAddress.address().toLatin1();
+    QByteArray siAppVersion = m_Computer->appVersion.toLatin1();
 
     SERVER_INFORMATION hostInfo;
     hostInfo.address = hostnameStr.data();
@@ -1621,7 +2078,7 @@ bool Session::startConnectionAsync()
     // Older GFE versions didn't have this field
     QByteArray siGfeVersion;
     if (!m_Computer->gfeVersion.isEmpty()) {
-        siGfeVersion = m_Computer->gfeVersion.toUtf8();
+        siGfeVersion = m_Computer->gfeVersion.toLatin1();
     }
     if (!siGfeVersion.isEmpty()) {
         hostInfo.serverInfoGfeVersion = siGfeVersion.data();
@@ -1630,7 +2087,7 @@ bool Session::startConnectionAsync()
     // Older GFE and Sunshine versions didn't have this field
     QByteArray rtspSessionUrlStr;
     if (!rtspSessionUrl.isEmpty()) {
-        rtspSessionUrlStr = rtspSessionUrl.toUtf8();
+        rtspSessionUrlStr = rtspSessionUrl.toLatin1();
         hostInfo.rtspSessionUrl = rtspSessionUrlStr.data();
     }
 
@@ -1695,8 +2152,53 @@ bool Session::startConnectionAsync()
         return false;
     }
 
+    startMicrophone();
+
     emit connectionStarted();
     return true;
+}
+
+void Session::startMicrophone()
+{
+    if (!m_Preferences->enableMicrophone) {
+        return;
+    }
+
+#ifdef Q_OS_DARWIN
+    // GeForce Experience has no client-microphone receiver. Sending an
+    // unknown control packet there is not useful and is avoided.
+    if (m_Computer->isNvidiaServerSoftware) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Microphone forwarding stays off for GeForce Experience hosts");
+        return;
+    }
+    if (!m_Microphone.start()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Microphone capture did not start; continuing the stream without it");
+    }
+#else
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Microphone forwarding is only implemented on macOS");
+#endif
+}
+
+void Session::stopMicrophone()
+{
+    m_Microphone.stop();
+}
+
+void Session::toggleMicrophoneMute()
+{
+    if (!m_Microphone.isRunning()) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Microphone capture is not active");
+        return;
+    }
+
+    const bool muted = !m_Microphone.isMuted();
+    m_Microphone.setMuted(muted);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                muted ? "Microphone muted" : "Microphone live");
 }
 
 void Session::flushWindowEvents()
@@ -1716,52 +2218,108 @@ void Session::flushWindowEvents()
     SDL_PushEvent(&flushEvent);
 }
 
-void Session::setShouldExit(bool quitHostApp)
+class ExecThread : public QThread
 {
-    // If the caller has explicitly asked us to quit the host app,
-    // override whatever the preferences say and do it. If the
-    // caller doesn't override to force quit, let the preferences
-    // dictate what we do.
-    if (quitHostApp) {
-        m_Preferences->quitAppAfter = true;
+public:
+    ExecThread(Session* session) :
+        QThread(nullptr),
+        m_Session(session)
+    {
+        setObjectName("Session Exec");
     }
 
-    m_ShouldExit = true;
+    void run() override
+    {
+        m_Session->execInternal();
+    }
+
+    Session* m_Session;
+};
+
+void Session::exec(QWindow* qtWindow)
+{
+    m_QtWindow = qtWindow;
+
+    // Use a separate thread for the streaming session on X11 or Wayland
+    // to ensure we don't stomp on Qt's GL context. This breaks when using
+    // the Qt EGLFS backend, so we will restrict this to X11
+    m_ThreadedExec = WMUtils::isRunningX11() || WMUtils::isRunningWayland();
+
+    if (m_ThreadedExec) {
+        // Run the streaming session on a separate thread for Linux/BSD
+        ExecThread execThread(this);
+        execThread.start();
+
+        // Until the SDL streaming window is created, we should continue
+        // to update the Qt UI to allow warning messages to display and
+        // make sure that the Qt window can hide itself.
+        while (!execThread.wait(10) && m_Window == nullptr) {
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            QCoreApplication::sendPostedEvents();
+        }
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QCoreApplication::sendPostedEvents();
+
+        // SDL is in charge now. Wait until the streaming thread exits
+        // to further update the Qt window.
+        execThread.wait();
+    }
+    else {
+        // Run the streaming session on the main thread for Windows and macOS
+        execInternal();
+    }
 }
 
-void Session::start()
+void Session::execInternal()
 {
-    // Wait for any old session to finish cleanup
+    // Complete initialization in this deferred context to avoid
+    // calling expensive functions in the constructor (during the
+    // process of loading the StreamSegue).
+    //
+    // NB: This initializes the SDL video subsystem, so it must be
+    // called on the main thread.
+    //
+    // chooseDecoder() runs inside initialize() (the PyroWave probe and
+    // the HEVC/AV1 capability probe). Those decoders call Session::get()
+    // while they come up. Wait out the previous session first, then
+    // publish this one, so that call is this session and not a null or
+    // half-destroyed one.
     s_ActiveSessionSemaphore.acquire();
-
-    // We're now active
     s_ActiveSession = this;
+
+    if (!initialize()) {
+        s_ActiveSession = nullptr;
+        s_ActiveSessionSemaphore.release();
+        emit sessionFinished(0);
+        emit readyForDeletion();
+        return;
+    }
 
     // Initialize the gamepad code with our preferences
     // NB: m_InputHandler must be initialize before starting the connection.
     m_InputHandler = new SdlInputHandler(*m_Preferences, m_StreamConfig.width, m_StreamConfig.height);
 
-    // Kick off the async connection thread then return to the caller to pump the event loop
-    auto thread = new AsyncConnectionStartThread(this);
-    QObject::connect(thread, &QThread::finished, this, &Session::exec);
-    QObject::connect(thread, &QThread::finished, thread, &QThread::deleteLater);
-    thread->start();
-}
+    AsyncConnectionStartThread asyncConnThread(this);
+    if (!m_ThreadedExec) {
+        // Kick off the async connection thread while we sit here and pump the event loop
+        asyncConnThread.start();
+        while (!asyncConnThread.wait(10)) {
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            QCoreApplication::sendPostedEvents();
+        }
 
-void Session::interrupt()
-{
-    // Stop any connection in progress
-    LiInterruptConnection();
+        // Pump the event loop one last time to ensure we pick up any events from
+        // the thread that happened while it was in the final successful QThread::wait().
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QCoreApplication::sendPostedEvents();
+    }
+    else {
+        // We're already in a separate thread so run the connection operations
+        // synchronously and don't pump the event loop. The main thread is already
+        // pumping the event loop for us.
+        asyncConnThread.run();
+    }
 
-    // Inject a quit event to our SDL event loop
-    SDL_Event event;
-    event.type = SDL_QUIT;
-    event.quit.timestamp = SDL_GetTicks();
-    SDL_PushEvent(&event);
-}
-
-void Session::exec()
-{
     // If the connection failed, clean up and abort the connection.
     if (!m_AsyncConnectionSuccess) {
         delete m_InputHandler;
@@ -1770,12 +2328,6 @@ void Session::exec()
         QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
         return;
     }
-
-    // Pump the Qt event loop one last time before we create our SDL window
-    // This is sometimes necessary for the QML code to process any signals
-    // we've emitted from the async connection thread.
-    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    QCoreApplication::sendPostedEvents();
 
     int x, y, width, height;
     getWindowDimensions(x, y, width, height);
@@ -1791,10 +2343,6 @@ void Session::exec()
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
-
-    // Disable depth and stencil buffers
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
 
     // We always want a resizable window with High DPI enabled
     Uint32 defaultWindowFlags = SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE;
@@ -1829,23 +2377,63 @@ void Session::exec()
     std::string windowName = QString(m_Computer->name + " - Moonlight").toStdString();
 #endif
 
+    Uint32 platformFlags = StreamUtils::getPlatformWindowFlags();
+#if defined(Q_OS_DARWIN) && (defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL))
+    // MoltenVK present calls SDL_Vulkan_CreateSurface. That requires
+    // SDL_WINDOW_VULKAN. Darwin's default flag is SDL_WINDOW_METAL so
+    // VideoToolbox (and PyroWave Metal) keep working. Swap only when the
+    // probe selected the Vulkan PyroWave backend.
+    if ((m_ActiveVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) &&
+            m_PyroWaveBackend == PyroWaveGpuBackend::Vulkan) {
+        // SDL_WINDOW_VULKAN is an enumerator in SDL_WindowFlags, not a
+        // preprocessor macro, so #ifdef SDL_WINDOW_VULKAN is false and the
+        // stream window stays SDL_WINDOW_METAL. MoltenVK then cannot create
+        // a surface. The flag has existed since SDL 2.0.6.
+#if SDL_VERSION_ATLEAST(2, 0, 6)
+        platformFlags &= ~SDL_WINDOW_METAL;
+        platformFlags |= SDL_WINDOW_VULKAN;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PyroWave Vulkan selected; stream window uses SDL_WINDOW_VULKAN");
+#else
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "PyroWave Vulkan needs SDL 2.0.6 or newer for SDL_WINDOW_VULKAN");
+#endif
+    }
+#endif
+
     m_Window = SDL_CreateWindow(windowName.c_str(),
                                 x,
                                 y,
                                 width,
                                 height,
-                                defaultWindowFlags | StreamUtils::getPlatformWindowFlags());
+                                defaultWindowFlags | platformFlags);
     if (!m_Window) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "SDL_CreateWindow() failed with platform flags: %s",
                     SDL_GetError());
 
+        // Keep the present flag. Dropping it leaves a Metal decoder on a
+        // Vulkan window, or MoltenVK with no surface, and the stream
+        // recreates forever.
+        Uint32 retryFlags = defaultWindowFlags;
+#if defined(Q_OS_DARWIN) && (defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL))
+        if (m_ActiveVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+            if (m_PyroWaveBackend == PyroWaveGpuBackend::Vulkan) {
+#if SDL_VERSION_ATLEAST(2, 0, 6)
+                retryFlags |= SDL_WINDOW_VULKAN;
+#endif
+            }
+            else if (m_PyroWaveBackend == PyroWaveGpuBackend::Metal) {
+                retryFlags |= SDL_WINDOW_METAL;
+            }
+        }
+#endif
         m_Window = SDL_CreateWindow(windowName.c_str(),
                                     x,
                                     y,
                                     width,
                                     height,
-                                    defaultWindowFlags);
+                                    retryFlags);
         if (!m_Window) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "SDL_CreateWindow() failed: %s",
@@ -1858,6 +2446,38 @@ void Session::exec()
             return;
         }
     }
+
+    // HACK: Remove once proper Dark Mode support lands in SDL
+#ifdef Q_OS_WIN32
+    if (m_QtWindow != nullptr) {
+        BOOL darkModeEnabled;
+
+        // Query whether dark mode is enabled for our Qt window (which tracks the OS dark mode state)
+        if (FAILED(DwmGetWindowAttribute((HWND)m_QtWindow->winId(), DWMWA_USE_IMMERSIVE_DARK_MODE, &darkModeEnabled, sizeof(darkModeEnabled))) &&
+            FAILED(DwmGetWindowAttribute((HWND)m_QtWindow->winId(), DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, &darkModeEnabled, sizeof(darkModeEnabled)))) {
+            darkModeEnabled = FALSE;
+        }
+
+        SDL_SysWMinfo info;
+        SDL_VERSION(&info.version);
+
+        if (SDL_GetWindowWMInfo(m_Window, &info) && info.subsystem == SDL_SYSWM_WINDOWS) {
+            // If dark mode is enabled, propagate that to our SDL window
+            if (darkModeEnabled) {
+                if (FAILED(DwmSetWindowAttribute(info.info.win.window, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkModeEnabled, sizeof(darkModeEnabled)))) {
+                    DwmSetWindowAttribute(info.info.win.window, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, &darkModeEnabled, sizeof(darkModeEnabled));
+                }
+
+                // Toggle non-client rendering off and back on to ensure dark mode takes effect on Windows 10.
+                // DWM doesn't seem to correctly invalidate the non-client area after enabling dark mode.
+                DWMNCRENDERINGPOLICY ncPolicy = DWMNCRP_DISABLED;
+                DwmSetWindowAttribute(info.info.win.window, DWMWA_NCRENDERING_POLICY, &ncPolicy, sizeof(ncPolicy));
+                ncPolicy = DWMNCRP_ENABLED;
+                DwmSetWindowAttribute(info.info.win.window, DWMWA_NCRENDERING_POLICY, &ncPolicy, sizeof(ncPolicy));
+            }
+        }
+    }
+#endif
 
     m_InputHandler->setWindow(m_Window);
 
@@ -1891,27 +2511,39 @@ void Session::exec()
         SDL_SetWindowFullscreen(m_Window, m_FullScreenFlag);
     }
 
+#ifdef Q_OS_DARWIN
+    // The HUD was shown while Qt still owned the main thread. Anchor it to
+    // this window (fullscreen or the desktop stream window), then deliver
+    // the expose so the chips are painted before SDL takes over.
+    StreamHudStats::noteStreamWindow(m_Window);
+    StreamHudStats::orderFront();
+    if (StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming()) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        StreamHudStats::orderFront();
+    }
+#endif
+
     bool needsFirstEnterCapture = false;
     bool needsPostDecoderCreationCapture = false;
 
-    // Avoid capturing the mouse initially for windowed relative mode.
-    // We still capture in windowed absolute mode because it doesn't
-    // constrain the motion of the cursor. This allows the user to
-    // easily reposition or resize the window.
-    if (m_IsFullScreen || m_Preferences->absoluteMouseMode) {
-        // HACK: For Wayland, we wait until we get the first SDL_WINDOWEVENT_ENTER
-        // event where it seems to work consistently on GNOME. For other platforms,
-        // especially where SDL may call SDL_RecreateWindow(), we must only capture
-        // after the decoder is created.
-        if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0) {
-            // Native Wayland: Capture on SDL_WINDOWEVENT_ENTER
-            needsFirstEnterCapture = true;
-        }
-        else {
-            // X11/XWayland: Capture after decoder creation
-            needsPostDecoderCreationCapture = true;
-        }
+    // HACK: For Wayland, we wait until we get the first SDL_WINDOWEVENT_ENTER
+    // event where it seems to work consistently on GNOME. For other platforms,
+    // especially where SDL may call SDL_RecreateWindow(), we must only capture
+    // after the decoder is created.
+    if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0) {
+        // Native Wayland: Capture on SDL_WINDOWEVENT_ENTER
+        needsFirstEnterCapture = true;
     }
+    else {
+        // X11/XWayland: Capture after decoder creation
+        needsPostDecoderCreationCapture = true;
+    }
+
+    // Stop text input. SDL enables it by default
+    // when we initialize the video subsystem, but this
+    // causes an IME popup when certain keys are held down
+    // on macOS.
+    SDL_StopTextInput();
 
     // Disable the screen saver if requested
     if (m_Preferences->keepAwake) {
@@ -1939,14 +2571,34 @@ void Session::exec()
 
     // Toggle the stats overlay if requested by the user
     m_OverlayManager.setOverlayState(Overlay::OverlayDebug, m_Preferences->showPerformanceOverlay);
+    m_OverlayManager.setOverlayState(Overlay::OverlayDebugAudio, m_Preferences->showPerformanceOverlay);
 
-    // Switch to async logging mode when we enter the SDL loop
-    StreamUtils::enterAsyncLoggingMode();
+#ifdef Q_OS_DARWIN
+    MacPipInstallMenu(macPipMenuToggle);
+#endif
 
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
+    // The Twilight HUD is the exception on macOS: while it is up, the idle
+    // wait is shorter and queued Qt events are drained there. Doing that on
+    // every SDL event re-enters Cocoa from inside the stream loop.
     SDL_Event event;
+#ifdef Q_OS_DARWIN
+    int twilightHudPump = 0;
+    int twilightHudRaise = 0;
+#endif
     for (;;) {
+#ifdef Q_OS_DARWIN
+        // Gamepad and mouse events can arrive faster than the idle timeout,
+        // which would otherwise starve the HUD's queued updates. Move the
+        // chips with the stream window here; raising on every batch flickers.
+        if (StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming() &&
+                ++twilightHudPump >= 20) {
+            twilightHudPump = 0;
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+            StreamHudStats::followStream();
+        }
+#endif
 #if SDL_VERSION_ATLEAST(2, 0, 18) && !defined(STEAM_LINK)
         // SDL 2.0.18 has a proper wait event implementation that uses platform
         // support to block on events rather than polling on Windows, macOS, X11,
@@ -1957,8 +2609,27 @@ void Session::exec()
         // NB: This behavior was introduced in SDL 2.0.16, but had a few critical
         // issues that could cause indefinite timeouts, delayed joystick detection,
         // and other problems.
-        if (!SDL_WaitEventTimeout(&event, 1000)) {
+        int waitMs = 1000;
+#ifdef Q_OS_DARWIN
+        const bool twilightHud = StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming();
+        if (twilightHud) {
+            waitMs = 100;
+        }
+#endif
+        if (!SDL_WaitEventTimeout(&event, waitMs)) {
             presence.runCallbacks();
+#ifdef Q_OS_DARWIN
+            if (twilightHud) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+                StreamHudStats::followStream();
+                // Fullscreen spaces can cover the chips. Raise occasionally,
+                // not on every move, so the window does not flicker.
+                if (++twilightHudRaise >= 10) {
+                    twilightHudRaise = 0;
+                    StreamHudStats::orderFront();
+                }
+            }
+#endif
             continue;
         }
 #else
@@ -2017,7 +2688,7 @@ void Session::exec()
                 break;
             case SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS:
                 m_InputHandler->setAdaptiveTriggers((uint16_t)(uintptr_t)event.user.data1,
-                                                    (DualSenseOutputReport *)event.user.data2);
+                                                    (DualSenseOutputReport*)event.user.data2);
                 break;
             default:
                 SDL_assert(false);
@@ -2025,6 +2696,18 @@ void Session::exec()
             break;
 
         case SDL_WINDOWEVENT:
+#ifdef Q_OS_DARWIN
+            // SDL and AppKit can drop the floating level when the window
+            // is resized or the app deactivates. Put it back. orderFront
+            // only on focus loss, so a resize does not cover the app the
+            // user is typing into beyond the corner the player already occupies.
+            if (m_PipActive) {
+                reapplyPictureInPictureChrome(event.window.event == SDL_WINDOWEVENT_FOCUS_LOST);
+            }
+            if (StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming()) {
+                StreamHudStats::followStream();
+            }
+#endif
             // Early handling of some events
             switch (event.window.event) {
             case SDL_WINDOWEVENT_FOCUS_LOST:
@@ -2037,7 +2720,6 @@ void Session::exec()
                 if (m_Preferences->muteOnFocusLoss) {
                     m_AudioMuted = false;
                 }
-                m_InputHandler->notifyFocusGained();
                 break;
             case SDL_WINDOWEVENT_LEAVE:
                 m_InputHandler->notifyMouseLeave();
@@ -2146,6 +2828,7 @@ void Session::exec()
 
             // Fall through
         case SDL_RENDER_DEVICE_RESET:
+        case SDL_RENDER_TARGETS_RESET:
 
             if (event.type != SDL_WINDOWEVENT) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
@@ -2153,7 +2836,7 @@ void Session::exec()
                             event.type);
             }
 
-            SDL_LockMutex(m_DecoderLock);
+            SDL_AtomicLock(&m_DecoderLock);
 
             // Destroy the old decoder
             delete m_VideoDecoder;
@@ -2173,9 +2856,10 @@ void Session::exec()
 
             // Now that the old decoder is dead, flush any events it may
             // have queued to reset itself (if this reset was the result
-            // of device loss or an internal error).
+            // of state loss).
             SDL_PumpEvents();
             SDL_FlushEvent(SDL_RENDER_DEVICE_RESET);
+            SDL_FlushEvent(SDL_RENDER_TARGETS_RESET);
 
             {
                 // If the stream exceeds the display refresh rate (plus some slack),
@@ -2198,7 +2882,7 @@ void Session::exec()
                                    enableVsync && m_Preferences->framePacing,
                                    false,
                                    s_ActiveSession->m_VideoDecoder)) {
-                    SDL_UnlockMutex(m_DecoderLock);
+                    SDL_AtomicUnlock(&m_DecoderLock);
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                  "Failed to recreate decoder after reset");
                     emit displayLaunchError(tr("Unable to initialize video decoder. Please check your streaming settings and try again."));
@@ -2224,7 +2908,7 @@ void Session::exec()
             // After a window resize, we need to reset the pointer lock region
             m_InputHandler->updatePointerRegionLock();
 
-            SDL_UnlockMutex(m_DecoderLock);
+            SDL_AtomicUnlock(&m_DecoderLock);
             break;
 
         case SDL_KEYUP:
@@ -2245,11 +2929,13 @@ void Session::exec()
             break;
         case SDL_CONTROLLERAXISMOTION:
             m_InputHandler->handleControllerAxisEvent(&event.caxis);
+            m_InputHandler->refreshGamepadOverlay(false);
             break;
         case SDL_CONTROLLERBUTTONDOWN:
         case SDL_CONTROLLERBUTTONUP:
             presence.runCallbacks();
             m_InputHandler->handleControllerButtonEvent(&event.cbutton);
+            m_InputHandler->refreshGamepadOverlay(true);
             break;
 #if SDL_VERSION_ATLEAST(2, 0, 14)
         case SDL_CONTROLLERSENSORUPDATE:
@@ -2269,6 +2955,7 @@ void Session::exec()
         case SDL_CONTROLLERDEVICEADDED:
         case SDL_CONTROLLERDEVICEREMOVED:
             m_InputHandler->handleControllerDeviceEvent(&event.cdevice);
+            m_InputHandler->refreshGamepadOverlay(true);
             break;
         case SDL_JOYDEVICEADDED:
             m_InputHandler->handleJoystickArrivalEvent(&event.jdevice);
@@ -2278,20 +2965,18 @@ void Session::exec()
         case SDL_FINGERUP:
             m_InputHandler->handleTouchFingerEvent(&event.tfinger);
             break;
-        case SDL_DISPLAYEVENT:
-            switch (event.display.event) {
-            case SDL_DISPLAYEVENT_CONNECTED:
-            case SDL_DISPLAYEVENT_DISCONNECTED:
-                m_InputHandler->updatePointerRegionLock();
-                break;
-            }
-            break;
         }
     }
 
 DispatchDeferredCleanup:
-    // Switch back to synchronous logging mode
-    StreamUtils::exitAsyncLoggingMode();
+#ifdef Q_OS_DARWIN
+    // Drop the menu before the window goes away so a click cannot call
+    // back into this session. Skipping the geometry restore avoids a
+    // fullscreen animation on the way out.
+    m_PipActive = false;
+    m_PipSnapBackUntil = 0;
+    MacPipRemoveMenu();
+#endif
 
     // Uncapture the mouse and hide the window immediately,
     // so we can return to the Qt GUI ASAP.
@@ -2314,10 +2999,10 @@ DispatchDeferredCleanup:
     // Destroy the decoder, since this must be done on the main thread
     // NB: This must happen before LiStopConnection() for pull-based
     // decoders.
-    SDL_LockMutex(m_DecoderLock);
+    SDL_AtomicLock(&m_DecoderLock);
     delete m_VideoDecoder;
     m_VideoDecoder = nullptr;
-    SDL_UnlockMutex(m_DecoderLock);
+    SDL_AtomicUnlock(&m_DecoderLock);
 
     // Propagate state changes from the SDL window back to the Qt window
     //
@@ -2346,6 +3031,7 @@ DispatchDeferredCleanup:
 
     // This must be called after the decoder is deleted, because
     // the renderer may want to interact with the window
+    StreamHudStats::noteStreamWindow(nullptr);
     SDL_DestroyWindow(m_Window);
 
     if (iconSurface != nullptr) {
@@ -2359,3 +3045,4 @@ DispatchDeferredCleanup:
     // reference.
     QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
 }
+

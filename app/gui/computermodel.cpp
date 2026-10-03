@@ -13,7 +13,9 @@ void ComputerModel::initialize(ComputerManager* computerManager)
     connect(m_ComputerManager, &ComputerManager::pairingCompleted,
             this, &ComputerModel::handlePairingCompleted);
 
+    beginResetModel();
     m_Computers = m_ComputerManager->getComputers();
+    endResetModel();
 }
 
 QVariant ComputerModel::data(const QModelIndex& index, int role) const
@@ -112,6 +114,70 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[DetailsRole] = "details";
 
     return names;
+}
+
+QVariant ComputerModel::roleAt(int row, int role) const
+{
+    if (row < 0 || row >= m_Computers.count()) {
+        return QVariant();
+    }
+    return data(index(row, 0), role);
+}
+
+int ComputerModel::computerCount() const
+{
+    return m_Computers.count();
+}
+
+QString ComputerModel::computerNameAt(int row) const
+{
+    return roleAt(row, NameRole).toString();
+}
+
+QString ComputerModel::computerUuidAt(int row) const
+{
+    if (row < 0 || row >= m_Computers.count()) {
+        return QString();
+    }
+
+    NvComputer* computer = m_Computers[row];
+    QReadLocker lock(&computer->lock);
+    return computer->uuid;
+}
+
+bool ComputerModel::computerOnlineAt(int row) const
+{
+    return roleAt(row, OnlineRole).toBool();
+}
+
+bool ComputerModel::computerPairedAt(int row) const
+{
+    return roleAt(row, PairedRole).toBool();
+}
+
+bool ComputerModel::computerWakeableAt(int row) const
+{
+    return roleAt(row, WakeableRole).toBool();
+}
+
+bool ComputerModel::computerBusyAt(int row) const
+{
+    return roleAt(row, BusyRole).toBool();
+}
+
+bool ComputerModel::computerStatusUnknownAt(int row) const
+{
+    return roleAt(row, StatusUnknownRole).toBool();
+}
+
+bool ComputerModel::computerSupportedAt(int row) const
+{
+    return roleAt(row, ServerSupportedRole).toBool();
+}
+
+QString ComputerModel::computerDetailsAt(int row) const
+{
+    return roleAt(row, DetailsRole).toString();
 }
 
 Session* ComputerModel::createSessionForCurrentGame(int computerIndex)

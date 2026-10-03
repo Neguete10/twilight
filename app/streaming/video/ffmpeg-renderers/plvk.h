@@ -10,34 +10,9 @@
 #include <libplacebo/renderer.h>
 #include <libplacebo/vulkan.h>
 
-#ifdef Q_OS_DARWIN
-class MetalVulkanTextureFactory {
-public:
-    MetalVulkanTextureFactory(pl_vulkan vulkan);
-    ~MetalVulkanTextureFactory();
-
-    bool mapVideoToolboxToPlacebo(const AVFrame *frame, pl_frame* mappedFrame);
-    void unmapVideoToolboxFromPlacebo(pl_frame* mappedFrame);
-
-private:
-    pl_vulkan m_Vulkan;
-    /* CVMetalTextureCacheRef */ void* m_TextureCache = nullptr;
-};
-
-// Work around direct-to-display mode sometimes (but not always!) blocking us
-// from getting a new drawable while the current one is getting scanned out.
-#define PLVK_USE_DYNAMIC_SWAPCHAIN_DEPTH 1
-
-// MoltenVK will block for the next drawable when we render the next frame
-// rather than inside pl_swapchain_start_frame(), so we will force it to wait
-// by rendering some no-op work right after we get the new swapchain frame.
-#define PLVK_USE_EARLY_RENDER_TO_WAIT 1
-
-#endif
-
 class PlVkRenderer : public IFFmpegRenderer {
 public:
-    PlVkRenderer(AVHWDeviceType hwDeviceType = AV_HWDEVICE_TYPE_NONE, IFFmpegRenderer *backendRenderer = nullptr);
+    PlVkRenderer(bool hwaccel = false, IFFmpegRenderer *backendRenderer = nullptr);
     virtual ~PlVkRenderer() override;
     virtual bool initialize(PDECODER_PARAMETERS params) override;
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary** options) override;
@@ -51,21 +26,17 @@ public:
     virtual int getDecoderColorspace() override;
     virtual int getDecoderColorRange() override;
     virtual int getDecoderCapabilities() override;
+    virtual bool needsTestFrame() override;
     virtual bool isPixelFormatSupported(int videoFormat, enum AVPixelFormat pixelFormat) override;
     virtual AVPixelFormat getPreferredPixelFormat(int videoFormat) override;
+    virtual RendererType getRendererType() override;
 
 private:
     static void lockQueue(AVHWDeviceContext *dev_ctx, uint32_t queue_family, uint32_t index);
     static void unlockQueue(AVHWDeviceContext *dev_ctx, uint32_t queue_family, uint32_t index);
     static void overlayUploadComplete(void* opaque);
 
-    void beginRenderTiming();
-    void endRenderTiming();
-
-    bool createSwapchain(int depth);
-    bool createOverlay(pl_overlay* overlay, SDL_Surface* surface);
     bool mapAvFrameToPlacebo(const AVFrame *frame, pl_frame* mappedFrame);
-    void unmapAvFrameFromPlacebo(const AVFrame *frame, pl_frame* mappedFrame);
     bool populateQueues(int videoFormat);
     bool chooseVulkanDevice(PDECODER_PARAMETERS params, bool hdrOutputRequired);
     bool tryInitializeDevice(VkPhysicalDevice device, VkPhysicalDeviceProperties* deviceProps,
@@ -77,39 +48,20 @@ private:
 
     // The backend renderer if we're frontend-only
     IFFmpegRenderer* m_Backend;
-    AVHWDeviceType m_HwDeviceType;
-
-#ifdef Q_OS_DARWIN
-    std::unique_ptr<MetalVulkanTextureFactory> m_MetalTextureFactory;
-#endif
-
-#ifdef PLVK_USE_DYNAMIC_SWAPCHAIN_DEPTH
-    int m_DelayedPresents = 0;
-    Uint32 m_RenderStartTime = 0;
-#endif
+    bool m_HwAccelBackend;
 
     // SDL state
     SDL_Window* m_Window = nullptr;
-
-    // Stream state
-    int m_MaxVideoFps;
 
     // The libplacebo rendering state
     pl_log m_Log = nullptr;
     pl_vk_inst m_PlVkInstance = nullptr;
     VkSurfaceKHR m_VkSurface = VK_NULL_HANDLE;
-    int m_SwapchainDepth = 0;
-    VkPresentModeKHR m_VkPresentMode;
     pl_vulkan m_Vulkan = nullptr;
     pl_swapchain m_Swapchain = nullptr;
     pl_renderer m_Renderer = nullptr;
     pl_tex m_Textures[PL_MAX_PLANES] = {};
     pl_color_space m_LastColorspace = {};
-
-#ifdef PLVK_USE_EARLY_RENDER_TO_WAIT
-    pl_overlay m_EmptyOverlay = {};
-    pl_overlay_part m_EmptyOverlayPart = {};
-#endif
 
     // Pending swapchain state shared between waitToRender(), renderFrame(), and cleanupRenderContext()
     pl_swapchain_frame m_SwapchainFrame = {};

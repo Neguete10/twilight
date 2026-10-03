@@ -5,8 +5,10 @@
 #include "backend/computerseeker.h"
 
 #include <QCoreApplication>
+#include <QTimer>
 
 #define COMPUTER_SEEK_TIMEOUT 30000
+#define APP_SEEK_TIMEOUT 10000
 
 namespace CliListApps
 {
@@ -14,7 +16,8 @@ namespace CliListApps
 enum State {
     StateInit,
     StateSeekComputer,
-    StateListApps,
+    StateListApp,
+    StateSeekApp,
     StateFailure,
 };
 
@@ -23,6 +26,7 @@ class Event
 public:
     enum Type {
         ComputerFound,
+        ComputerUpdated,
         ComputerSeekTimedout,
         Executed,
     };
@@ -62,6 +66,9 @@ public:
                            q, &Launcher::onComputerSeekTimeout);
                 m_ComputerSeeker->start(COMPUTER_SEEK_TIMEOUT);
 
+                q->connect(m_ComputerManager, &ComputerManager::computerStateChanged,
+                           q, &Launcher::onComputerUpdated);
+
                 m_BoxArtManager = new BoxArtManager(q);
 
                 if (m_Arguments.isVerbose()) {
@@ -81,27 +88,11 @@ public:
         case Event::ComputerFound:
             if (m_State == StateSeekComputer) {
                 if (event.computer->pairState == NvComputer::PS_PAIRED) {
-                    m_State = StateListApps;
+                    m_State = StateSeekApp;
                     m_Computer = event.computer;
-
+                    m_TimeoutTimer->start(APP_SEEK_TIMEOUT);
                     if (m_Arguments.isVerbose()) {
                         fprintf(stdout, "Loading app list...\n");
-                    }
-
-                    // To avoid race conditions where ComputerSeeker stops async polling, but
-                    // ComputerManager is yet to update the app list, we will explicitly fetch the latest app list.
-                    // Otherwise, it becomes complicated as we would have to guess whether ComputerManager
-                    // would emit 1 signal (the list did not change) or 2 signals (indicating that the list has changed)
-                    try {
-                        NvHTTP http{m_Computer};
-
-                        const auto appList = http.getAppList();
-                        m_Arguments.isPrintCSV() ? printAppsCSV(appList) : printApps(appList);
-
-                        QCoreApplication::exit(0);
-                    } catch (std::exception& exception) {
-                        fprintf(stderr, "%s\n", exception.what());
-                        QCoreApplication::exit(1);
                     }
                 } else {
                     m_State = StateFailure;
@@ -111,6 +102,14 @@ public:
 
                     QCoreApplication::exit(-1);
                 }
+            }
+            break;
+        // Occurs when a computer is updated
+        case Event::ComputerUpdated:
+            if (m_State == StateSeekApp) {
+                m_Arguments.isPrintCSV() ? printAppsCSV(m_Computer->appList) : printApps(m_Computer->appList);
+
+                QCoreApplication::exit(0);
             }
             break;
         }
@@ -147,6 +146,7 @@ public:
     BoxArtManager *m_BoxArtManager;
     NvComputer *m_Computer;
     State m_State;
+    QTimer *m_TimeoutTimer;
     ListCommandLineParser m_Arguments;
 };
 
@@ -157,7 +157,11 @@ Launcher::Launcher(QString computer, ListCommandLineParser arguments, QObject *p
     Q_D(Launcher);
     d->m_ComputerName = computer;
     d->m_State = StateInit;
+    d->m_TimeoutTimer = new QTimer(this);
+    d->m_TimeoutTimer->setSingleShot(true);
     d->m_Arguments = arguments;
+    connect(d->m_TimeoutTimer, &QTimer::timeout,
+            this, &Launcher::onComputerSeekTimeout);
 }
 
 Launcher::~Launcher()
@@ -190,6 +194,14 @@ void Launcher::onComputerSeekTimeout()
 {
     Q_D(Launcher);
     Event event(Event::ComputerSeekTimedout);
+    d->handleEvent(event);
+}
+
+void Launcher::onComputerUpdated(NvComputer *computer)
+{
+    Q_D(Launcher);
+    Event event(Event::ComputerUpdated);
+    event.computer = computer;
     d->handleEvent(event);
 }
 

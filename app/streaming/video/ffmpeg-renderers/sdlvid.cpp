@@ -13,10 +13,10 @@ extern "C" {
 }
 
 SdlRenderer::SdlRenderer()
-    : IFFmpegRenderer(RendererType::SDL),
-      m_VideoFormat(0),
+    : m_VideoFormat(0),
       m_Renderer(nullptr),
       m_Texture(nullptr),
+      m_ColorSpace(-1),
       m_NeedsYuvToRgbConversion(false),
       m_SwsContext(nullptr),
       m_RgbFrame(av_frame_alloc()),
@@ -82,9 +82,7 @@ bool SdlRenderer::isRenderThreadSupported()
                 "SDL renderer backend: %s",
                 info.name);
 
-    if (info.name != QString("direct3d11") &&
-        info.name != QString("direct3d12") &&
-        info.name != QString("metal")) {
+    if (info.name != QString("direct3d") && info.name != QString("metal")) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "SDL renderer backend requires main thread rendering");
         return false;
@@ -142,14 +140,6 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
         return false;
     }
 
-    // Don't create a renderer or pump events for test-only
-    // renderers. Test-only renderers might be created on
-    // a non-main thread where interaction with the SDL
-    // render API is unsafe.
-    if (params->testOnly) {
-        return true;
-    }
-
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (!SDL_GetWindowWMInfo(params->window, &info)) {
@@ -195,6 +185,7 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_CreateRenderer() failed: %s",
                      SDL_GetError());
+        return false;
     }
 
     // SDL_CreateRenderer() can end up having to recreate our window (SDL_RecreateWindow())
@@ -214,10 +205,14 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
         SDL_FlushEvent(SDL_WINDOWEVENT);
     }
 
-    if (!m_Renderer) {
-        m_InitFailureReason = InitFailureReason::NoSoftwareSupport;
-        return false;
-    }
+#ifdef Q_OS_WIN32
+    // For some reason, using Direct3D9Ex breaks this with multi-monitor setups.
+    // When focus is lost, the window is minimized then immediately restored without
+    // input focus. This glitches out the renderer and a bunch of other stuff.
+    // Direct3D9Ex itself seems to have this minimize on focus loss behavior on its
+    // own, so just disable SDL's handling of the focus loss event.
+    SDL_SetHintWithPriority(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0", SDL_HINT_OVERRIDE);
+#endif
 
     return true;
 }
@@ -234,10 +229,11 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
                 SDL_DestroyTexture(m_OverlayTextures[type]);
             }
 
+            SDL_Rect viewportRect;
+            SDL_RenderGetViewport(m_Renderer, &viewportRect);
+
             if (type == Overlay::OverlayStatusUpdate) {
                 // Bottom Left
-                SDL_Rect viewportRect;
-                SDL_RenderGetViewport(m_Renderer, &viewportRect);
                 m_OverlayRects[type].x = 0;
                 m_OverlayRects[type].y = viewportRect.h - newSurface->h;
             }
@@ -246,17 +242,22 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
                 m_OverlayRects[type].x = 0;
                 m_OverlayRects[type].y = 0;
             }
+            else if (type == Overlay::OverlayDebugAudio) {
+                // Top right
+                m_OverlayRects[type].x = viewportRect.w - newSurface->w;
+                m_OverlayRects[type].y = 0;
+            }
+            else if (type == Overlay::OverlayGamepad) {
+                // Bottom right
+                m_OverlayRects[type].x = SDL_max(0, viewportRect.w - newSurface->w);
+                m_OverlayRects[type].y = SDL_max(0, viewportRect.h - newSurface->h);
+            }
 
             m_OverlayRects[type].w = newSurface->w;
             m_OverlayRects[type].h = newSurface->h;
 
             m_OverlayTextures[type] = SDL_CreateTextureFromSurface(m_Renderer, newSurface);
             SDL_FreeSurface(newSurface);
-
-            if (m_OverlayTextures[type]) {
-                // Overlays are always drawn at exact size
-                SDL_SetTextureScaleMode(m_OverlayTextures[type], SDL_ScaleModeNearest);
-            }
         }
 
         // If we have an overlay texture, render it too
@@ -291,8 +292,11 @@ ReadbackRetry:
         }
     }
 
-    // Recreate the texture if the frame format or size changes
-    if (hasFrameFormatChanged(frame)) {
+    // Because the specific YUV color conversion shader is established at
+    // texture creation for most SDL render backends, we need to recreate
+    // the texture when the colorspace changes.
+    int colorspace = getFrameColorspace(frame);
+    if (colorspace != m_ColorSpace) {
 #ifdef HAVE_CUDA
         if (m_CudaGLHelper != nullptr) {
             delete m_CudaGLHelper;
@@ -301,6 +305,17 @@ ReadbackRetry:
 #endif
 
         if (m_Texture != nullptr) {
+            SDL_DestroyTexture(m_Texture);
+            m_Texture = nullptr;
+        }
+
+        m_ColorSpace = colorspace;
+    }
+
+    // Recreate the texture if the frame changed in size
+    if (m_Texture != nullptr) {
+        int width, height;
+        if (SDL_QueryTexture(m_Texture, nullptr, nullptr, &width, &height) == 0 && (frame->width != width || frame->height != height)) {
             SDL_DestroyTexture(m_Texture);
             m_Texture = nullptr;
         }
@@ -391,7 +406,7 @@ ReadbackRetry:
         }
         else {
             // SDL will perform YUV conversion on the GPU
-            switch (getFrameColorspace(frame))
+            switch (colorspace)
             {
             case COLORSPACE_REC_709:
                 SDL_assert(!isFrameFullRange(frame));
@@ -422,9 +437,6 @@ ReadbackRetry:
                          SDL_GetError());
             goto Exit;
         }
-
-        // Never alpha blend this texture when rendering
-        SDL_SetTextureBlendMode(m_Texture, SDL_BLENDMODE_NONE);
 
 #ifdef HAVE_CUDA
         if (frame->format == AV_PIX_FMT_CUDA) {
@@ -635,6 +647,11 @@ bool SdlRenderer::testRenderFrame(AVFrame* frame)
 
 bool SdlRenderer::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info)
 {
-    // We can transparently handle size and display changes
+    // We can transparently handle size and display changes, except Windows where
+    // changing size appears to break the renderer (maybe due to the render thread?)
+#ifdef Q_OS_WIN32
+    return !(info->stateChangeFlags & ~(WINDOW_STATE_CHANGE_DISPLAY));
+#else
     return !(info->stateChangeFlags & ~(WINDOW_STATE_CHANGE_SIZE | WINDOW_STATE_CHANGE_DISPLAY));
+#endif
 }

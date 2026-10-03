@@ -33,7 +33,7 @@ QByteArray Path::readDataFile(QString fileName)
 {
     QFile dataFile(getDataFilePath(fileName));
     if (!dataFile.open(QIODevice::ReadOnly)) {
-        return {};
+        return QByteArray();
     }
     return dataFile.readAll();
 }
@@ -48,9 +48,10 @@ void Path::writeCacheFile(QString fileName, QByteArray data)
     }
 
     QFile dataFile(cacheDir.absoluteFilePath(fileName));
-    if (dataFile.open(QIODevice::WriteOnly)) {
-        dataFile.write(data);
+    if (!dataFile.open(QIODevice::WriteOnly)) {
+        return;
     }
+    dataFile.write(data);
 }
 
 void Path::deleteCacheFile(QString fileName)

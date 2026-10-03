@@ -1,10 +1,25 @@
 QT += core quick network quickcontrols2 svg
-CONFIG += c++17
+CONFIG += c++11
+
+# Teach moonlight-common-c the PyroWave capability bits, adaptive triggers,
+# and the microphone control-stream send before either project compiles
+# against Limelight.h. Idempotent. See docs/PYROWAVE_MAC.md,
+# docs/DUALSENSE_MAC.md, and docs/MICROPHONE_MAC.md.
+!system(python3 $$PWD/../scripts/apply_pyrowave_protocol.py) {
+    error("Failed to apply the PyroWave protocol patch to moonlight-common-c")
+}
+!system(python3 $$PWD/../scripts/apply_adaptive_triggers_protocol.py) {
+    error("Failed to apply the adaptive-trigger protocol patch to moonlight-common-c")
+}
+!system(python3 $$PWD/../scripts/apply_mic_control_packet.py) {
+    error("Failed to apply the microphone control-stream patch to moonlight-common-c")
+}
 
 unix:!macx {
     TARGET = moonlight
 } else {
-    # On macOS, this is the name displayed in the global menu bar
+    # Executable name stays Moonlight (CFBundleExecutable and QSettings).
+    # The .app folder is Twilight.app; see QMAKE_APPLICATION_BUNDLE_NAME.
     TARGET = Moonlight
 }
 
@@ -36,29 +51,35 @@ DEFINES += QT_DEPRECATED_WARNINGS
 DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 win32 {
-    !exists($$PWD/../libs/windows) {
-        error("Missing dependencies. Please run 'powershell .\setup-deps.ps1' to fetch prebuilt libraries.")
+    contains(QT_ARCH, i386) {
+        LIBS += -L$$PWD/../libs/windows/lib/x86
+        INCLUDEPATH += $$PWD/../libs/windows/include/x86
     }
-
     contains(QT_ARCH, x86_64) {
         LIBS += -L$$PWD/../libs/windows/lib/x64
-        INCLUDEPATH += $$PWD/../libs/windows/include/x64 $$PWD/../libs/windows/include/x64/SDL2
+        INCLUDEPATH += $$PWD/../libs/windows/include/x64
     }
     contains(QT_ARCH, arm64) {
         LIBS += -L$$PWD/../libs/windows/lib/arm64
-        INCLUDEPATH += $$PWD/../libs/windows/include/arm64 $$PWD/../libs/windows/include/arm64/SDL2
+        INCLUDEPATH += $$PWD/../libs/windows/include/arm64
     }
 
     INCLUDEPATH += $$PWD/../libs/windows/include
     LIBS += ws2_32.lib winmm.lib dxva2.lib ole32.lib gdi32.lib user32.lib d3d9.lib dwmapi.lib dbghelp.lib
+
+    # Work around a conflict with math.h inclusion between SDL and Qt 6
+    DEFINES += _USE_MATH_DEFINES
 }
 macx:!disable-prebuilts {
-    !exists($$PWD/../libs/mac) {
-        error("Missing dependencies. Please run 'python3 setup-deps.py' to fetch prebuilt libraries.")
-    }
+    INCLUDEPATH += $$PWD/../libs/mac/include
+    INCLUDEPATH += $$PWD/../libs/mac/Frameworks/SDL2.framework/Versions/A/Headers
+    INCLUDEPATH += $$PWD/../libs/mac/Frameworks/SDL2_ttf.framework/Versions/A/Headers
+    LIBS += -L$$PWD/../libs/mac/lib -F$$PWD/../libs/mac/Frameworks
 
-    INCLUDEPATH += $$PWD/../libs/mac/include $$PWD/../libs/mac/include/SDL2
-    LIBS += -L$$PWD/../libs/mac/lib
+    # QMake doesn't handle framework-style includes correctly on its own
+    QMAKE_CFLAGS += -F$$PWD/../libs/mac/Frameworks
+    QMAKE_CXXFLAGS += -F$$PWD/../libs/mac/Frameworks
+    QMAKE_OBJECTIVE_CFLAGS += -F$$PWD/../libs/mac/Frameworks
 }
 
 unix:if(!macx|disable-prebuilts) {
@@ -116,9 +137,7 @@ unix:if(!macx|disable-prebuilts) {
                 }
             }
 
-            # Disabled by default due to reliability issues. See #1314.
-            # CUDA interop is superseded by VDPAU and Vulkan Video.
-            enable-cuda {
+            !disable-cuda {
                 packagesExist(ffnvcodec) {
                     PKGCONFIG += ffnvcodec
                     CONFIG += cuda
@@ -153,16 +172,35 @@ win32 {
     CONFIG += ffmpeg libplacebo
 }
 win32:!winrt {
-    CONFIG += discord-rpc
+    CONFIG += soundio discord-rpc
 }
 macx {
     !disable-prebuilts {
-        LIBS += -lssl.3 -lcrypto.3 -lavcodec.62 -lavutil.60 -lswscale.9 -lopus.0 -lSDL2 -lSDL2_ttf -lplacebo
-        CONFIG += discord-rpc libplacebo
+        LIBS += -lssl.3 -lcrypto.3 -lavcodec.61 -lavutil.59 -lswscale.8 -lopus -framework SDL2 -framework SDL2_ttf
+        CONFIG += discord-rpc
     }
 
-    LIBS += -lobjc -framework VideoToolbox -framework AVFoundation -framework CoreVideo -framework CoreGraphics -framework CoreMedia -framework AppKit -framework Metal -framework QuartzCore
-    CONFIG += ffmpeg
+    LIBS += -lobjc \
+        -framework Accelerate \
+        -framework AppKit \
+        -framework AudioToolbox \
+        -framework AudioUnit \
+        -framework AVFoundation \
+        -framework CoreAudio \
+        -framework CoreVideo \
+        -framework CoreGraphics \
+        -framework CoreLocation \
+        -framework CoreMedia \
+        -framework CoreWLAN \
+        -framework GameController \
+        -framework IOKit \
+        -framework Metal \
+        -framework QuartzCore \
+        -framework VideoToolbox \
+        -framework IOKit \
+        -framework CoreFoundation
+
+    CONFIG += ffmpeg soundio
 }
 
 SOURCES += \
@@ -185,18 +223,27 @@ SOURCES += \
     settings/compatfetcher.cpp \
     settings/mappingfetcher.cpp \
     settings/streamingpreferences.cpp \
+    settings/network_profile.cpp \
+    settings/network_profile_logic.cpp \
+    settings/network_identity.cpp \
     streaming/input/abstouch.cpp \
+    streaming/input/dualsense_effects.cpp \
     streaming/input/gamepad.cpp \
+    streaming/input/gamepad_overlay.cpp \
     streaming/input/input.cpp \
     streaming/input/keyboard.cpp \
     streaming/input/mouse.cpp \
     streaming/input/reltouch.cpp \
     streaming/session.cpp \
     streaming/audio/audio.cpp \
+    streaming/audio/microphone/mic_wire.cpp \
+    streaming/audio/renderers/renderer.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
     gui/appmodel.cpp \
-    streaming/bandwidth.cpp \
+    gui/streamhudparse.cpp \
+    gui/streamhudstats.cpp \
+    gui/sfsymbolprovider.cpp \
     streaming/streamutils.cpp \
     backend/autoupdatechecker.cpp \
     path.cpp \
@@ -207,7 +254,6 @@ SOURCES += \
     wm.cpp
 
 HEADERS += \
-    SDL_compat.h \
     backend/nvaddress.h \
     backend/nvapp.h \
     cli/pair.h \
@@ -227,14 +273,24 @@ HEADERS += \
     cli/quitstream.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
+    settings/network_profile.h \
+    settings/network_profile_logic.h \
+    settings/network_identity.h \
     streaming/input/input.h \
     streaming/session.h \
+    streaming/audio/microphone/mic_capture.h \
+    streaming/audio/microphone/mic_permission.h \
+    streaming/audio/microphone/mic_resample.h \
+    streaming/audio/microphone/mic_wire.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
     gui/appmodel.h \
+    gui/streamhudparse.h \
+    gui/streamhudstats.h \
+    gui/streamhudplace.h \
+    gui/sfsymbolprovider.h \
     streaming/video/decoder.h \
-    streaming/bandwidth.h \
     streaming/streamutils.h \
     backend/autoupdatechecker.h \
     path.h \
@@ -262,6 +318,57 @@ ffmpeg {
         streaming/video/ffmpeg-renderers/sdlvid.h \
         streaming/video/ffmpeg-renderers/swframemapper.h \
         streaming/video/ffmpeg-renderers/pacer/pacer.h
+}
+# PyroWave (intra-only GPU wavelet) decoder. Off by default so the existing
+# macOS CoreAudio build does not need the pyrowave submodule or MoltenVK.
+# Enable with: qmake CONFIG+=pyrowave
+# macOS uses the shared-VkDevice MoltenVK path from andyg.pyrowave-macos
+# (6fd162d2). Linux uses the dmabuf path in the same file. See docs/PYROWAVE_MAC.md.
+pyrowave {
+    message(PyroWave decoder selected)
+
+    DEFINES += HAVE_PYROWAVE
+
+    INCLUDEPATH += $$PWD/../pyrowave
+    INCLUDEPATH += $$PWD/../pyrowave/Granite/third_party/khronos/vulkan-headers/include
+
+    SOURCES += \
+        streaming/bandwidth.cpp \
+        streaming/video/pyrowave.cpp
+    HEADERS += \
+        streaming/bandwidth.h \
+        streaming/video/pyrowave.h \
+        streaming/video/pyrowave_backend.h \
+        streaming/video/pyrowave_packets.h \
+        streaming/video/pyrowave_stats.h
+
+    macx {
+        # MoltenVK has no dmabuf. Vulkan entry points come from SDL at runtime.
+        # libplacebo is only pulled in for this config; the default macOS link
+        # line is unchanged.
+        #
+        # Metal is a second decoder in this same CONFIG+=pyrowave build. It
+        # dlopens libpyrowave-metal and is not linked here: that dylib exports
+        # the same C names as libpyrowave-shared (pyrowave_decoder_create, …)
+        # with different signatures. Do not bump the pyrowave submodule to the
+        # metal/ tree; 263ef100 is the Vulkan API this file calls.
+        # libpyrowave-metal comes from the pyrowave-metal submodule (89f7e47).
+        # The macOS makefile below builds it and copies it into the bundle.
+        DEFINES += HAVE_PYROWAVE_METAL
+        SOURCES += streaming/video/pyrowave_metal.mm
+        HEADERS += \
+            streaming/video/pyrowave_metal.h \
+            streaming/video/pyrowave_metal_api.h
+        LIBS += -L$$PWD/../pyrowave/build -lpyrowave-shared -lplacebo
+    }
+    unix:!macx {
+        PKGCONFIG += libdrm libplacebo
+        LIBS += -L$$PWD/../pyrowave/build -lpyrowave-shared -lvulkan
+    }
+    win32 {
+        error("CONFIG+=pyrowave is implemented for macOS (Vulkan/MoltenVK and Metal) and Linux (Vulkan) only")
+    }
+    QMAKE_RPATHDIR += $$PWD/../pyrowave/build
 }
 libva {
     message(VAAPI renderer selected)
@@ -323,12 +430,9 @@ libdrm {
     HEADERS += streaming/video/ffmpeg-renderers/drm.h
 
     linux {
-        !disable-masterhooks {
-            message(Master hooks enabled)
-            DEFINES += HAVE_DRM_MASTER_HOOKS
-            SOURCES += masterhook.c masterhook_internal.c
-            LIBS += -ldl -pthread
-        }
+        message(Master hooks enabled)
+        SOURCES += masterhook.c masterhook_internal.c
+        LIBS += -ldl
     }
 }
 cuda {
@@ -350,10 +454,6 @@ libplacebo {
         streaming/video/ffmpeg-renderers/plvk_c.c
     HEADERS += \
         streaming/video/ffmpeg-renderers/plvk.h
-
-    macx {
-        SOURCES += streaming/video/ffmpeg-renderers/plvk_objc.mm
-    }
 }
 config_EGL {
     message(EGL renderer selected)
@@ -404,16 +504,51 @@ win32:!winrt {
         streaming/video/ffmpeg-renderers/d3d11va.h \
         streaming/video/ffmpeg-renderers/pacer/dxvsyncsource.h
 }
+macx: SOURCES += streaming/input/dualsense_hid_mac.mm
+!macx: SOURCES += streaming/input/dualsense_hid.cpp
+
 macx {
-    message(VideoToolbox renderer selected)
+    message(CoreAudio + VideoToolbox renderers selected)
+
+    DEFINES += HAVE_COREAUDIO TWILIGHT_HAS_SF_SYMBOLS
 
     SOURCES += \
+        gui/sfsymbol_mac.mm \
+        gui/streamhud_mac.mm \
+        settings/network_identity_mac.mm \
+        streaming/audio/microphone/mic_capture_mac.mm \
+        streaming/audio/microphone/mic_permission_mac.mm \
+        streaming/audio/renderers/coreaudio/au_spatial_renderer.mm \
+        streaming/audio/renderers/coreaudio/coreaudio.cpp \
+        streaming/audio/renderers/coreaudio/TPCircularBuffer.c \
+        streaming/input/corehid_mouse_decoder.cpp \
+        streaming/input/corehid_mouse.mm \
+        streaming/mac/pip_window.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
         streaming/video/ffmpeg-renderers/vt_avsamplelayer.mm \
         streaming/video/ffmpeg-renderers/vt_metal.mm
 
     HEADERS += \
+        streaming/audio/renderers/coreaudio/au_spatial_renderer.h \
+        streaming/audio/renderers/coreaudio/coreaudio.h \
+        streaming/audio/renderers/coreaudio/coreaudio_helpers.h \
+        streaming/audio/renderers/coreaudio/TPCircularBuffer.h \
+        streaming/input/corehid_mouse.h \
+        streaming/mac/pip_frame.h \
+        streaming/mac/pip_window.h \
         streaming/video/ffmpeg-renderers/vt.h
+}
+!macx {
+    SOURCES += \
+        streaming/audio/microphone/mic_capture.cpp \
+        streaming/audio/microphone/mic_permission.cpp
+}
+soundio {
+    message(libsoundio audio renderer selected)
+
+    DEFINES += HAVE_SOUNDIO SOUNDIO_STATIC_LIBRARY
+    SOURCES += streaming/audio/renderers/soundioaudiorenderer.cpp
+    HEADERS += streaming/audio/renderers/soundioaudiorenderer.h
 }
 discord-rpc {
     message(Discord integration enabled)
@@ -453,38 +588,6 @@ RESOURCES += \
     resources.qrc \
     qml.qrc
 
-TRANSLATIONS += \
-    languages/qml_zh_CN.ts \
-    languages/qml_de.ts \
-    languages/qml_fr.ts \
-    languages/qml_nb_NO.ts \
-    languages/qml_ru.ts \
-    languages/qml_es.ts \
-    languages/qml_ja.ts \
-    languages/qml_vi.ts \
-    languages/qml_th.ts \
-    languages/qml_ko.ts \
-    languages/qml_hu.ts \
-    languages/qml_nl.ts \
-    languages/qml_sv.ts \
-    languages/qml_tr.ts \
-    languages/qml_uk.ts \
-    languages/qml_zh_TW.ts \
-    languages/qml_el.ts \
-    languages/qml_hi.ts \
-    languages/qml_it.ts \
-    languages/qml_pt.ts \
-    languages/qml_pt_BR.ts \
-    languages/qml_pl.ts \
-    languages/qml_cs.ts \
-    languages/qml_he.ts \
-    languages/qml_ckb.ts \
-    languages/qml_lt.ts \
-    languages/qml_et.ts \
-    languages/qml_bg.ts \
-    languages/qml_eo.ts \
-    languages/qml_ta.ts
-
 # Additional import path used to resolve QML modules in Qt Creator's code model
 QML_IMPORT_PATH =
 
@@ -504,6 +607,15 @@ else:unix: LIBS += -L$$OUT_PWD/../qmdnsengine/ -lqmdnsengine
 
 INCLUDEPATH += $$PWD/../qmdnsengine/qmdnsengine/src/include $$PWD/../qmdnsengine
 DEPENDPATH += $$PWD/../qmdnsengine/qmdnsengine/src/include $$PWD/../qmdnsengine
+
+soundio {
+    win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../soundio/release/ -lsoundio
+    else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../soundio/debug/ -lsoundio
+    else:unix: LIBS += -L$$OUT_PWD/../soundio/ -lsoundio
+
+    INCLUDEPATH += $$PWD/../soundio/libsoundio
+    DEPENDPATH += $$PWD/../soundio/libsoundio
+}
 
 win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../h264bitstream/release/ -lh264bitstream
 else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../h264bitstream/debug/ -lh264bitstream
@@ -554,22 +666,89 @@ win32 {
     QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/Moonlight.exe.manifest
 }
 macx {
-    # Create Info.plist in object dir with the correct version string
+    # Create Info.plist in object dir with the correct version string.
+    # CFBundleName, CFBundleDisplayName, and InfoPlist.strings are Twilight.
+    # On a live 387b7f64 build those were already Twilight and Dock hover
+    # still said Moonlight, which is the .app folder name. The folder is
+    # Twilight.app. CFBundleExecutable and the binary stay Moonlight.
+    # Bundle id stays com.moonlight-stream.Moonlight unless twilight-mas
+    # swaps it. See docs/TWILIGHT_MAS.md.
+    # Makefile builds name the folder from this variable and the binary
+    # from TARGET. The Xcode generator forces PRODUCT_NAME to TARGET, so
+    # leave that path as Moonlight.app rather than pointing the product
+    # reference at a different folder than Xcode writes.
+    !macx-xcode: QMAKE_APPLICATION_BUNDLE_NAME = Twilight
+
+    # Makefile builds (qmake CONFIG+=pyrowave && make) compile libpyrowave-metal
+    # from the pyrowave-metal submodule before linking, then copy the dylib
+    # into the app bundle. $$files() further down only sees a dylib that
+    # already exists when qmake runs, so a fresh tree still gets the copy
+    # here. The dylib is not committed. The Xcode generator is left alone:
+    # it names the product Moonlight.app.
+    !macx-xcode:pyrowave {
+        PYROWAVE_METAL_SRC = $$PWD/../pyrowave-metal/metal
+        PYROWAVE_METAL_STAMP = $$PWD/../pyrowave-metal/build/.twilight-built
+        !exists($$PYROWAVE_METAL_SRC/CMakeLists.txt) {
+            error("pyrowave-metal is not checked out. Run: git submodule update --init pyrowave-metal")
+        }
+        pyrowave_metal.target = $$PYROWAVE_METAL_STAMP
+        pyrowave_metal.depends = $$PYROWAVE_METAL_SRC/CMakeLists.txt \
+            $$files($$PYROWAVE_METAL_SRC/*.mm) \
+            $$files($$PYROWAVE_METAL_SRC/*.cpp) \
+            $$files($$PYROWAVE_METAL_SRC/*.hpp) \
+            $$files($$PYROWAVE_METAL_SRC/*.h) \
+            $$files($$PYROWAVE_METAL_SRC/shaders/*)
+        pyrowave_metal.commands = \"$$PWD/../scripts/build-pyrowave-metal.sh\" build && touch \"$$PYROWAVE_METAL_STAMP\"
+        QMAKE_EXTRA_TARGETS += pyrowave_metal
+        PRE_TARGETDEPS += $$PYROWAVE_METAL_STAMP
+        QMAKE_POST_LINK += \"$$PWD/../scripts/build-pyrowave-metal.sh\" install \"$$OUT_PWD/$${QMAKE_APPLICATION_BUNDLE_NAME}.app/Contents/Frameworks\"
+    }
+    # Hardened Runtime signing is: codesign --options runtime
     system(cp $$PWD/Info.plist $$OUT_PWD/Info.plist)
     system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$OUT_PWD/Info.plist)
 
+    TWILIGHT_BUNDLE_ID = com.moonlight-stream.Moonlight
+    TWILIGHT_DISPLAY_NAME = Twilight
+    twilight-mas {
+        TWILIGHT_BUNDLE_ID = com.henrique.twilight
+        TWILIGHT_DISPLAY_NAME = Twilight
+
+        # Xcode generator only. Makefile builds sign in scripts/generate-dmg.sh.
+        CODE_SIGN_ENTITLEMENTS.name = CODE_SIGN_ENTITLEMENTS
+        CODE_SIGN_ENTITLEMENTS.value = $$PWD/deploy/macos/Twilight-MAS.entitlements
+        ENABLE_HARDENED_RUNTIME.name = ENABLE_HARDENED_RUNTIME
+        ENABLE_HARDENED_RUNTIME.value = YES
+        QMAKE_MAC_XCODE_SETTINGS += CODE_SIGN_ENTITLEMENTS ENABLE_HARDENED_RUNTIME
+
+        message("twilight-mas: bundle id $$TWILIGHT_BUNDLE_ID")
+        message("twilight-mas: display name $$TWILIGHT_DISPLAY_NAME")
+        message("twilight-mas: entitlements $$PWD/deploy/macos/Twilight-MAS.entitlements")
+        message("twilight-mas: codesign --options runtime --timestamp --entitlements $$PWD/deploy/macos/Twilight-MAS.entitlements")
+    }
+    system(sed -i -e 's/BUNDLE_ID/$$TWILIGHT_BUNDLE_ID/g' $$OUT_PWD/Info.plist)
+    system(sed -i -e 's/DISPLAY_NAME/$$TWILIGHT_DISPLAY_NAME/g' $$OUT_PWD/Info.plist)
+
     QMAKE_INFO_PLIST = $$OUT_PWD/Info.plist
 
-    APP_BUNDLE_RESOURCES.files = moonlight.icns
+    APP_BUNDLE_RESOURCES.files = twilight.icns
     APP_BUNDLE_RESOURCES.path = Contents/Resources
+
+    # Localized names. Dock hover still follows the Twilight.app folder
+    # when Launch Services does not substitute these.
+    APP_BUNDLE_DISPLAY_NAME.files = deploy/macos/en.lproj/InfoPlist.strings
+    APP_BUNDLE_DISPLAY_NAME.path = Contents/Resources/en.lproj
 
     APP_BUNDLE_PLIST.files = $$OUT_PWD/Info.plist
     APP_BUNDLE_PLIST.path = Contents
 
-    QMAKE_BUNDLE_DATA += APP_BUNDLE_RESOURCES APP_BUNDLE_PLIST
+    QMAKE_BUNDLE_DATA += APP_BUNDLE_RESOURCES APP_BUNDLE_DISPLAY_NAME APP_BUNDLE_PLIST
 
     !disable-prebuilts {
         APP_BUNDLE_FRAMEWORKS.files = $$files(../libs/mac/Frameworks/*.framework, true) $$files(../libs/mac/lib/*.dylib, true)
+        pyrowave: APP_BUNDLE_FRAMEWORKS.files += $$files(../pyrowave/build/libpyrowave-shared*.dylib)
+        # Present only when the dylib was already built before this qmake.
+        # The makefile post-link step copies a dylib produced during make.
+        pyrowave: APP_BUNDLE_FRAMEWORKS.files += $$files(../pyrowave-metal/build/libpyrowave-metal*.dylib)
         APP_BUNDLE_FRAMEWORKS.path = Contents/Frameworks
 
         QMAKE_BUNDLE_DATA += APP_BUNDLE_FRAMEWORKS

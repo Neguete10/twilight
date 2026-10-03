@@ -38,9 +38,6 @@ private:
     decrypt(const QByteArray& ciphertext, const QByteArray& key);
 
     QByteArray
-    getSignatureFromCert(X509* cert);
-
-    QByteArray
     getSignatureFromPemCert(const QByteArray& certificate);
 
     bool

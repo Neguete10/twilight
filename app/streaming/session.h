@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QSemaphore>
-#include <QQuickWindow>
+#include <QWindow>
 
 #include <Limelight.h>
 #include <opus_multistream.h>
@@ -9,7 +9,9 @@
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
+#include "audio/microphone/mic_capture.h"
 #include "video/overlaymanager.h"
+#include "video/pyrowave_backend.h"
 
 class SupportedVideoFormatList : public QList<int>
 {
@@ -18,7 +20,7 @@ public:
     {
         int value = 0;
 
-        for (const int v : *this) {
+        for (const int & v : *this) {
             value |= v;
         }
 
@@ -72,6 +74,10 @@ public:
             {SCM_AV1_MAIN10, VIDEO_FORMAT_AV1_MAIN10},
             {SCM_AV1_HIGH8_444, VIDEO_FORMAT_AV1_HIGH8_444},
             {SCM_AV1_HIGH10_444, VIDEO_FORMAT_AV1_HIGH10_444},
+            {SCM_PYROWAVE, VIDEO_FORMAT_PYROWAVE},
+            {SCM_PYROWAVE_444, VIDEO_FORMAT_PYROWAVE_444},
+            {SCM_PYROWAVE10_420, VIDEO_FORMAT_PYROWAVE10_420},
+            {SCM_PYROWAVE10_444, VIDEO_FORMAT_PYROWAVE10_444},
         };
 
         for (QMap<int, int>::const_iterator it = mapping.cbegin(); it != mapping.cend(); ++it) {
@@ -96,15 +102,23 @@ class Session : public QObject
     friend class SdlInputHandler;
     friend class DeferredSessionCleanupTask;
     friend class AsyncConnectionStartThread;
+    friend class ExecThread;
 
 public:
     explicit Session(NvComputer* computer, NvApp& app, StreamingPreferences *preferences = nullptr);
-    virtual ~Session();
 
-    Q_INVOKABLE bool initialize(QQuickWindow* qtWindow);
-    Q_INVOKABLE void start();
-    Q_INVOKABLE void interrupt();
-    Q_PROPERTY(QStringList launchWarnings MEMBER m_LaunchWarnings NOTIFY launchWarningsChanged);
+    // NB: This may not get destroyed for a long time! Don't put any cleanup here.
+    // Use Session::exec() or DeferredSessionCleanupTask instead.
+    virtual ~Session() {};
+
+    Q_INVOKABLE void exec(QWindow* qtWindow);
+
+#ifdef Q_OS_DARWIN
+    // Shrinks the SDL stream window into a floating mini player that stays
+    // visible across Spaces and Stage Manager. Same call exits. The stream
+    // hotkey is Ctrl+Alt+Shift+P; the Window menu calls this too.
+    void togglePictureInPicture();
+#endif
 
     static
     void getDecoderInfo(SDL_Window* window,
@@ -123,8 +137,6 @@ public:
 
     void flushWindowEvents();
 
-    void setShouldExit(bool quitHostApp = false);
-
 signals:
     void stageStarting(QString stage);
 
@@ -134,6 +146,8 @@ signals:
 
     void displayLaunchError(QString text);
 
+    void displayLaunchWarning(QString text);
+
     void quitStarting();
 
     void sessionFinished(int portTestResult);
@@ -141,10 +155,10 @@ signals:
     // Emitted after sessionFinished() when the session is ready to be destroyed
     void readyForDeletion();
 
-    void launchWarningsChanged();
-
 private:
-    void exec();
+    void execInternal();
+
+    bool initialize();
 
     bool startConnectionAsync();
 
@@ -166,6 +180,27 @@ private:
                              int& width, int& height);
 
     void toggleFullscreen();
+
+#ifdef Q_OS_DARWIN
+    void enterPictureInPicture();
+
+    void exitPictureInPicture();
+
+    void releaseVideoDecoder();
+
+    // Re-applies floating chrome after SDL or AppKit resets it. For a short
+    // window after leaving fullscreen, a display-sized frame is pulled back
+    // to the mini player (macOS animates that transition).
+    void reapplyPictureInPictureChrome(bool orderFront);
+
+    bool displayCoversWindow(int width, int height) const;
+#endif
+
+    void startMicrophone();
+
+    void stopMicrophone();
+
+    void toggleMicrophoneMute();
 
     void notifyMouseEmulationMode(bool enabled);
 
@@ -220,7 +255,7 @@ private:
     void clSetControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b);
 
     static
-    void clSetAdaptiveTriggers(uint16_t controllerNumber, uint8_t eventFlags, uint8_t typeLeft, uint8_t typeRight, uint8_t *left, uint8_t *right);
+    void clSetAdaptiveTriggers(uint16_t controllerNumber, uint8_t eventFlags, uint8_t typeLeft, uint8_t typeRight, uint8_t* left, uint8_t* right);
 
     static
     int arInit(int audioConfiguration,
@@ -252,17 +287,17 @@ private:
     NvApp m_App;
     SDL_Window* m_Window;
     IVideoDecoder* m_VideoDecoder;
-    SDL_mutex* m_DecoderLock;
+    SDL_SpinLock m_DecoderLock;
     bool m_AudioDisabled;
     bool m_AudioMuted;
     Uint32 m_FullScreenFlag;
-    QQuickWindow* m_QtWindow;
+    QWindow* m_QtWindow;
+    bool m_ThreadedExec;
     bool m_UnexpectedTermination;
     SdlInputHandler* m_InputHandler;
     int m_MouseEmulationRefCount;
     int m_FlushingWindowEventsRef;
-    QStringList m_LaunchWarnings;
-    bool m_ShouldExit;
+    QList<QString> m_LaunchWarnings;
 
     bool m_AsyncConnectionSuccess;
     int m_PortTestResults;
@@ -278,6 +313,32 @@ private:
     OPUS_MULTISTREAM_CONFIGURATION m_OriginalAudioConfig;
     int m_AudioSampleCount;
     Uint32 m_DropAudioEndTime;
+    // Set by the PyroWave probe before the stream window exists. None when
+    // this session is not using PyroWave. Vulkan needs SDL_WINDOW_VULKAN;
+    // Metal and every other codec keep SDL_WINDOW_METAL.
+    PyroWaveGpuBackend m_PyroWaveBackend;
+
+#ifdef Q_OS_DARWIN
+    bool m_PipActive;
+    bool m_PipRestoreFullscreen;
+    int m_PipRestoreX;
+    int m_PipRestoreY;
+    int m_PipRestoreW;
+    int m_PipRestoreH;
+    int m_PipFrameX;
+    int m_PipFrameY;
+    int m_PipFrameW;
+    int m_PipFrameH;
+    // SDL_GetTicks() deadline. Zero means "do not snap a fullscreen-sized
+    // window back to the mini frame".
+    Uint32 m_PipSnapBackUntil;
+    // Set while reapply is changing the window, so a synchronous SDL
+    // event watch cannot re-enter that path.
+    bool m_PipReapplying;
+    QString m_PipRestoreTitle;
+#endif
+
+    MicrophoneCapture m_Microphone;
 
     Overlay::OverlayManager m_OverlayManager;
 

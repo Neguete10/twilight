@@ -2,18 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>GCSupportsGameMode</key>
-	<true/>
 	<key>CFBundleExecutable</key>
 	<string>Moonlight</string>
-	<key>LSSupportsGameMode</key>
+	<key>CFBundleName</key>
+	<string>Twilight</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>LSHasLocalizedDisplayName</key>
 	<true/>
+	<key>CFBundleSpokenName</key>
+	<string>Twilight</string>
 	<key>CFBundleGetInfoString</key>
 	<string>Stream games and other applications from another PC</string>
 	<key>CFBundleIconFile</key>
-	<string>moonlight</string>
+	<string>twilight</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.moonlight-stream.Moonlight</string>
+	<string>BUNDLE_ID</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>CFBundlePackageType</key>
@@ -35,20 +39,26 @@
 	</array>
 	<key>GCSupportsControllerUserInteraction</key>
 	<true/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.games</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Moonlight uses the local network to connect to your gaming PC for streaming.</string>
+	<string>Twilight uses the local network to connect to your gaming PC for streaming.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>This app reads the Wi-Fi network name so a saved stream profile can match this network. macOS requires Location permission to reveal that name. Your location is not stored.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app reads the Wi-Fi network name so a saved stream profile can match this network. macOS requires Location permission to reveal that name. Your location is not stored.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Twilight uses the microphone to send your voice to the host PC while streaming.</string>
 	<key>CFBundleVersion</key>
 	<string>VERSION</string>
 	<key>CFBundleShortVersionString</key>
 	<string>VERSION</string>
 	<key>CFBundleDisplayName</key>
-	<string>Moonlight</string>
-    <key>LSApplicationCategoryType</key>
-	<string>public.app-category.games</string>
+	<string>DISPLAY_NAME</string>
 </dict>
 </plist>

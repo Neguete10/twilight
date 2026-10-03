@@ -58,7 +58,7 @@ void AutoUpdateChecker::start()
 void AutoUpdateChecker::parseStringToVersionQuad(QString& string, QVector<int>& version)
 {
     QStringList list = string.split('.');
-    for (const QString& component : std::as_const(list)) {
+    for (const QString& component : list) {
         version.append(component.toInt());
     }
 }
@@ -139,7 +139,7 @@ void AutoUpdateChecker::handleUpdateCheckRequestFinished(QNetworkReply* reply)
             return;
         }
 
-        for (const auto& updateEntry : std::as_const(array)) {
+        for (QJsonValueRef updateEntry : array) {
             if (updateEntry.isObject()) {
                 QJsonObject updateObj = updateEntry.toObject();
                 if (!updateObj.contains("platform") ||

@@ -13,10 +13,47 @@ import SdlGamepadKeyNavigation 1.0
 ApplicationWindow {
     property bool pollingActive: false
 
-    // Set by SettingsView to force the back operation to pop all
-    // pages except the initial view. This is required when doing
-    // a retranslate() because AppView breaks for some reason.
-    property bool clearOnBack: false
+    // Twilight (V2) is the starting shell. Classic stays available.
+    // streamActive blocks a shell swap during a stream.
+    property bool v2Active: false
+    property bool streamActive: false
+    property string classicTitle: ""
+    readonly property bool allowShellSwitch: initialView === "qrc:/gui/PcView.qml"
+
+    function activateShell(version) {
+        if (streamActive || !allowShellSwitch) {
+            return
+        }
+
+        var next = version === "v2" ? "v2" : "v1"
+        if (((next === "v2") === v2Active) && StreamingPreferences.uiVersion === next) {
+            return
+        }
+
+        if (StreamingPreferences.uiVersion !== next) {
+            StreamingPreferences.uiVersion = next
+            StreamingPreferences.save()
+        }
+
+        v2Active = next === "v2"
+        title = v2Active ? "Twilight" : classicTitle
+
+        if (!v2Active && stackView.depth > 1) {
+            stackView.pop(null)
+        }
+
+        if (v2Active) {
+            if (width < 1100) {
+                width = 1180
+            }
+            if (height < 720) {
+                height = 800
+            }
+        }
+        else {
+            stackView.forceActiveFocus()
+        }
+    }
 
     id: window
     width: 1280
@@ -34,7 +71,18 @@ ApplicationWindow {
         SdlGamepadKeyNavigation.enable()
     }
 
+    onClosing: {
+        if (v2Active) {
+            StreamingPreferences.save()
+        }
+    }
+
     Component.onCompleted: {
+        classicTitle = title
+        if (allowShellSwitch && StreamingPreferences.uiVersion === "v2") {
+            activateShell("v2")
+        }
+
         // Show the window according to the user's preferences
         if (SystemProperties.hasDesktopEnvironment) {
             if (StreamingPreferences.uiDisplayMode == StreamingPreferences.UI_MAXIMIZED) {
@@ -51,20 +99,10 @@ ApplicationWindow {
         }
 
         // Display any modal dialogs for configuration warnings
-        if (runConfigChecks) {
-            if (SystemProperties.isWow64) {
-                wow64Dialog.open()
-            }
-
-            // Hardware acceleration and unmapped gamepads are checked asynchronously
-            SystemProperties.hasHardwareAccelerationChanged.connect(hasHardwareAccelerationChanged)
-            SystemProperties.unmappedGamepadsChanged.connect(hasUnmappedGamepadsChanged)
-            SystemProperties.startAsyncLoad()
+        if (SystemProperties.isWow64) {
+            wow64Dialog.open()
         }
-    }
-
-    function hasHardwareAccelerationChanged() {
-        if (!SystemProperties.hasHardwareAcceleration && StreamingPreferences.videoDecoderSelection !== StreamingPreferences.VDS_FORCE_SOFTWARE) {
+        else if (!SystemProperties.hasHardwareAcceleration) {
             if (SystemProperties.isRunningXWayland) {
                 xWaylandDialog.open()
             }
@@ -72,44 +110,27 @@ ApplicationWindow {
                 noHwDecoderDialog.open()
             }
         }
-    }
 
-    function hasUnmappedGamepadsChanged() {
         if (SystemProperties.unmappedGamepads) {
             unmappedGamepadDialog.unmappedGamepads = SystemProperties.unmappedGamepads
             unmappedGamepadDialog.open()
         }
     }
-
-    // It would be better to use TextMetrics here, but it always lays out
-    // the text slightly more compactly than real Text does in ToolTip,
-    // causing unexpected line breaks to be inserted
-    Text {
-        id: tooltipTextLayoutHelper
-        visible: false
-        font: ToolTip.toolTip.font
-        text: ToolTip.toolTip.text
-    }
-
+  
     // This configures the maximum width of the singleton attached QML ToolTip. If left unconstrained,
     // it will never insert a line break and just extend on forever.
-    ToolTip.toolTip.contentWidth: Math.min(tooltipTextLayoutHelper.width, 400)
+    ToolTip.toolTip.contentWidth: ToolTip.toolTip.implicitContentWidth < 400 ? ToolTip.toolTip.implicitContentWidth : 400
 
     function goBack() {
-        if (clearOnBack) {
-            // Pop all items except the first one
-            stackView.pop(null)
-            clearOnBack = false
-        }
-        else {
-            stackView.pop()
-        }
+        stackView.pop()
     }
 
     StackView {
         id: stackView
         anchors.fill: parent
-        focus: true
+        focus: !v2Active
+        visible: !v2Active
+        enabled: !v2Active
 
         Component.onCompleted: {
             // Perform our early initialization before constructing
@@ -153,6 +174,17 @@ ApplicationWindow {
         Keys.onHangupPressed: {
             settingsButton.clicked()
         }
+    }
+
+    // Loaded only after the user picks Twilight. Inactive while Classic is showing,
+    // so a V2 QML error cannot take down the default shell.
+    Loader {
+        id: v2Shell
+        anchors.fill: parent
+        active: v2Active
+        visible: v2Active
+        focus: v2Active
+        source: "qrc:/gui/ui/v2/ShellV2.qml"
     }
 
     // This timer keeps us polling for 5 minutes of inactivity
@@ -217,10 +249,20 @@ ApplicationWindow {
         SdlGamepadKeyNavigation.notifyWindowFocus(visible && active)
     }
 
+    // Workaround for lack of instanceof in Qt 5.9.
+    //
+    // Based on https://stackoverflow.com/questions/13923794/how-to-do-a-is-a-typeof-or-instanceof-in-qml
+    function qmltypeof(obj, className) { // QtObject, string -> bool
+        // className plus "(" is the class instance without modification
+        // className plus "_QML" is the class instance with user-defined properties
+        var str = obj.toString();
+        return str.startsWith(className + "(") || str.startsWith(className + "_QML");
+    }
+
     function navigateTo(url, objectType)
     {
         var existingItem = stackView.find(function(item, index) {
-            return item instanceof objectType
+            return qmltypeof(item, objectType)
         })
 
         if (existingItem !== null) {
@@ -235,7 +277,8 @@ ApplicationWindow {
 
     header: ToolBar {
         id: toolBar
-        height: 60
+        visible: !v2Active
+        height: v2Active ? 0 : 60
         anchors.topMargin: 5
         anchors.bottomMargin: 5
 
@@ -287,7 +330,7 @@ ApplicationWindow {
 
             Label {
                 id: versionLabel
-                visible: stackView.currentItem instanceof SettingsView
+                visible: qmltypeof(stackView.currentItem, "SettingsView")
                 text: qsTr("Version %1").arg(SystemProperties.versionString)
                 font.pointSize: 12
                 horizontalAlignment: Qt.AlignRight
@@ -297,7 +340,7 @@ ApplicationWindow {
             NavigableToolButton {
                 id: discordButton
                 visible: SystemProperties.hasBrowser &&
-                         stackView.currentItem instanceof SettingsView
+                         qmltypeof(stackView.currentItem, "SettingsView")
 
                 iconSource: "qrc:/res/discord.svg"
 
@@ -316,7 +359,7 @@ ApplicationWindow {
 
             NavigableToolButton {
                 id: addPcButton
-                visible: stackView.currentItem instanceof PcView
+                visible: qmltypeof(stackView.currentItem, "PcView")
 
                 iconSource:  "qrc:/res/ic_add_to_queue_white_48px.svg"
 
@@ -328,6 +371,7 @@ ApplicationWindow {
                 Shortcut {
                     id: newPcShortcut
                     sequence: StandardKey.New
+                    enabled: !v2Active
                     onActivated: addPcButton.clicked()
                 }
 
@@ -392,6 +436,7 @@ ApplicationWindow {
                 Shortcut {
                     id: helpShortcut
                     sequence: StandardKey.HelpContents
+                    enabled: !v2Active
                     onActivated: helpButton.clicked()
                 }
 
@@ -414,10 +459,27 @@ ApplicationWindow {
 
                 iconSource: "qrc:/res/ic_videogame_asset_white_48px.svg"
 
-                onClicked: navigateTo("qrc:/gui/GamepadMapper.qml", GamepadMapper)
+                onClicked: navigateTo("qrc:/gui/GamepadMapper.qml", "GamepadMapper")
 
                 Keys.onDownPressed: {
                     stackView.currentItem.forceActiveFocus(Qt.TabFocus)
+                }
+            }
+
+            Loader {
+                id: versionToggleLoader
+                active: allowShellSwitch && !v2Active
+                visible: active
+                source: "qrc:/gui/ui/v2/UiVersionToggle.qml"
+                Layout.alignment: Qt.AlignVCenter
+                // Qt 6: Loader.implicitWidth/Height are read-only; size via Layout.
+                Layout.preferredWidth: item ? item.implicitWidth : 0
+                Layout.preferredHeight: item ? item.implicitHeight : 0
+
+                onLoaded: {
+                    item.darkChrome = true
+                    item.currentVersion = "v1"
+                    item.requestVersion.connect(activateShell)
                 }
             }
 
@@ -426,7 +488,7 @@ ApplicationWindow {
 
                 iconSource:  "qrc:/res/settings.svg"
 
-                onClicked: navigateTo("qrc:/gui/SettingsView.qml", SettingsView)
+                onClicked: navigateTo("qrc:/gui/SettingsView.qml", "SettingsView")
 
                 Keys.onDownPressed: {
                     stackView.currentItem.forceActiveFocus(Qt.TabFocus)
@@ -435,6 +497,7 @@ ApplicationWindow {
                 Shortcut {
                     id: settingsShortcut
                     sequence: StandardKey.Preferences
+                    enabled: !v2Active
                     onActivated: settingsButton.clicked()
                 }
 

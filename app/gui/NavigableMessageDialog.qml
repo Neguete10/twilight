@@ -15,9 +15,7 @@ NavigableDialog {
 
     onOpened: {
         // Force keyboard focus on the label so keyboard navigation works
-        if (dialogButtonBox.count > 0) {
-            dialogButtonBox.itemAt(dialogButtonBox.count - 1).forceActiveFocus(Qt.TabFocus)
-        }
+        dialogLabel.forceActiveFocus()
     }
 
     RowLayout {
@@ -26,7 +24,6 @@ NavigableDialog {
         BusyIndicator {
             id: dialogSpinner
             visible: false
-            running: visible
         }
 
         Image {
@@ -54,21 +51,24 @@ NavigableDialog {
             // will cause word wrap to kick in.
             Layout.maximumWidth: 400
             Layout.maximumHeight: 400
+
+            Keys.onReturnPressed: {
+                accept()
+            }
+
+            Keys.onEnterPressed: {
+                accept()
+            }
+
+            Keys.onEscapePressed: {
+                reject()
+            }
         }
     }
 
     footer: DialogButtonBox {
         id: dialogButtonBox
         standardButtons: dialog.standardButtons
-
-        delegate: Button {
-            flat: true
-
-            Keys.onReturnPressed: clicked()
-            Keys.onEnterPressed: clicked()
-            Keys.onRightPressed: nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocus)
-            Keys.onLeftPressed: nextItemInFocusChain(false).forceActiveFocus(Qt.TabFocus)
-        }
 
         onHelpRequested: {
             Qt.openUrlExternally(helpUrl)

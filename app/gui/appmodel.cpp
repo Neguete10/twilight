@@ -39,6 +39,59 @@ QString AppModel::getRunningAppName()
     return nullptr;
 }
 
+int AppModel::appCount() const
+{
+    return m_VisibleApps.count();
+}
+
+QString AppModel::appNameAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count()) {
+        return QString();
+    }
+    return m_VisibleApps.at(row).name;
+}
+
+int AppModel::appIdAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count()) {
+        return 0;
+    }
+    return m_VisibleApps.at(row).id;
+}
+
+bool AppModel::appRunningAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count() || m_CurrentGameId == 0) {
+        return false;
+    }
+    return m_VisibleApps.at(row).id == m_CurrentGameId;
+}
+
+bool AppModel::appHiddenAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count()) {
+        return false;
+    }
+    return m_VisibleApps.at(row).hidden;
+}
+
+bool AppModel::appDirectLaunchAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count()) {
+        return false;
+    }
+    return m_VisibleApps.at(row).directLaunch;
+}
+
+QString AppModel::appBoxArtAt(int row) const
+{
+    if (row < 0 || row >= m_VisibleApps.count()) {
+        return QString();
+    }
+    return data(index(row, 0), BoxArtRole).toString();
+}
+
 Session* AppModel::createSessionForApp(int appIndex)
 {
     Q_ASSERT(appIndex < m_VisibleApps.count());
@@ -120,7 +173,7 @@ void AppModel::quitRunningApp()
 
 bool AppModel::isAppCurrentlyVisible(const NvApp& app)
 {
-    for (const NvApp& visibleApp : std::as_const(m_VisibleApps)) {
+    for (const NvApp& visibleApp : m_VisibleApps) {
         if (app.id == visibleApp.id) {
             return true;
         }
@@ -156,7 +209,7 @@ void AppModel::updateAppList(QVector<NvApp> newList)
         const NvApp& existingApp = m_VisibleApps.at(i);
 
         bool found = false;
-        for (const NvApp& newApp : std::as_const(newVisibleList)) {
+        for (const NvApp& newApp : newVisibleList) {
             if (existingApp.id == newApp.id) {
                 // If the data changed, update it in our list
                 if (existingApp != newApp) {
@@ -178,7 +231,7 @@ void AppModel::updateAppList(QVector<NvApp> newList)
     }
 
     // Process additions now
-    for (const NvApp& newApp : std::as_const(newVisibleList)) {
+    for (const NvApp& newApp : newVisibleList) {
         int insertionIndex = m_VisibleApps.size();
         bool found = false;
 

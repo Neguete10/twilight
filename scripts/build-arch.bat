@@ -25,12 +25,6 @@ if /I "%BUILD_CONFIG%"=="debug" (
                 echo Signed release builds must not have unstaged changes!
                 exit /b 1
             )
-
-            echo Updating dependencies
-            powershell %cd%\setup-deps.ps1
-            if !ERRORLEVEL! NEQ 0 (
-                exit /b 1
-            )
         ) else (
             echo Invalid build configuration - expected 'debug' or 'release'
             echo Usage: scripts\build-arch.bat ^(release^|debug^)
@@ -39,23 +33,18 @@ if /I "%BUILD_CONFIG%"=="debug" (
     )
 )
 
-rem Locate qmake and determine if we're using qmake.exe or (host-)qmake.bat
-rem (host-)qmake.bat is an ARM64 forwarder to the x64 version of qmake.exe
+rem Locate qmake and determine if we're using qmake.exe or qmake.bat
+rem qmake.bat is an ARM64 forwarder to the x64 version of qmake.exe
 where qmake.bat
 if !ERRORLEVEL! EQU 0 (
     set QMAKE_CMD=call qmake.bat
 ) else (
-    where host-qmake.bat
+    where qmake.exe
     if !ERRORLEVEL! EQU 0 (
-        set QMAKE_CMD=call host-qmake.bat
+        set QMAKE_CMD=qmake.exe
     ) else (
-        where qmake.exe
-        if !ERRORLEVEL! EQU 0 (
-            set QMAKE_CMD=qmake.exe
-        ) else (
-            echo Unable to find QMake. Did you add Qt bins to your PATH?
-            goto Error
-        )
+        echo Unable to find QMake. Did you add Qt bins to your PATH?
+        goto Error
     )
 )
 
@@ -75,17 +64,12 @@ if not x%QT_PATH:_arm64=%==x%QT_PATH% (
     set HOSTBIN_PATH=%QT_PATH:_arm64=_64%
     echo HOSTBIN_PATH=!HOSTBIN_PATH!
 
-    if exist %QT_PATH%\host-qtpaths.bat (
-        echo Using windeployqt.exe from HOSTBIN_PATH
-        set WINDEPLOYQT_CMD=!HOSTBIN_PATH!\windeployqt.exe --qtpaths %QT_PATH%\host-qtpaths.bat
+    if exist %QT_PATH%\windeployqt.exe (
+        echo Using windeployqt.exe from QT_PATH
+        set WINDEPLOYQT_CMD=windeployqt.exe
     ) else (
-        if exist %QT_PATH%\windeployqt.exe (
-            echo Using windeployqt.exe from QT_PATH
-            set WINDEPLOYQT_CMD=windeployqt.exe
-        ) else (
-            echo Using windeployqt.exe from HOSTBIN_PATH
-            set WINDEPLOYQT_CMD=!HOSTBIN_PATH!\windeployqt.exe --qtpaths %QT_PATH%\qtpaths.bat
-        )
+        echo Using windeployqt.exe from HOSTBIN_PATH
+        set WINDEPLOYQT_CMD=!HOSTBIN_PATH!\windeployqt.exe --qtpaths %QT_PATH%\qtpaths.bat
     )
 ) else (
     if not x%QT_PATH:_64=%==x%QT_PATH% (
@@ -112,13 +96,7 @@ set BUILD_FOLDER=%BUILD_ROOT%\build-%ARCH%-%BUILD_CONFIG%
 set DEPLOY_FOLDER=%BUILD_ROOT%\deploy-%ARCH%-%BUILD_CONFIG%
 set INSTALLER_FOLDER=%BUILD_ROOT%\installer-%ARCH%-%BUILD_CONFIG%
 set SYMBOLS_FOLDER=%BUILD_ROOT%\symbols-%ARCH%-%BUILD_CONFIG%
-
-rem Allow CI to override the version.txt with an environment variable
-if defined CI_VERSION (
-    set VERSION=%CI_VERSION%
-) else (
-    set /p VERSION=<%SOURCE_ROOT%\app\version.txt
-)
+set /p VERSION=<%SOURCE_ROOT%\app\version.txt
 
 rem Use the correct VC tools for the specified architecture
 if /I "%ARCH%" EQU "x64" (
@@ -153,11 +131,6 @@ mkdir %DEPLOY_FOLDER%
 mkdir %BUILD_FOLDER%
 mkdir %INSTALLER_FOLDER%
 mkdir %SYMBOLS_FOLDER%
-
-rem Enable LTCG for official builds
-set CFLAGS=/GL
-set CXXFLAGS=/GL
-set LDFLAGS=/LTCG
 
 echo Configuring the project
 pushd %BUILD_FOLDER%
@@ -223,30 +196,27 @@ if not x%QT_PATH:\5.=%==x%QT_PATH% (
     rem Qt 5.15
     set WINDEPLOYQT_ARGS=--no-qmltooling --no-virtualkeyboard
 ) else (
-    rem Qt 6.8+
+    rem Qt 6.5+
     set WINDEPLOYQT_ARGS=--no-system-d3d-compiler --no-system-dxc-compiler --skip-plugin-types qmltooling,generic --no-ffmpeg
     set WINDEPLOYQT_ARGS=!WINDEPLOYQT_ARGS! --no-quickcontrols2fusion --no-quickcontrols2imagine --no-quickcontrols2universal
-    set WINDEPLOYQT_ARGS=!WINDEPLOYQT_ARGS! --no-quickcontrols2fusionstyleimpl --no-quickcontrols2imaginestyleimpl --no-quickcontrols2universalstyleimpl --no-quickcontrols2windowsstyleimpl --no-quickcontrols2fluentwinui3styleimpl
+    set WINDEPLOYQT_ARGS=!WINDEPLOYQT_ARGS! --no-quickcontrols2fusionstyleimpl --no-quickcontrols2imaginestyleimpl --no-quickcontrols2universalstyleimpl --no-quickcontrols2windowsstyleimpl
 )
 
 echo Deploying Qt dependencies
 %WINDEPLOYQT_CMD% --dir %DEPLOY_FOLDER% --%BUILD_CONFIG% --qmldir %SOURCE_ROOT%\app\gui --no-opengl-sw --no-compiler-runtime --no-sql %WINDEPLOYQT_ARGS% %BUILD_FOLDER%\app\%BUILD_CONFIG%\Moonlight.exe
 if !ERRORLEVEL! NEQ 0 goto Error
 
-echo Deleting unused files
+echo Deleting unused styles
 rem Qt 5.x directories
 rmdir /s /q %DEPLOY_FOLDER%\QtQuick\Controls.2\Fusion
 rmdir /s /q %DEPLOY_FOLDER%\QtQuick\Controls.2\Imagine
 rmdir /s /q %DEPLOY_FOLDER%\QtQuick\Controls.2\Universal
-rem Qt 6.8+ directories
+rem Qt 6.5+ directories
 rmdir /s /q %DEPLOY_FOLDER%\qml\QtQuick\Controls\Fusion
 rmdir /s /q %DEPLOY_FOLDER%\qml\QtQuick\Controls\Imagine
 rmdir /s /q %DEPLOY_FOLDER%\qml\QtQuick\Controls\Universal
 rmdir /s /q %DEPLOY_FOLDER%\qml\QtQuick\Controls\Windows
-rmdir /s /q %DEPLOY_FOLDER%\qml\QtQuick\Controls\FluentWinUI3
 rmdir /s /q %DEPLOY_FOLDER%\qml\QtQuick\NativeStyle
-rem icuuc.dll ships with all supported OSes (and Qt incorrectly deploys the x64 version on ARM64)
-del %DEPLOY_FOLDER%\icuuc.dll
 
 if "%SIGN%"=="1" (
     echo Signing deployed binaries
@@ -267,7 +237,7 @@ if "%ML_SYMBOL_STORE%" NEQ "" (
 )
 
 echo Building MSI
-cmd /c "set VERSION= && msbuild -Restore %SOURCE_ROOT%\wix\Moonlight\Moonlight.wixproj /p:Configuration=%BUILD_CONFIG% /p:Platform=%ARCH% /p:MSBuildProjectExtensionsPath=%BUILD_FOLDER%\"
+msbuild -Restore %SOURCE_ROOT%\wix\Moonlight\Moonlight.wixproj /p:Configuration=%BUILD_CONFIG% /p:Platform=%ARCH% /p:MSBuildProjectExtensionsPath=%BUILD_FOLDER%\
 if !ERRORLEVEL! NEQ 0 goto Error
 
 echo Copying application binary to deployment directory
@@ -279,19 +249,9 @@ rem This must be done after WiX harvesting and signing, since the VCRT dlls are 
 rem and should not be harvested for inclusion in the full installer
 copy "%VC_REDIST_DLL_PATH%\*.dll" %DEPLOY_FOLDER%
 if !ERRORLEVEL! NEQ 0 goto Error
-
-rem Since we don't publish Windows installers for CI builds, let's use the user profile
-rem location of the regular non-portable version by default. We'll place a file in the
-rem the package to allow the user to rename if they want portable behavior.
-if defined CI_VERSION (
-    echo. > %DEPLOY_FOLDER%\portable.dat.inactive
-    if !ERRORLEVEL! NEQ 0 goto Error
-) else (
-    rem This file tells Moonlight that it's a portable installation
-    echo. > %DEPLOY_FOLDER%\portable.dat
-    if !ERRORLEVEL! NEQ 0 goto Error
-)
-
+rem This file tells Moonlight that it's a portable installation
+echo. > %DEPLOY_FOLDER%\portable.dat
+if !ERRORLEVEL! NEQ 0 goto Error
 7z a %INSTALLER_FOLDER%\MoonlightPortable-%ARCH%-%VERSION%.zip %DEPLOY_FOLDER%\*
 if !ERRORLEVEL! NEQ 0 goto Error
 

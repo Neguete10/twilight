@@ -90,6 +90,7 @@ private slots:
 
     void handleResolvedAddress(const QHostAddress& address)
     {
+        qInfo() << "Resolved" << hostname() << "to" << address;
         m_Addresses.push_back(address);
     }
 
@@ -150,7 +151,7 @@ public:
         // interrupt() should have taken care of this
         Q_ASSERT(m_ActiveThread == nullptr);
 
-        for (QThread* thread : std::as_const(m_InactiveList)) {
+        for (QThread* thread : m_InactiveList) {
             thread->wait();
             delete thread;
         }
@@ -227,7 +228,7 @@ public:
 
     Q_INVOKABLE void addNewHostManually(QString address);
 
-    void addNewHost(NvAddress address, bool mdns, QString name = QString(), NvAddress mdnsIpv6Address = NvAddress());
+    void addNewHost(NvAddress address, bool mdns, NvAddress mdnsIpv6Address = NvAddress());
 
     QString generatePinString();
 

@@ -1,6 +1,6 @@
 #include "slaud.h"
 
-#include "SDL_compat.h"
+#include <SDL.h>
 
 SLAudioRenderer::SLAudioRenderer()
     : m_AudioContext(nullptr),
@@ -18,6 +18,8 @@ bool SLAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* o
                      "SLAudio_CreateContext() failed");
         return false;
     }
+
+    setOpusConfig(opusConfig);
 
     // This number is pretty conservative (especially for surround), but
     // it's hard to avoid since we get crushed by CPU limitations.
@@ -109,9 +111,16 @@ bool SLAudioRenderer::submitAudio(int bytesWritten)
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Too many queued audio frames: %d",
                     LiGetPendingAudioFrames());
+        m_ActiveWndAudioStats.totalGlitches++;
+        m_ActiveWndAudioStats.droppedOverload++;
     }
 
     return true;
+}
+
+int SLAudioRenderer::getCapabilities()
+{
+    return CAPABILITY_SLOW_OPUS_DECODER | CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
 }
 
 IAudioRenderer::AudioFormat SLAudioRenderer::getAudioBufferFormat()

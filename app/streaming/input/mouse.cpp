@@ -1,7 +1,7 @@
 #include "input.h"
 
 #include <Limelight.h>
-#include "SDL_compat.h"
+#include <SDL.h>
 #include "streaming/streamutils.h"
 
 void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
@@ -28,6 +28,10 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
     }
     else if (m_AbsoluteMouseMode && !isMouseInVideoRegion(event->x, event->y) && event->state == SDL_PRESSED) {
         // Ignore button presses outside the video region, but allow button releases
+        return;
+    }
+    else if (coreHidSuppressesRelativeMotion()) {
+        // The HID callback already sent this click. SDL would send it again.
         return;
     }
 
@@ -149,6 +153,11 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
 
         m_MouseWasInVideoRegion = mouseInVideoRegion;
     }
+    else if (coreHidSuppressesRelativeMotion()) {
+        // IOHID (or GCMouse, if IOHID was denied) already sent this delta.
+        // SDL's xrel comes from the warped cursor and would double-count.
+        return;
+    }
     else {
         LiSendMouseMoveEvent(xrel, yrel);
     }
@@ -162,6 +171,11 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
     }
     else if (event->which == SDL_TOUCH_MOUSEID) {
         // Ignore synthetic mouse events
+        return;
+    }
+    else if (coreHidSuppressesScroll()) {
+        // A relative HID wheel is already on the host. Gesture scrolls from
+        // devices with no wheel element still fall through to SDL.
         return;
     }
 
@@ -193,7 +207,7 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
     if (event->preciseX != 0.0f) {
         // Invert the scroll direction if needed
         if (m_ReverseScrollDirection) {
-            event->preciseX = -event->preciseX;
+            event->preciseX = -event->preciseY;
         }
 
 #ifdef Q_OS_DARWIN
@@ -269,10 +283,8 @@ void SdlInputHandler::updatePointerRegionLock()
     // toggled it themselves using the keyboard shortcut. If that's the case, they
     // have full control over it and we don't touch it anymore.
     if (!m_PointerRegionLockToggledByUser) {
-        // Lock the pointer in true full-screen mode or in any fullscreen mode when only a single monitor is present
-        Uint32 fullscreenFlags = SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN_DESKTOP;
-        m_PointerRegionLockActive = (fullscreenFlags == SDL_WINDOW_FULLSCREEN) ||
-                                    (fullscreenFlags != 0 && SDL_GetNumVideoDisplays() == 1);
+        // Lock the pointer in true full-screen mode and leave it unlocked in other modes
+        m_PointerRegionLockActive = (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN;
     }
 
     // If region lock is enabled, grab the cursor so it can't accidentally leave our window.

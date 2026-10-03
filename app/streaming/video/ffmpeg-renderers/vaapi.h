@@ -60,8 +60,8 @@ public:
     virtual ~VAAPIRenderer() override;
     virtual bool initialize(PDECODER_PARAMETERS params) override;
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary** options) override;
-    virtual bool prepareDecoderContextInGetFormat(AVCodecContext*, AVPixelFormat) override;
     virtual void renderFrame(AVFrame* frame) override;
+    virtual bool needsTestFrame() override;
     virtual bool isDirectRenderingSupported() override;
     virtual int getDecoderColorspace() override;
     virtual int getDecoderCapabilities() override;
@@ -73,11 +73,13 @@ public:
     virtual AVPixelFormat getEGLImagePixelFormat() override;
     virtual bool initializeEGL(EGLDisplay dpy, const EGLExtensions &ext) override;
     virtual ssize_t exportEGLImages(AVFrame *frame, EGLDisplay dpy, EGLImage images[EGL_MAX_PLANES]) override;
+    virtual void freeEGLImages(EGLDisplay dpy, EGLImage[EGL_MAX_PLANES]) override;
 #endif
 
 #ifdef HAVE_DRM
     virtual bool canExportDrmPrime() override;
     virtual bool mapDrmPrimeFrame(AVFrame* frame, AVDRMFrameDescriptor* drmDescriptor) override;
+    virtual void unmapDrmPrimeFrame(AVDRMFrameDescriptor* drmDescriptor) override;
 #endif
 
 private:
@@ -87,10 +89,6 @@ private:
 
 #if defined(HAVE_EGL) || defined(HAVE_DRM)
     bool canExportSurfaceHandle(int layerTypeFlag, VADRMPRIMESurfaceDescriptor* descriptor);
-#endif
-
-#ifdef HAVE_DRM
-    static void freeDrmDescriptorBuffer(void* opaque, uint8_t* data);
 #endif
 
     int m_DecoderSelectionPass;
@@ -108,7 +106,6 @@ private:
     SDL_Rect m_OverlayRect[Overlay::OverlayMax];
 
 #ifdef HAVE_LIBVA_X11
-    Display* m_XDisplay;
     Window m_XWindow;
 #endif
 
@@ -125,6 +122,7 @@ private:
         Separate,
         Composed
     } m_EglExportType;
+    VADRMPRIMESurfaceDescriptor m_PrimeDescriptor;
     EglImageFactory m_EglImageFactory;
 #endif
 };

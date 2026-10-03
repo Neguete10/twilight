@@ -1,7 +1,7 @@
 #pragma once
 
 #include "renderer.h"
-#include "SDL_compat.h"
+#include <SDL.h>
 
 class SdlAudioRenderer : public IAudioRenderer
 {
@@ -16,11 +16,15 @@ public:
 
     virtual bool submitAudio(int bytesWritten);
 
+    virtual int getCapabilities();
+
     virtual AudioFormat getAudioBufferFormat();
+
+    const char * getRendererName() { return m_Name; }
 
 private:
     SDL_AudioDeviceID m_AudioDevice;
     void* m_AudioBuffer;
-    Uint32 m_FrameSize;
-    Uint32 m_FrameDurationMs;
+    int m_FrameSize;
+    char m_Name[24];
 };

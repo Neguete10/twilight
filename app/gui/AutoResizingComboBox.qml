@@ -50,12 +50,4 @@ ComboBox {
     popup.onAboutToHide: {
         SdlGamepadKeyNavigation.setUiNavMode(true)
     }
-
-    Keys.onLeftPressed: {
-        decrementCurrentIndex()
-    }
-
-    Keys.onRightPressed: {
-        incrementCurrentIndex()
-    }
 }

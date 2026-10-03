@@ -19,5 +19,21 @@
         <file>gui/NavigableDialog.qml</file>
         <file>gui/CenteredGridView.qml</file>
         <file>gui/CliPair.qml</file>
+        <file>gui/ui/v2/ThemeV2.qml</file>
+        <file>gui/ui/v2/TwTextV2.qml</file>
+        <file>gui/ui/v2/SymbolV2.qml</file>
+        <file>gui/ui/v2/UiVersionToggle.qml</file>
+        <file>gui/ui/v2/SwitchV2.qml</file>
+        <file>gui/ui/v2/SliderV2.qml</file>
+        <file>gui/ui/v2/ChoiceV2.qml</file>
+        <file>gui/ui/v2/SettingRowV2.qml</file>
+        <file>gui/ui/v2/DialogCardV2.qml</file>
+        <file>gui/ui/v2/HudChipsV2.qml</file>
+        <file>gui/ui/v2/StreamHudV2.qml</file>
+        <file>gui/ui/v2/StreamSegueV2.qml</file>
+        <file>gui/ui/v2/SettingsSheetV2.qml</file>
+        <file>gui/ui/v2/HostSheetV2.qml</file>
+        <file>gui/ui/v2/HostActionV2.qml</file>
+        <file>gui/ui/v2/ShellV2.qml</file>
     </qresource>
 </RCC>

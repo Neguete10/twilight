@@ -1,10 +1,9 @@
 #include "streamingpreferences.h"
+#include "streaming/audio/microphone/mic_permission.h"
 #include "utils.h"
 
+#include <QAtomicInt>
 #include <QSettings>
-#include <QTranslator>
-#include <QCoreApplication>
-#include <QLocale>
 #include <QReadWriteLock>
 #include <QtMath>
 
@@ -16,14 +15,17 @@
 #define SER_FPS "fps"
 #define SER_BITRATE "bitrate"
 #define SER_UNLOCK_BITRATE "unlockbitrate"
-#define SER_AUTOADJUSTBITRATE "autoadjustbitrate"
 #define SER_FULLSCREEN "fullscreen"
 #define SER_VSYNC "vsync"
 #define SER_GAMEOPTS "gameopts"
+#define SER_HEADTRACKING "headtracking"
 #define SER_HOSTAUDIO "hostaudio"
+#define SER_MICROPHONE "microphone"
 #define SER_MULTICONT "multicontroller"
 #define SER_AUDIOCFG "audiocfg"
+#define SER_SPATIALAUDIOCFG "spatialaudiocfg"
 #define SER_VIDEOCFG "videocfg"
+#define SER_PYROWAVE_BACKEND "pyrowavebackend"
 #define SER_HDR "hdr"
 #define SER_YUV444 "yuv444"
 #define SER_VIDEODEC "videodec"
@@ -31,11 +33,11 @@
 #define SER_MDNS "mdns"
 #define SER_QUITAPPAFTER "quitAppAfter"
 #define SER_ABSMOUSEMODE "mouseacceleration"
+#define SER_COREHIDMOUSE "corehidmouse"
 #define SER_ABSTOUCHMODE "abstouchmode"
 #define SER_STARTWINDOWED "startwindowed"
 #define SER_FRAMEPACING "framepacing"
 #define SER_CONNWARNINGS "connwarnings"
-#define SER_CONFWARNINGS "confwarnings"
 #define SER_UIDISPLAYMODE "uidisplaymode"
 #define SER_RICHPRESENCE "richpresence"
 #define SER_GAMEPADMOUSE "gamepadmouse"
@@ -43,6 +45,7 @@
 #define SER_PACKETSIZE "packetsize"
 #define SER_DETECTNETBLOCKING "detectnetblocking"
 #define SER_SHOWPERFOVERLAY "showperfoverlay"
+#define SER_TWILIGHTHUD "showTwilightHud"
 #define SER_SWAPMOUSEBUTTONS "swapmousebuttons"
 #define SER_MUTEONFOCUSLOSS "muteonfocusloss"
 #define SER_BACKGROUNDGAMEPAD "backgroundgamepad"
@@ -50,16 +53,19 @@
 #define SER_SWAPFACEBUTTONS "swapfacebuttons"
 #define SER_CAPTURESYSKEYS "capturesyskeys"
 #define SER_KEEPAWAKE "keepawake"
-#define SER_LANGUAGE "language"
+#define SER_UIVERSION "uiVersion"
+#define SER_LASTHOSTUUID "lastSelectedHostUuid"
 
 #define CURRENT_DEFAULT_VER 2
 
-static StreamingPreferences* s_GlobalPrefs;
+static QAtomicInt s_HudWantsSamples(0);
 
-Q_GLOBAL_STATIC(QReadWriteLock, s_GlobalPrefsLock)
+static StreamingPreferences* s_GlobalPrefs;
+static QReadWriteLock s_GlobalPrefsLock;
 
 StreamingPreferences::StreamingPreferences(QQmlEngine *qmlEngine)
-    : m_QmlEngine(qmlEngine)
+    : m_ShowTwilightHud(false),
+      m_QmlEngine(qmlEngine)
 {
     reload();
 }
@@ -67,7 +73,7 @@ StreamingPreferences::StreamingPreferences(QQmlEngine *qmlEngine)
 StreamingPreferences* StreamingPreferences::get(QQmlEngine *qmlEngine)
 {
     {
-        QReadLocker readGuard(s_GlobalPrefsLock);
+        QReadLocker readGuard(&s_GlobalPrefsLock);
 
         // If we have a preference object and it's associated with a QML engine or
         // if the caller didn't specify a QML engine, return the existing object.
@@ -79,7 +85,7 @@ StreamingPreferences* StreamingPreferences::get(QQmlEngine *qmlEngine)
     }
 
     {
-        QWriteLocker writeGuard(s_GlobalPrefsLock);
+        QWriteLocker writeGuard(&s_GlobalPrefsLock);
 
         // If we already have an preference object but the QML engine is now available,
         // associate the QML engine with the preferences.
@@ -110,10 +116,8 @@ void StreamingPreferences::reload()
 #ifdef Q_OS_DARWIN
     recommendedFullScreenMode = WindowMode::WM_FULLSCREEN_DESKTOP;
 #else
-    // Wayland doesn't support modesetting, so use fullscreen desktop mode
-    // unless we have a slow GPU (which can take advantage of wp_viewporter
-    // to reduce GPU load with lower resolution video streams).
-    if (WMUtils::isRunningWayland() && !WMUtils::isGpuSlow()) {
+    // Wayland doesn't support modesetting, so use fullscreen desktop mode.
+    if (WMUtils::isRunningWayland()) {
         recommendedFullScreenMode = WindowMode::WM_FULLSCREEN_DESKTOP;
     }
     else {
@@ -126,19 +130,21 @@ void StreamingPreferences::reload()
     fps = settings.value(SER_FPS, 60).toInt();
     enableYUV444 = settings.value(SER_YUV444, false).toBool();
     bitrateKbps = settings.value(SER_BITRATE, getDefaultBitrate(width, height, fps, enableYUV444)).toInt();
-    unlockBitrate = settings.value(SER_UNLOCK_BITRATE, false).toBool();
-    autoAdjustBitrate = settings.value(SER_AUTOADJUSTBITRATE, true).toBool();
+    unlockBitrate = settings.value(SER_UNLOCK_BITRATE, true).toBool();
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     gameOptimizations = settings.value(SER_GAMEOPTS, true).toBool();
+    spatialHeadTracking = settings.value(SER_HEADTRACKING, false).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
+    enableMicrophone = settings.value(SER_MICROPHONE, false).toBool();
+    refreshMicrophoneStatus();
     multiController = settings.value(SER_MULTICONT, true).toBool();
     enableMdns = settings.value(SER_MDNS, true).toBool();
     quitAppAfter = settings.value(SER_QUITAPPAFTER, false).toBool();
     absoluteMouseMode = settings.value(SER_ABSMOUSEMODE, false).toBool();
+    coreHidMouse = settings.value(SER_COREHIDMOUSE, false).toBool();
     absoluteTouchMode = settings.value(SER_ABSTOUCHMODE, true).toBool();
     framePacing = settings.value(SER_FRAMEPACING, false).toBool();
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
-    configurationWarnings = settings.value(SER_CONFWARNINGS, true).toBool();
     richPresence = settings.value(SER_RICHPRESENCE, true).toBool();
     gamepadMouse = settings.value(SER_GAMEPADMOUSE, true).toBool();
     detectNetworkBlocking = settings.value(SER_DETECTNETBLOCKING, true).toBool();
@@ -155,8 +161,19 @@ void StreamingPreferences::reload()
                                                          static_cast<int>(CaptureSysKeysMode::CSK_OFF)).toInt());
     audioConfig = static_cast<AudioConfig>(settings.value(SER_AUDIOCFG,
                                                   static_cast<int>(AudioConfig::AC_STEREO)).toInt());
+    spatialAudioConfig = static_cast<SpatialAudioConfig>(settings.value(SER_SPATIALAUDIOCFG,
+                                                  static_cast<int>(SpatialAudioConfig::SAC_AUTO)).toInt());
     videoCodecConfig = static_cast<VideoCodecConfig>(settings.value(SER_VIDEOCFG,
                                                   static_cast<int>(VideoCodecConfig::VCC_AUTO)).toInt());
+    {
+        int backend = settings.value(SER_PYROWAVE_BACKEND,
+                                     static_cast<int>(PyroWaveBackendConfig::PWBC_AUTO)).toInt();
+        if (backend < static_cast<int>(PyroWaveBackendConfig::PWBC_AUTO) ||
+                backend > static_cast<int>(PyroWaveBackendConfig::PWBC_VULKAN)) {
+            backend = static_cast<int>(PyroWaveBackendConfig::PWBC_AUTO);
+        }
+        pyroWaveBackend = static_cast<PyroWaveBackendConfig>(backend);
+    }
     videoDecoderSelection = static_cast<VideoDecoderSelection>(settings.value(SER_VIDEODEC,
                                                   static_cast<int>(VideoDecoderSelection::VDS_AUTO)).toInt());
     windowMode = static_cast<WindowMode>(settings.value(SER_WINDOWMODE,
@@ -166,8 +183,14 @@ void StreamingPreferences::reload()
     uiDisplayMode = static_cast<UIDisplayMode>(settings.value(SER_UIDISPLAYMODE,
                                                static_cast<int>(settings.value(SER_STARTWINDOWED, true).toBool() ? UIDisplayMode::UI_WINDOWED
                                                                                                                  : UIDisplayMode::UI_MAXIMIZED)).toInt());
-    language = static_cast<Language>(settings.value(SER_LANGUAGE,
-                                                    static_cast<int>(Language::LANG_AUTO)).toInt());
+    {
+        // Missing key starts on Twilight. An explicit "v1" still restores Classic.
+        const QString version = settings.value(SER_UIVERSION).toString().trimmed().toLower();
+        m_UiVersion = (version == QLatin1String("v1")) ? QStringLiteral("v1") : QStringLiteral("v2");
+    }
+    m_LastSelectedHostUuid = settings.value(SER_LASTHOSTUUID).toString();
+    m_ShowTwilightHud = settings.value(SER_TWILIGHTHUD, false).toBool();
+    publishHudSamplingFlag();
 
 
     // Perform default settings updates as required based on last default version
@@ -192,130 +215,6 @@ void StreamingPreferences::reload()
     }
 }
 
-bool StreamingPreferences::retranslate()
-{
-    static QTranslator* translator = nullptr;
-
-#if QT_VERSION < QT_VERSION_CHECK(5, 10, 0)
-    if (m_QmlEngine != nullptr) {
-        // Dynamic retranslation is not supported until Qt 5.10
-        return false;
-    }
-#endif
-
-    QTranslator* newTranslator = new QTranslator();
-    QString languageSuffix = getSuffixFromLanguage(language);
-
-    // Remove the old translator, even if we can't load a new one.
-    // Otherwise we'll be stuck with the old translated values instead
-    // of defaulting to English.
-    if (translator != nullptr) {
-        QCoreApplication::removeTranslator(translator);
-        delete translator;
-        translator = nullptr;
-    }
-
-    if (newTranslator->load(QString(":/languages/qml_") + languageSuffix)) {
-        qInfo() << "Successfully loaded translation for" << languageSuffix;
-
-        translator = newTranslator;
-        QCoreApplication::installTranslator(translator);
-    }
-    else {
-        qInfo() << "No translation available for" << languageSuffix;
-        delete newTranslator;
-    }
-
-    if (m_QmlEngine != nullptr) {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-        // This is a dynamic retranslation from the settings page.
-        // We have to kick the QML engine into reloading our text.
-        m_QmlEngine->retranslate();
-#else
-        // Unreachable below Qt 5.10 due to the check above
-        Q_ASSERT(false);
-#endif
-    }
-    else {
-        // This is a translation from a non-QML context, which means
-        // it is probably app startup. There's nothing to refresh.
-    }
-
-    return true;
-}
-
-QString StreamingPreferences::getSuffixFromLanguage(StreamingPreferences::Language lang)
-{
-    switch (lang)
-    {
-    case LANG_DE:
-        return "de";
-    case LANG_EN:
-        return "en";
-    case LANG_FR:
-        return "fr";
-    case LANG_ZH_CN:
-        return "zh_CN";
-    case LANG_NB_NO:
-        return "nb_NO";
-    case LANG_RU:
-        return "ru";
-    case LANG_ES:
-        return "es";
-    case LANG_JA:
-        return "ja";
-    case LANG_VI:
-        return "vi";
-    case LANG_TH:
-        return "th";
-    case LANG_KO:
-        return "ko";
-    case LANG_HU:
-        return "hu";
-    case LANG_NL:
-        return "nl";
-    case LANG_SV:
-        return "sv";
-    case LANG_TR:
-        return "tr";
-    case LANG_UK:
-        return "uk";
-    case LANG_ZH_TW:
-        return "zh_TW";
-    case LANG_PT:
-        return "pt";
-    case LANG_PT_BR:
-        return "pt_BR";
-    case LANG_EL:
-        return "el";
-    case LANG_IT:
-        return "it";
-    case LANG_HI:
-        return "hi";
-    case LANG_PL:
-        return "pl";
-    case LANG_CS:
-        return "cs";
-    case LANG_HE:
-        return "he";
-    case LANG_CKB:
-        return "ckb";
-    case LANG_LT:
-        return "lt";
-    case LANG_ET:
-        return "et";
-    case LANG_BG:
-        return "bg";
-    case LANG_EO:
-        return "eo";
-    case LANG_TA:
-        return "ta";
-    case LANG_AUTO:
-    default:
-        return QLocale::system().name();
-    }
-}
-
 void StreamingPreferences::save()
 {
     QSettings settings;
@@ -325,31 +224,33 @@ void StreamingPreferences::save()
     settings.setValue(SER_FPS, fps);
     settings.setValue(SER_BITRATE, bitrateKbps);
     settings.setValue(SER_UNLOCK_BITRATE, unlockBitrate);
-    settings.setValue(SER_AUTOADJUSTBITRATE, autoAdjustBitrate);
     settings.setValue(SER_VSYNC, enableVsync);
     settings.setValue(SER_GAMEOPTS, gameOptimizations);
+    settings.setValue(SER_HEADTRACKING, spatialHeadTracking);
     settings.setValue(SER_HOSTAUDIO, playAudioOnHost);
+    settings.setValue(SER_MICROPHONE, enableMicrophone);
     settings.setValue(SER_MULTICONT, multiController);
     settings.setValue(SER_MDNS, enableMdns);
     settings.setValue(SER_QUITAPPAFTER, quitAppAfter);
     settings.setValue(SER_ABSMOUSEMODE, absoluteMouseMode);
+    settings.setValue(SER_COREHIDMOUSE, coreHidMouse);
     settings.setValue(SER_ABSTOUCHMODE, absoluteTouchMode);
     settings.setValue(SER_FRAMEPACING, framePacing);
     settings.setValue(SER_CONNWARNINGS, connectionWarnings);
-    settings.setValue(SER_CONFWARNINGS, configurationWarnings);
     settings.setValue(SER_RICHPRESENCE, richPresence);
     settings.setValue(SER_GAMEPADMOUSE, gamepadMouse);
     settings.setValue(SER_PACKETSIZE, packetSize);
     settings.setValue(SER_DETECTNETBLOCKING, detectNetworkBlocking);
     settings.setValue(SER_SHOWPERFOVERLAY, showPerformanceOverlay);
     settings.setValue(SER_AUDIOCFG, static_cast<int>(audioConfig));
+    settings.setValue(SER_SPATIALAUDIOCFG, static_cast<int>(spatialAudioConfig));
     settings.setValue(SER_HDR, enableHdr);
     settings.setValue(SER_YUV444, enableYUV444);
     settings.setValue(SER_VIDEOCFG, static_cast<int>(videoCodecConfig));
+    settings.setValue(SER_PYROWAVE_BACKEND, static_cast<int>(pyroWaveBackend));
     settings.setValue(SER_VIDEODEC, static_cast<int>(videoDecoderSelection));
     settings.setValue(SER_WINDOWMODE, static_cast<int>(windowMode));
     settings.setValue(SER_UIDISPLAYMODE, static_cast<int>(uiDisplayMode));
-    settings.setValue(SER_LANGUAGE, static_cast<int>(language));
     settings.setValue(SER_DEFAULTVER, CURRENT_DEFAULT_VER);
     settings.setValue(SER_SWAPMOUSEBUTTONS, swapMouseButtons);
     settings.setValue(SER_MUTEONFOCUSLOSS, muteOnFocusLoss);
@@ -358,6 +259,127 @@ void StreamingPreferences::save()
     settings.setValue(SER_SWAPFACEBUTTONS, swapFaceButtons);
     settings.setValue(SER_CAPTURESYSKEYS, captureSysKeysMode);
     settings.setValue(SER_KEEPAWAKE, keepAwake);
+    settings.setValue(SER_UIVERSION, m_UiVersion);
+    settings.setValue(SER_TWILIGHTHUD, m_ShowTwilightHud);
+    settings.setValue(SER_LASTHOSTUUID, m_LastSelectedHostUuid);
+}
+
+bool StreamingPreferences::hudWantsSamples()
+{
+    return s_HudWantsSamples.loadAcquire() != 0;
+}
+
+void StreamingPreferences::publishHudSamplingFlag()
+{
+    const bool sample = m_UiVersion == QLatin1String("v2") && m_ShowTwilightHud;
+    s_HudWantsSamples.storeRelease(sample ? 1 : 0);
+}
+
+void StreamingPreferences::setShowTwilightHud(bool show)
+{
+    if (m_ShowTwilightHud == show) {
+        return;
+    }
+
+    m_ShowTwilightHud = show;
+    publishHudSamplingFlag();
+
+    QSettings settings;
+    settings.setValue(SER_TWILIGHTHUD, m_ShowTwilightHud);
+    emit showTwilightHudChanged();
+}
+
+void StreamingPreferences::setLastSelectedHostUuid(const QString& uuid)
+{
+    if (m_LastSelectedHostUuid == uuid) {
+        return;
+    }
+
+    m_LastSelectedHostUuid = uuid;
+
+    QSettings settings;
+    settings.setValue(SER_LASTHOSTUUID, m_LastSelectedHostUuid);
+    emit lastSelectedHostUuidChanged();
+}
+
+void StreamingPreferences::setUiVersion(const QString& version)
+{
+    const QString normalized = (version.trimmed().compare(QLatin1String("v2"), Qt::CaseInsensitive) == 0)
+            ? QStringLiteral("v2")
+            : QStringLiteral("v1");
+    if (m_UiVersion == normalized) {
+        return;
+    }
+
+    m_UiVersion = normalized;
+    publishHudSamplingFlag();
+
+    QSettings settings;
+    settings.setValue(SER_UIVERSION, m_UiVersion);
+    emit uiVersionChanged();
+}
+
+QString StreamingPreferences::microphoneStatusText() const
+{
+    return m_MicrophoneStatusText;
+}
+
+void StreamingPreferences::refreshMicrophoneStatus()
+{
+    QString text;
+    switch (MacMicrophonePermission::status()) {
+    case MacMicrophonePermission::Status::Granted:
+        text = tr("Microphone access granted. Ctrl+Alt+Shift+N mutes it during a stream.");
+        break;
+    case MacMicrophonePermission::Status::Denied:
+        text = tr("Microphone access is off for this app. Turn it on in System Settings > Privacy & Security > Microphone.");
+        break;
+    case MacMicrophonePermission::Status::Restricted:
+        text = tr("Microphone access is restricted on this Mac.");
+        break;
+    case MacMicrophonePermission::Status::NotDetermined:
+    default:
+        text = tr("Checking this box asks macOS for microphone access.");
+        break;
+    }
+
+    if (text == m_MicrophoneStatusText) {
+        return;
+    }
+    m_MicrophoneStatusText = text;
+    emit microphoneStatusTextChanged();
+}
+
+void StreamingPreferences::setMicrophoneEnabled(bool enabled)
+{
+    if (!enabled) {
+        ++m_MicRequestSerial;
+        enableMicrophone = false;
+        refreshMicrophoneStatus();
+        save();
+        return;
+    }
+
+    const int serial = ++m_MicRequestSerial;
+    MacMicrophonePermission::request([this, serial](bool granted) {
+        QMetaObject::invokeMethod(this,
+                                  "completeMicrophoneRequest",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(int, serial),
+                                  Q_ARG(bool, granted));
+    });
+}
+
+void StreamingPreferences::completeMicrophoneRequest(int serial, bool granted)
+{
+    if (serial != m_MicRequestSerial) {
+        return;
+    }
+
+    enableMicrophone = granted;
+    refreshMicrophoneStatus();
+    save();
+    emit microphoneAccessFinished(granted);
 }
 
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)
@@ -402,8 +424,16 @@ int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool
             break;
         }
         else if (resTable[i].pixels == -1) {
-            // Never go above the highest resolution entry
-            resolutionFactor = resTable[i-1].factor;
+            // Above the last table row, continue the 1440p-to-4K slope using the
+            // width*height the caller passed (the display's reported mode).
+            // Exact 1080p, 1440p, and 4K rows are unchanged. No multi-monitor branch.
+            const int prevPixels = resTable[i - 2].pixels;
+            const int prevFactor = resTable[i - 2].factor;
+            const int lastPixels = resTable[i - 1].pixels;
+            const int lastFactor = resTable[i - 1].factor;
+            const double extra = (double)(pixels - lastPixels) * (double)(lastFactor - prevFactor)
+                    / (double)(lastPixels - prevPixels);
+            resolutionFactor = (float)((double)lastFactor + extra);
             break;
         }
     }
@@ -414,4 +444,83 @@ int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool
     }
 
     return qRound(resolutionFactor * frameRateFactor) * 1000;
+}
+
+void StreamingPreferences::applyNetworkProfileSettings(const NetworkProfiles::StreamPreset& incoming)
+{
+    NetworkProfiles::StreamPreset preset = incoming;
+
+    // Same migration as reload(): the retired combined HEVC+HDR value is codec
+    // auto plus the HDR flag.
+    if (preset.videoCodecConfig == VCC_FORCE_HEVC_HDR_DEPRECATED) {
+        preset.videoCodecConfig = VCC_AUTO;
+        preset.enableHdr = true;
+    }
+    // The settings page clears frame pacing whenever V-Sync is off.
+    if (!preset.enableVsync) {
+        preset.framePacing = false;
+    }
+    // The bitrate slider tops out at 150 Mbps until "unlock bitrate" is on.
+    if (!preset.unlockBitrate && preset.bitrateKbps > 150000) {
+        preset.bitrateKbps = 150000;
+    }
+
+    width = preset.width;
+    height = preset.height;
+    fps = preset.fps;
+    unlockBitrate = preset.unlockBitrate;
+    enableVsync = preset.enableVsync;
+    spatialHeadTracking = preset.spatialHeadTracking;
+    audioConfig = static_cast<AudioConfig>(preset.audioConfig);
+    spatialAudioConfig = static_cast<SpatialAudioConfig>(preset.spatialAudioConfig);
+    videoCodecConfig = static_cast<VideoCodecConfig>(preset.videoCodecConfig);
+    pyroWaveBackend = static_cast<PyroWaveBackendConfig>(preset.pyroWaveBackend);
+    enableHdr = preset.enableHdr;
+    enableYUV444 = preset.enableYUV444;
+    videoDecoderSelection = static_cast<VideoDecoderSelection>(preset.videoDecoderSelection);
+    windowMode = static_cast<WindowMode>(preset.windowMode);
+    framePacing = preset.framePacing;
+
+    emit unlockBitrateChanged();
+    emit enableYUV444Changed();
+    emit displayModeChanged();
+    emit enableVsyncChanged();
+    emit spatialHeadTrackingChanged();
+    emit audioConfigChanged();
+    emit spatialAudioConfigChanged();
+    emit videoCodecConfigChanged();
+    emit pyroWaveBackendChanged();
+    emit enableHdrChanged();
+    emit videoDecoderSelectionChanged();
+    emit windowModeChanged();
+    emit framePacingChanged();
+
+    // Those signals update the classic settings controls, and the YUV 4:4:4
+    // checkbox replaces bitrate with getDefaultBitrate while it runs. Write
+    // the profile bitrate after that so the saved number wins.
+    bitrateKbps = preset.bitrateKbps;
+    emit bitrateChanged();
+    save();
+}
+
+NetworkProfiles::StreamPreset StreamingPreferences::captureNetworkProfileSettings() const
+{
+    NetworkProfiles::StreamPreset preset = NetworkProfiles::emptyStreamPreset();
+    preset.width = width;
+    preset.height = height;
+    preset.fps = fps;
+    preset.bitrateKbps = bitrateKbps;
+    preset.unlockBitrate = unlockBitrate;
+    preset.videoCodecConfig = static_cast<int>(videoCodecConfig);
+    preset.pyroWaveBackend = static_cast<int>(pyroWaveBackend);
+    preset.enableHdr = enableHdr;
+    preset.enableYUV444 = enableYUV444;
+    preset.videoDecoderSelection = static_cast<int>(videoDecoderSelection);
+    preset.windowMode = static_cast<int>(windowMode);
+    preset.audioConfig = static_cast<int>(audioConfig);
+    preset.spatialAudioConfig = static_cast<int>(spatialAudioConfig);
+    preset.spatialHeadTracking = spatialHeadTracking;
+    preset.enableVsync = enableVsync;
+    preset.framePacing = framePacing;
+    return preset;
 }
