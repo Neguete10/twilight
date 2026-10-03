@@ -536,6 +536,7 @@ macx {
         streaming/audio/renderers/coreaudio/au_spatial_renderer.h \
         streaming/audio/renderers/coreaudio/coreaudio.h \
         streaming/audio/renderers/coreaudio/coreaudio_helpers.h \
+        streaming/audio/renderers/coreaudio/coreaudio_playback.h \
         streaming/audio/renderers/coreaudio/TPCircularBuffer.h \
         streaming/input/corehid_mouse.h \
         streaming/mac/pip_frame.h \

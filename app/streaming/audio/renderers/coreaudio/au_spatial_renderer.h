@@ -33,7 +33,8 @@ public:
     uint32_t m_PersonalizedHRTF;
 
 private:
-    AudioUnit _Nonnull m_Mixer;
+    AudioUnit m_Mixer;
+    bool m_Initialized;
     const TPCircularBuffer* _Nonnull m_RingBufferPtr; // pointer to RingBuffer in the outer CoreAudioRenderer
     SimpleBlock _Nonnull m_StatsTrackRenderBlock;
 
