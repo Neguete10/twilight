@@ -13,6 +13,8 @@ Item {
     property bool supported: true
     property string details: ""
     property bool showHidden: false
+    property string wakeNotice: ""
+    property bool wakeNoticeSent: false
 
     signal closeRequested()
     signal wakeRequested()
@@ -139,7 +141,19 @@ Item {
                 symbol: "bolt.fill"
                 title: qsTr("Wake")
                 visible: !sheet.online && sheet.wakeable
-                onTriggered: sheet.wakeRequested()
+                onTriggered: {
+                    sheet.wakeNotice = ""
+                    sheet.wakeRequested()
+                }
+            }
+            TwTextV2 {
+                width: parent.width
+                visible: sheet.wakeNotice !== ""
+                theme: sheet.theme
+                color: sheet.wakeNoticeSent ? sheet.theme.secondary : sheet.theme.danger
+                font.pixelSize: 13
+                wrapMode: Text.Wrap
+                text: sheet.wakeNotice
             }
             HostActionV2 {
                 theme: sheet.theme

@@ -59,15 +59,19 @@ public:
 signals:
     void pairingCompleted(QVariant error);
     void connectionTestCompleted(int result, QString blockedPorts);
+    void wakeCompleted(int computerIndex, QString message, bool sent);
 
 private slots:
     void handleComputerStateChanged(NvComputer* computer);
 
     void handlePairingCompleted(NvComputer* computer, QString error);
 
+    void deliverWakeResult(int computerIndex, int outcome, int generation);
+
 private:
     QVariant roleAt(int row, int role) const;
 
     QVector<NvComputer*> m_Computers;
     ComputerManager* m_ComputerManager;
+    int m_WakeGeneration;
 };

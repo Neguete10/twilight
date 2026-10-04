@@ -1,5 +1,6 @@
 #pragma once
 
+#include "wake_notice.h"
 #include "nvhttp.h"
 #include "nvaddress.h"
 
@@ -50,7 +51,7 @@ public:
     bool
     update(const NvComputer& that);
 
-    bool
+    WakePacketOutcome
     wake() const;
 
     enum ReachabilityType

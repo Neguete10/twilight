@@ -71,7 +71,7 @@ These are in the tree and documented on their own pages. They are not part of up
 
 ## Release
 
-The current release is [v6.1.1](https://github.com/Neguete10/twilight/releases/tag/v6.1.1). The asset is `Twilight-6.1.1.dmg`. That build is ad-hoc signed and not notarized. Its note says it fixes the picture-in-picture crash in the audio decoder, and that the Mac build includes PyroWave Vulkan and Metal (`libpyrowave-metal` 0.5.0, source `89f7e47`). `app/version.txt` in this tree is `6.1.1`.
+The last published build is [v6.1.1](https://github.com/Neguete10/twilight/releases/tag/v6.1.1). The asset is `Twilight-6.1.1.dmg`. That build is ad-hoc signed and not notarized. Its note says it fixes the picture-in-picture crash in the audio decoder, and that the Mac build includes PyroWave Vulkan and Metal (`libpyrowave-metal` 0.5.0, source `89f7e47`). `app/version.txt` in this tree is `7.0.0`.
 
 ## Building the Mac app
 

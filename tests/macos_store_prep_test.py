@@ -61,7 +61,18 @@ def test_plist_rewrite():
     )
     expect(desktop_plist["CFBundleIdentifier"] == "com.moonlight-stream.Moonlight", "desktop bundle id")
     expect(mas_plist["CFBundleIdentifier"] == "com.henrique.twilight", "MAS bundle id")
-    expect(desktop_plist["CFBundleShortVersionString"] == "6.1.1", "version unchanged")
+    expect(desktop_plist["CFBundleShortVersionString"] == "6.1.1", "plist writes the version qmake passes")
+    expect(template.count("<string>VERSION</string>") == 2, "Info.plist keeps the qmake version token")
+    tree_version = (ROOT / "app" / "version.txt").read_text(encoding="utf-8").strip()
+    wired = module.prepare(
+        template, tree_version, "com.moonlight-stream.Moonlight", "Twilight", "desktop"
+    )
+    wired_plist = plistlib.loads(wired.encode("utf-8"))
+    expect(wired_plist["CFBundleShortVersionString"] == "7.0.0", "short version follows version.txt")
+    expect(wired_plist["CFBundleVersion"] == "7.0.0", "bundle version follows version.txt")
+    expect("6.1.1" not in template, "Info.plist does not hardcode 6.1.1")
+    pro = (ROOT / "app" / "app.pro").read_text(encoding="utf-8")
+    expect("$$cat(version.txt)" in pro, "qmake passes version.txt into Info.plist")
     expect(
         "Twilight uses the microphone" in desktop_plist["NSMicrophoneUsageDescription"],
         "microphone usage string",
@@ -156,7 +167,7 @@ def test_notices():
     expect(b"Apache License" in (ROOT / "app/licenses/OpenSSL-Apache-2.0.txt").read_bytes(), "OpenSSL Apache text")
     expect(b"Nathan Osman" in (ROOT / "app/licenses/qmdnsengine-MIT.txt").read_bytes(), "qmdnsengine copyright")
     version = (ROOT / "app/version.txt").read_text(encoding="utf-8").strip()
-    expect(version == "6.1.1", "version was not bumped")
+    expect(version == "7.0.0", "version is 7.0.0")
 
 
 def test_package_script():
