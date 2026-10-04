@@ -73,12 +73,23 @@ CenteredGridView {
         }
     }
 
+    property string wakeNoticeText: ""
+
+    function wakeComplete(index, message, sent)
+    {
+        if (message === undefined || message === null || message === "")
+            return
+        wakeNoticeText = message
+        wakeNoticeTimer.restart()
+    }
+
     function createModel()
     {
         var model = Qt.createQmlObject('import ComputerModel 1.0; ComputerModel {}', parent, '')
         model.initialize(ComputerManager)
         model.pairingCompleted.connect(pairingComplete)
         model.connectionTestCompleted.connect(testConnectionDialog.connectionTestComplete)
+        model.wakeCompleted.connect(wakeComplete)
         return model
     }
 
@@ -405,6 +416,37 @@ CenteredGridView {
         text: showPcDetailsDialog.pcDetails
         imageSrc: "qrc:/res/baseline-help_outline-24px.svg"
         standardButtons: Dialog.Ok
+    }
+
+    SystemPalette { id: wakeNoticePalette }
+
+    Rectangle {
+        parent: ApplicationWindow.overlay
+        z: 5
+        visible: pcGrid.wakeNoticeText !== ""
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 24
+        radius: 4
+        color: wakeNoticePalette.window
+        border.width: 1
+        border.color: wakeNoticePalette.mid
+        width: wakeNoticeLabel.implicitWidth + 24
+        height: 36
+
+        Label {
+            id: wakeNoticeLabel
+            anchors.centerIn: parent
+            text: pcGrid.wakeNoticeText
+            font.pointSize: 12
+            color: wakeNoticePalette.windowText
+        }
+    }
+
+    Timer {
+        id: wakeNoticeTimer
+        interval: 2800
+        onTriggered: pcGrid.wakeNoticeText = ""
     }
 
     ScrollBar.vertical: ScrollBar {}

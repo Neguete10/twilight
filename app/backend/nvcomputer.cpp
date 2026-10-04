@@ -213,7 +213,7 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     this->isSupportedServerVersion = CompatFetcher::isGfeVersionSupported(this->gfeVersion);
 }
 
-bool NvComputer::wake() const
+WakePacketOutcome NvComputer::wake() const
 {
     QByteArray wolPayload;
 
@@ -222,12 +222,12 @@ bool NvComputer::wake() const
 
         if (state == NvComputer::CS_ONLINE) {
             qWarning() << name << "is already online";
-            return true;
+            return WakePacketSkipped;
         }
 
         if (macAddress.isEmpty()) {
             qWarning() << name << "has no MAC address stored";
-            return false;
+            return WakePacketFailed;
         }
 
         // Create the WoL payload
@@ -313,7 +313,7 @@ bool NvComputer::wake() const
 
             // Send to all static ports
             for (quint16 port : STATIC_WOL_PORTS) {
-                if (sock.writeDatagram(wolPayload, address, port)) {
+                if (sock.writeDatagram(wolPayload, address, port) > 0) {
                     qInfo().nospace().noquote() << "Sent WoL packet to " << name << " via " << address.toString() << ":" << port;
                     success = true;
                 }
@@ -337,7 +337,7 @@ bool NvComputer::wake() const
                 for (quint16 port : DYNAMIC_WOL_PORTS) {
                     port = (port - 47989) + basePort;
 
-                    if (sock.writeDatagram(wolPayload, address, port)) {
+                    if (sock.writeDatagram(wolPayload, address, port) > 0) {
                         qInfo().nospace().noquote() << "Sent WoL packet to " << name << " via " << address.toString() << ":" << port;
                         success = true;
                     }
@@ -349,7 +349,7 @@ bool NvComputer::wake() const
         }
     }
 
-    return success;
+    return success ? WakePacketSent : WakePacketFailed;
 }
 
 NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const

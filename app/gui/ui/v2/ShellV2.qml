@@ -291,6 +291,17 @@ Item {
             showError("" + error)
     }
 
+    function wakeComplete(index, message, sent) {
+        if (message === undefined || message === null || message === "")
+            return
+        if (hostSheetOpen && index === selectedIndex) {
+            hostSheet.wakeNotice = message
+            hostSheet.wakeNoticeSent = sent
+            return
+        }
+        toast(message)
+    }
+
     function testComplete(result, blockedPorts) {
         if (result === -1) {
             testMessage = qsTr("The network test could not be performed because none of Twilight's connection testing servers were reachable from this PC.")
@@ -359,6 +370,7 @@ Item {
         ComputerManager.computerAddCompleted.connect(addComplete)
         computerModel.pairingCompleted.connect(pairComplete)
         computerModel.connectionTestCompleted.connect(testComplete)
+        computerModel.wakeCompleted.connect(wakeComplete)
         noteComputersChanged()
         forceActiveFocus()
     }
@@ -1097,6 +1109,7 @@ Item {
     }
 
     HostSheetV2 {
+        id: hostSheet
         theme: shell.theme
         open: shell.hostSheetOpen
         hostName: shell.selectedName
@@ -1108,7 +1121,10 @@ Item {
         supported: shell.selectedSupported
         details: shell.selectedDetails
         showHidden: shell.showHidden
-        onCloseRequested: shell.hostSheetOpen = false
+        onCloseRequested: {
+            hostSheet.wakeNotice = ""
+            shell.hostSheetOpen = false
+        }
         onWakeRequested: computerModel.wakeComputer(shell.selectedIndex)
         onPairRequested: shell.beginPair()
         onTestRequested: computerModel.testConnectionForComputer(shell.selectedIndex)
