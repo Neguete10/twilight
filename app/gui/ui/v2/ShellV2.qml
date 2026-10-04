@@ -433,6 +433,23 @@ Item {
                 anchors.rightMargin: 16
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 8
+                TwTextV2 {
+                    anchors.verticalCenter: parent.verticalCenter
+                    theme: shell.theme
+                    text: qsTr("About")
+                    font.pixelSize: 13
+                    color: aboutArea.containsMouse ? theme.accent : theme.secondary
+                    MouseArea {
+                        id: aboutArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            settingsSheet.section = "about"
+                            shell.settingsOpen = true
+                        }
+                    }
+                }
                 UiVersionToggle {
                     anchors.verticalCenter: parent.verticalCenter
                     darkChrome: theme.dark
@@ -1104,6 +1121,7 @@ Item {
     }
 
     SettingsSheetV2 {
+        id: settingsSheet
         theme: shell.theme
         open: shell.settingsOpen
         onCloseRequested: {

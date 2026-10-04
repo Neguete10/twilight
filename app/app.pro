@@ -709,29 +709,37 @@ macx {
         QMAKE_POST_LINK += \"$$PWD/../scripts/build-pyrowave-metal.sh\" install \"$$OUT_PWD/$${QMAKE_APPLICATION_BUNDLE_NAME}.app/Contents/Frameworks\"
     }
     # Hardened Runtime signing is: codesign --options runtime
-    system(cp $$PWD/Info.plist $$OUT_PWD/Info.plist)
-    system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$OUT_PWD/Info.plist)
-
+    # Info.plist tokens and the ATS dictionary are rewritten by
+    # scripts/prepare-macos-infoplist.py. Desktop keeps
+    # NSAllowsArbitraryLoads. twilight-mas swaps in NSAllowsLocalNetworking.
     TWILIGHT_BUNDLE_ID = com.moonlight-stream.Moonlight
     TWILIGHT_DISPLAY_NAME = Twilight
+    TWILIGHT_PLIST_MODE = desktop
+    TWILIGHT_ENTITLEMENTS = $$PWD/deploy/macos/Twilight-MAS.entitlements
     twilight-mas {
         TWILIGHT_BUNDLE_ID = com.henrique.twilight
         TWILIGHT_DISPLAY_NAME = Twilight
+        TWILIGHT_PLIST_MODE = mas
+        twilight-mas-multicast {
+            TWILIGHT_ENTITLEMENTS = $$PWD/deploy/macos/Twilight-MAS-multicast.entitlements
+        }
 
         # Xcode generator only. Makefile builds sign in scripts/generate-dmg.sh.
         CODE_SIGN_ENTITLEMENTS.name = CODE_SIGN_ENTITLEMENTS
-        CODE_SIGN_ENTITLEMENTS.value = $$PWD/deploy/macos/Twilight-MAS.entitlements
+        CODE_SIGN_ENTITLEMENTS.value = $$TWILIGHT_ENTITLEMENTS
         ENABLE_HARDENED_RUNTIME.name = ENABLE_HARDENED_RUNTIME
         ENABLE_HARDENED_RUNTIME.value = YES
         QMAKE_MAC_XCODE_SETTINGS += CODE_SIGN_ENTITLEMENTS ENABLE_HARDENED_RUNTIME
 
         message("twilight-mas: bundle id $$TWILIGHT_BUNDLE_ID")
         message("twilight-mas: display name $$TWILIGHT_DISPLAY_NAME")
-        message("twilight-mas: entitlements $$PWD/deploy/macos/Twilight-MAS.entitlements")
-        message("twilight-mas: codesign --options runtime --timestamp --entitlements $$PWD/deploy/macos/Twilight-MAS.entitlements")
+        message("twilight-mas: plist mode $$TWILIGHT_PLIST_MODE")
+        message("twilight-mas: entitlements $$TWILIGHT_ENTITLEMENTS")
+        message("twilight-mas: codesign --options runtime --timestamp --entitlements $$TWILIGHT_ENTITLEMENTS")
     }
-    system(sed -i -e 's/BUNDLE_ID/$$TWILIGHT_BUNDLE_ID/g' $$OUT_PWD/Info.plist)
-    system(sed -i -e 's/DISPLAY_NAME/$$TWILIGHT_DISPLAY_NAME/g' $$OUT_PWD/Info.plist)
+    !system(python3 \"$$PWD/../scripts/prepare-macos-infoplist.py\" \"$$PWD/Info.plist\" \"$$OUT_PWD/Info.plist\" \"$$cat(version.txt)\" \"$$TWILIGHT_BUNDLE_ID\" \"$$TWILIGHT_DISPLAY_NAME\" $$TWILIGHT_PLIST_MODE) {
+        error("Failed to prepare Info.plist")
+    }
 
     QMAKE_INFO_PLIST = $$OUT_PWD/Info.plist
 
@@ -746,7 +754,16 @@ macx {
     APP_BUNDLE_PLIST.files = $$OUT_PWD/Info.plist
     APP_BUNDLE_PLIST.path = Contents
 
-    QMAKE_BUNDLE_DATA += APP_BUNDLE_RESOURCES APP_BUNDLE_DISPLAY_NAME APP_BUNDLE_PLIST
+    # GPL and third-party license texts. Loose files, not only inside qrc,
+    # so a copy of the app bundle contains the notices.
+    APP_BUNDLE_LICENSES.files = $$files(licenses/*.txt)
+    APP_BUNDLE_LICENSES.path = Contents/Resources/Licenses
+
+    # Required-reason API manifest. Collected-data keys are intentionally absent.
+    APP_BUNDLE_PRIVACY.files = deploy/macos/PrivacyInfo.xcprivacy
+    APP_BUNDLE_PRIVACY.path = Contents/Resources
+
+    QMAKE_BUNDLE_DATA += APP_BUNDLE_RESOURCES APP_BUNDLE_DISPLAY_NAME APP_BUNDLE_PLIST APP_BUNDLE_LICENSES APP_BUNDLE_PRIVACY
 
     !disable-prebuilts {
         APP_BUNDLE_FRAMEWORKS.files = $$files(../libs/mac/Frameworks/*.framework, true) $$files(../libs/mac/lib/*.dylib, true)

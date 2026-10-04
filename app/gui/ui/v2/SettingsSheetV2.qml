@@ -184,6 +184,7 @@ Item {
                             ListElement { sectionId: "input"; label: qsTr("Input"); symbol: "gamecontroller" }
                             ListElement { sectionId: "network"; label: qsTr("Network"); symbol: "network" }
                             ListElement { sectionId: "advanced"; label: qsTr("Advanced"); symbol: "slider.horizontal.3" }
+                            ListElement { sectionId: "about"; label: qsTr("About"); symbol: "info.circle" }
                         }
 
                         Rectangle {
@@ -244,6 +245,7 @@ Item {
                               : sheet.section === "audio" ? qsTr("Audio")
                               : sheet.section === "input" ? qsTr("Input")
                               : sheet.section === "network" ? qsTr("Network")
+                              : sheet.section === "about" ? qsTr("About")
                               : qsTr("Advanced")
                         theme: sheet.theme
                         font.pixelSize: 28
@@ -774,6 +776,23 @@ Item {
                             text: qsTr("The window mode applies the next time the app opens. Packet size and fully custom modes stay in Classic.")
                         }
 
+                    }
+
+                    Loader {
+                        id: aboutLoader
+                        width: parent.width
+                        active: sheet.section === "about"
+                        visible: active
+                        height: item ? item.height : 0
+                        source: "qrc:/gui/AboutNotices.qml"
+                        onLoaded: {
+                            item.width = aboutLoader.width
+                            item.theme = sheet.theme
+                        }
+                        onWidthChanged: {
+                            if (item)
+                                item.width = width
+                        }
                     }
                 }
             }

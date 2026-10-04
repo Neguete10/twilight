@@ -422,6 +422,28 @@ ApplicationWindow {
                 }
             }
 
+            ToolButton {
+                id: aboutButton
+                text: qsTr("About")
+                font.pixelSize: 14
+                Layout.preferredHeight: parent.height
+                visible: !qmltypeof(stackView.currentItem, "AboutView")
+                onClicked: navigateTo("qrc:/gui/AboutView.qml", "AboutView")
+
+                Keys.onReturnPressed: clicked()
+                Keys.onEnterPressed: clicked()
+                Keys.onRightPressed: nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocus)
+                Keys.onLeftPressed: nextItemInFocusChain(false).forceActiveFocus(Qt.TabFocus)
+                Keys.onDownPressed: {
+                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
+                }
+
+                ToolTip.delay: 1000
+                ToolTip.timeout: 3000
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("About Twilight, warranty, and licenses")
+            }
+
             NavigableToolButton {
                 id: helpButton
                 visible: SystemProperties.hasBrowser

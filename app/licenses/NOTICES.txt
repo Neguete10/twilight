@@ -1,0 +1,31 @@
+Twilight is a modified version of Moonlight Qt. It is not the upstream Moonlight project.
+
+The modifications include the CoreAudio spatial audio work from Andy Grundman's moonlight-qt (https://github.com/andygrundman/moonlight-qt), a fork of moonlight-stream/moonlight-qt (https://github.com/moonlight-stream/moonlight-qt). moonlight-common-c, which this client includes, is part of that same GPL-3.0 lineage. The version of this build is shown in About.
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3.
+
+This program comes with ABSOLUTELY NO WARRANTY. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for details.
+
+The GNU GPL version 3 is included in this build as GPL-3.0.txt. Read that file for the full terms.
+
+Corresponding source code for this version: https://github.com/Neguete10/twilight
+
+Third-party notices. Each full license is a separate file in this folder.
+
+qmdnsengine. Copyright (c) 2017 Nathan Osman. MIT License. qmdnsengine-MIT.txt.
+
+h264bitstream. Copyright (C) 2005-2007 Auroras Entertainment, LLC. Copyright (C) 2008-2011 Avail-TVN. Written by Alex Izvorski and Alex Giladi. GNU LGPL version 2.1 or later. h264bitstream-LGPL-2.1.txt.
+
+SDL_GameControllerDB. zlib License, Copyright (C) 1997-2025 Sam Lantinga, as shipped in the upstream LICENSE file. SDL_GameControllerDB-Zlib.txt.
+
+FFmpeg (libavcodec.61, libavutil.59, libswscale.8). GNU LGPL version 2.1 or later unless that prebuilt was configured with --enable-gpl. The configure line is not in this source tree. FFmpeg-LGPL-2.1.txt. https://ffmpeg.org/legal.html
+
+OpenSSL 3 (libssl.3 and libcrypto.3). Copyright (c) 1998-2024 The OpenSSL Project Authors. Copyright (c) 1995-1998 Eric Young and Tim Hudson. Apache License 2.0. OpenSSL-Apache-2.0.txt.
+
+Opus. Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozilla, Amazon. BSD license. Opus-BSD.txt.
+
+SDL2. Copyright (C) 1997-2025 Sam Lantinga. zlib License. SDL2-Zlib.txt.
+
+SDL2_ttf. Copyright (C) 1997-2024 Sam Lantinga. zlib License. SDL2_ttf-Zlib.txt.
+
+libplacebo. GNU LGPL version 2.1 or later. Linked on macOS when the build uses CONFIG+=pyrowave. The default Mac link line does not include it. libplacebo-LGPL-2.1.txt.
