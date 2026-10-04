@@ -67,7 +67,7 @@ These are in the tree and documented on their own pages. They are not part of up
 - [CoreHID mouse capture](docs/COREHID_MAC.md). Off unless you enable it. Trackpads stay on SDL.
 - [Microphone to the host](docs/MICROPHONE_MAC.md). macOS only, on the encrypted control stream. A Vibepollo build with Vibelight passthrough can play it. Stock Sunshine does not. Ctrl+Alt+Shift+N mutes it during a stream.
 - [Network profiles](docs/NETWORK_PROFILES.md) in Classic settings.
-- [Mac App Store scaffolding](docs/TWILIGHT_MAS.md). `CONFIG+=twilight-mas` is local signing config. This tree does not submit a build.
+- [Mac App Store checklist](docs/TWILIGHT_MAS.md). `TWILIGHT_MAS=1` builds a local installer package. This tree does not submit a build.
 
 ## Release
 

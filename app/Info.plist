@@ -41,6 +41,11 @@
 	<true/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
+	<!-- prepare-macos-infoplist.py keeps this dictionary for desktop builds.
+	     CONFIG+=twilight-mas replaces the key element below with
+	     NSAllowsLocalNetworking. macOS 11 and later ignore
+	     NSAllowsArbitraryLoads when NSAllowsLocalNetworking is also
+	     present, so the script never emits both. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

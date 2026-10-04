@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Same Mac App Store entitlements as Twilight-MAS.entitlements, plus
+  com.apple.developer.networking.multicast.
+  Select with TWILIGHT_MAS_MULTICAST=1 (qmake CONFIG+=twilight-mas-multicast).
+  The provisioning profile must already contain this restricted entitlement.
+  A profile without Apple's multicast grant will not match this file.
+  Use Twilight-MAS.entitlements until the grant is on the App ID.
+  Do not submit the result to App Store review.
+-->
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.developer.spatial-audio.profile-access</key>
+	<true/>
+	<key>com.apple.developer.coremotion.head-pose</key>
+	<true/>
+	<key>com.apple.developer.networking.multicast</key>
+	<true/>
+</dict>
+</plist>

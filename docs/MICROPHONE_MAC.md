@@ -67,7 +67,7 @@ A working host log looks like `passthrough armed`, then `First mic packet receiv
 
 Mute is Ctrl+Alt+Shift+N during the stream. Mute replaces the frame with silence and still sends, so the host plays silence instead of packet-loss concealment. The device stays open, so unmute does not ask for permission again. Mute does not persist across streams. The shortcut is disabled on non-macOS builds so the keys are still delivered to the host there.
 
-Permission is requested from the settings checkbox via `AVCaptureDevice requestAccessForMediaType:`, not from inside the stream. If access is missing when the stream starts, the stream continues and the log says capture did not start. Denied and restricted states leave the checkbox off. The usage string is `NSMicrophoneUsageDescription` in `app/Info.plist`. The Mac App Store config rewrites the "Moonlight uses the microphone" sentence to "Twilight uses the microphone".
+Permission is requested from the settings checkbox via `AVCaptureDevice requestAccessForMediaType:`, not from inside the stream. If access is missing when the stream starts, the stream continues and the log says capture did not start. Denied and restricted states leave the checkbox off. The usage string is `NSMicrophoneUsageDescription` in `app/Info.plist`, and it already says Twilight uses the microphone on every Mac build. A sandboxed build also needs `com.apple.security.device.audio-input` or the sandbox denies the device before macOS can show the prompt. That entitlement is in `Twilight-MAS.entitlements`. See `docs/TWILIGHT_MAS.md`.
 
 ## Entitlements
 

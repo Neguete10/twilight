@@ -1,4 +1,5 @@
-# This script requires create-dmg to be installed from https://github.com/sindresorhus/create-dmg
+# Desktop DMGs require create-dmg: https://github.com/sindresorhus/create-dmg
+# TWILIGHT_MAS=1 does not create a DMG. It writes a productbuild .pkg.
 BUILD_CONFIG=$1
 
 fail()
@@ -24,6 +25,20 @@ if [ "$SIGNING_IDENTITY" == "" ]; then
   SIGNING_IDENTITY=$SIGNING_PROVIDER_SHORTNAME
 fi
 
+# Check store identities before the clean-tree rule so a missing certificate
+# name fails here, including on a dirty worktree.
+if [ "${TWILIGHT_MAS:-}" = "1" ]; then
+  if [ "$SIGNING_IDENTITY" == "" ]; then
+    fail "TWILIGHT_MAS=1 requires SIGNING_IDENTITY, the Mac App Store application certificate. Example: export SIGNING_IDENTITY=\"3rd Party Mac Developer Application: Your Name (TEAMID)\". This script does not invent a signing identity."
+  fi
+  if [ "${INSTALLER_SIGNING_IDENTITY:-}" == "" ]; then
+    fail "TWILIGHT_MAS=1 requires INSTALLER_SIGNING_IDENTITY for productbuild. Example: export INSTALLER_SIGNING_IDENTITY=\"3rd Party Mac Developer Installer: Your Name (TEAMID)\". This script does not invent a signing identity."
+  fi
+  if [ "${PROVISIONING_PROFILE:-}" == "" ] || [ ! -f "${PROVISIONING_PROFILE}" ]; then
+    fail "TWILIGHT_MAS=1 requires PROVISIONING_PROFILE set to a downloaded Mac App Store distribution profile (.provisionprofile) for com.henrique.twilight. This script does not create one."
+  fi
+fi
+
 [ "$SIGNING_IDENTITY" == "" ] || git diff-index --quiet HEAD -- || fail "Signed release builds must not have unstaged changes!"
 
 echo Cleaning output directories
@@ -33,16 +48,26 @@ mkdir $BUILD_ROOT
 mkdir $BUILD_FOLDER
 mkdir $INSTALLER_FOLDER
 
-# Desktop / Developer ID DMG is the default (no App Sandbox entitlements).
-# TWILIGHT_MAS=1 selects CONFIG+=twilight-mas: sandbox entitlements and
-# bundle id com.henrique.twilight. This does not upload or submit a build.
+# Desktop DMG is the default. Signed desktop builds use
+# spatial-audio.entitlements. Unsigned builds embed no entitlements.
+# TWILIGHT_MAS=1 selects CONFIG+=twilight-mas and writes a productbuild
+# .pkg. It does not upload, notarize, or submit a build.
+# TWILIGHT_MAS_MULTICAST=1 also selects the multicast entitlement. Leave
+# it unset until the provisioning profile contains Apple's grant.
 QMAKE_CONFIG_ARGS=
+MAS_ENTITLEMENTS="$SOURCE_ROOT/app/deploy/macos/Twilight-MAS.entitlements"
 if [ "${TWILIGHT_MAS:-}" = "1" ]; then
-  echo "TWILIGHT_MAS=1: CONFIG+=twilight-mas"
-  echo "Hardened Runtime: codesign --options runtime"
-  echo "Entitlements: app/deploy/macos/Twilight-MAS.entitlements"
-  echo "This does not submit anything to App Store review."
   QMAKE_CONFIG_ARGS="CONFIG+=twilight-mas"
+  if [ "${TWILIGHT_MAS_MULTICAST:-}" = "1" ]; then
+    QMAKE_CONFIG_ARGS="$QMAKE_CONFIG_ARGS CONFIG+=twilight-mas-multicast"
+    MAS_ENTITLEMENTS="$SOURCE_ROOT/app/deploy/macos/Twilight-MAS-multicast.entitlements"
+    echo "TWILIGHT_MAS_MULTICAST=1: com.apple.developer.networking.multicast"
+    echo "The provisioning profile must include that grant or signing will fail."
+  fi
+  echo "TWILIGHT_MAS=1: $QMAKE_CONFIG_ARGS"
+  echo "Hardened Runtime: codesign --options runtime"
+  echo "Entitlements: $MAS_ENTITLEMENTS"
+  echo "Installer identity is used only for productbuild. Nothing is uploaded."
 fi
 echo Configuring the project
 pushd $BUILD_FOLDER
@@ -72,9 +97,13 @@ find $BUILD_FOLDER/app/Twilight.app/ -name '*.dSYM' | xargs rm -rf
 if [ "$SIGNING_IDENTITY" != "" ]; then
   echo Signing app bundle
   if [ "${TWILIGHT_MAS:-}" = "1" ]; then
+    # The profile has to be inside the bundle before the signature is sealed.
+    echo "Embedding provisioning profile"
+    cp "$PROVISIONING_PROFILE" "$BUILD_FOLDER/app/Twilight.app/Contents/embedded.provisionprofile" \
+      || fail "Could not embed the provisioning profile"
     # Hardened Runtime plus the Mac App Store entitlements.
     codesign --force --deep --options runtime --timestamp \
-      --entitlements "$SOURCE_ROOT/app/deploy/macos/Twilight-MAS.entitlements" \
+      --entitlements "$MAS_ENTITLEMENTS" \
       --sign "$SIGNING_IDENTITY" \
       $BUILD_FOLDER/app/Twilight.app || fail "Signing failed!"
   else
@@ -86,6 +115,19 @@ if [ "$SIGNING_IDENTITY" != "" ]; then
   fi
   echo "App signature:"
   codesign -d --entitlements - -vvv $BUILD_FOLDER/app/Twilight.app
+fi
+
+# A store package is a signed installer, not a DMG. Skip create-dmg and
+# Developer ID notarization on this path.
+if [ "${TWILIGHT_MAS:-}" = "1" ]; then
+  echo "Creating Mac App Store installer package"
+  productbuild --component "$BUILD_FOLDER/app/Twilight.app" /Applications \
+    --sign "$INSTALLER_SIGNING_IDENTITY" \
+    "$INSTALLER_FOLDER/Twilight-$VERSION.pkg" || fail "productbuild failed!"
+  echo "Mac App Store package: $INSTALLER_FOLDER/Twilight-$VERSION.pkg"
+  echo "This script does not upload or submit the package."
+  echo Build successful
+  exit 0
 fi
 
 echo Creating DMG
