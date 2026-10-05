@@ -64,7 +64,7 @@ qmake CONFIG+=twilight-mas moonlight-qt.pro
 qmake CONFIG+=twilight-mas CONFIG+=twilight-mas-multicast moonlight-qt.pro
 ```
 
-A desktop DMG is unchanged: run `scripts/generate-dmg.sh Release` without `TWILIGHT_MAS`. Signed desktop builds still pass `app/deploy/macos/spatial-audio.entitlements`. Unsigned builds embed no entitlements. `create-dmg` is only required for that desktop path.
+A desktop disk image is still `scripts/generate-dmg.sh Release` without `TWILIGHT_MAS`. That path writes the drag-and-drop DMG, not a productbuild package. Signed desktop builds still pass `app/deploy/macos/spatial-audio.entitlements`. Unsigned builds embed no entitlements. `create-dmg` is only required for that desktop path.
 
 ## Entitlements
 
