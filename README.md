@@ -1,10 +1,8 @@
 # Twilight
 
-Twilight is Henrique's Mac client for streaming a game from another computer. He loves [Moonlight](https://github.com/moonlight-stream/moonlight-qt)'s Qt client, and the open source community around it. Twilight is his fork of [Andy Grundman's](https://github.com/andygrundman/moonlight-qt) Core Audio spatial fork ([`andyg.coreaudio-spatial-mixer`](https://github.com/andygrundman/moonlight-qt/tree/andyg.coreaudio-spatial-mixer)), so he can keep helping macOS people specifically.
+Twilight is a Mac client for streaming a game from another computer. It is a fork of [Moonlight](https://github.com/moonlight-stream/moonlight-qt)'s Qt client through [Andy Grundman's](https://github.com/andygrundman/moonlight-qt) Core Audio spatial fork ([`andyg.coreaudio-spatial-mixer`](https://github.com/andygrundman/moonlight-qt/tree/andyg.coreaudio-spatial-mixer)), made to keep helping macOS people specifically. That Qt client is a joy, and so is the open source community around it.
 
 It sits beside Moonlight. Moonlight has not endorsed it.
-
-Twilight is GPL-3.0, the same license as Moonlight. See [`LICENSE`](LICENSE).
 
 ## On the Mac
 
