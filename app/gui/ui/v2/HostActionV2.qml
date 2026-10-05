@@ -6,12 +6,16 @@ Rectangle {
     property string symbol: "info.circle"
     property string title: ""
     property bool danger: false
+    property bool keyed: false
     signal triggered()
 
     width: parent ? parent.width : 0
     height: visible ? 44 : 0
     radius: 12
-    color: area.containsMouse ? (theme ? theme.fill : "transparent") : "transparent"
+    color: keyed ? (theme ? theme.selection : "transparent")
+                 : (area.containsMouse ? (theme ? theme.fill : "transparent") : "transparent")
+    border.width: keyed ? 1 : 0
+    border.color: theme ? theme.accent : "transparent"
 
     Row {
         anchors.fill: parent

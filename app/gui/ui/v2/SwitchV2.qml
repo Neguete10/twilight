@@ -5,7 +5,13 @@ Item {
     property var theme
     property bool checked: false
     property bool enabled: true
+    property bool keyed: false
     signal toggled(bool next)
+
+    function activate() {
+        if (root.enabled)
+            root.toggled(!root.checked)
+    }
 
     width: 44
     height: 26
@@ -15,8 +21,8 @@ Item {
         anchors.fill: parent
         radius: height / 2
         color: root.checked ? root.theme.accent : root.theme.fillStrong
-        border.width: 1
-        border.color: root.checked ? root.theme.accent : root.theme.stroke
+        border.width: root.keyed ? 2 : 1
+        border.color: root.keyed ? root.theme.ink : (root.checked ? root.theme.accent : root.theme.stroke)
 
         Rectangle {
             width: 20

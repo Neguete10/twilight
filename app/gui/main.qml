@@ -28,6 +28,9 @@ ApplicationWindow {
     property bool updatePromptClosing: false
     property bool updateInfoClosing: false
     property string classicTitle: ""
+    // The Classic toolbar hides while Twilight is showing, so the shell reads these.
+    property string pendingUpdateVersion: ""
+    property string pendingUpdateUrl: ""
     readonly property bool allowShellSwitch: initialView === "qrc:/gui/PcView.qml"
 
     function activateShell(version) {
@@ -209,6 +212,8 @@ ApplicationWindow {
         }
 
         AutoUpdateChecker.updateAvailable.connect(function(version, releaseUrl, downloadUrl, notes, manual) {
+            pendingUpdateVersion = version
+            pendingUpdateUrl = downloadUrl !== "" ? downloadUrl : releaseUrl
             openUpdatePrompt()
         })
         AutoUpdateChecker.upToDate.connect(function(version, manual) {

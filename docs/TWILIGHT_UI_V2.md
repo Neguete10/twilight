@@ -16,13 +16,13 @@ The main window toolbar has a **Twilight / Classic** control. Twilight is the le
 
 | Screen | What it does |
 | --- | --- |
-| Shell | Sidebar of hosts, app library, search, one-click stream, Desktop hero |
-| Host sheet | Wake, pair, rename, remove, network test, show hidden apps |
-| Settings | Video, Audio (including spatial, head tracking, and on macOS the host microphone), Input, Network, Advanced (codec and PyroWave GPU backend). Same `StreamingPreferences` object as Classic |
+| Shell | Sidebar of hosts, app library, search, one-click stream, Desktop hero. Arrow keys and the gamepad move between hosts and apps. Menu opens the host sheet or the app menu. Start opens settings. |
+| Host sheet | Wake, pair, rename, remove, network test, show hidden apps. Up and down move, confirm activates. |
+| Settings | Video, Audio (including spatial, head tracking, and on macOS the host microphone), Input, Network, Advanced (codec and PyroWave GPU backend). Same `StreamingPreferences` object as Classic. D-pad up and down walk the focus chain. Resolution and frame rate include a typed custom value, native and notch-excluded sizes, and the refresh rate of every attached display. |
 | Stream start | Twilight launch card, then the existing `Session` |
 | In-stream HUD | Glass chips for FPS, bitrate, and RTT, plus End, while a Twilight stream is open |
 
-Pin on an app tile is Moonlight's existing direct-launch flag (one app per host). Right-click a tile to hide or show it. That uses the same app model as Classic.
+Pin on an app tile is Moonlight's existing direct-launch flag (one app per host). Right-click a tile, or press the menu button, for launch, quit, direct launch, and hide. Hide stays off while that app is running or set to direct launch, unless it is already hidden. Show hidden apps on the host sheet is Classic's View All Apps. A running tile has its own Quit button, which quits the host app and does not start another. Help and an update pill sit in the shell header when there is something to open. Discord is in Settings, next to Help.
 
 ## Icons and type
 
@@ -49,8 +49,9 @@ Add pages under `app/gui/ui/v2/` and list them in `app/qml.qrc`. The shell is `S
 - SF Symbols are real only on macOS 11+. Other platforms get the geometric stand-ins.
 - No backdrop blur.
 - On macOS the HUD is a child of the SDL stream window and follows its position, including picture-in-picture. Elsewhere it sits at the top of the primary screen.
-- Gamepad grid navigation stays on Classic. Twilight is pointer-first, with preferences, New, and Escape shortcuts.
-- Custom resolution, custom frame rate, and packet size stay in Classic. Twilight can show a custom size that was already saved, and offers 720p, 1080p, 1440p, 4K, and the current display mode.
+- Packet size stays in Classic settings. Twilight does not edit it.
+- Network profiles stay on the Classic settings page. Twilight does not add a profile picker, and it does not change `StreamingPreferences::applyNetworkProfileSettings`.
+- Command-line pair, quit, and stream windows stay on the classic path.
 - Linux CI can compile the HUD parser test without Qt (`tests/twilight_hud_parse_test.cpp`). Loading the QML still needs a Qt build of the app. This VM does not treat a missing full Moonlight link as a V2 failure.
 
 ## Not in this pass

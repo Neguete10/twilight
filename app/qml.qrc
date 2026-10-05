@@ -36,6 +36,7 @@
         <file>gui/ui/v2/SettingsSheetV2.qml</file>
         <file>gui/ui/v2/HostSheetV2.qml</file>
         <file>gui/ui/v2/HostActionV2.qml</file>
+        <file>gui/ui/v2/MenuCardV2.qml</file>
         <file>gui/ui/v2/ShellV2.qml</file>
     </qresource>
     <qresource prefix="/licenses">
