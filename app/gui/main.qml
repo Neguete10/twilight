@@ -17,6 +17,16 @@ ApplicationWindow {
     // streamActive blocks a shell swap during a stream.
     property bool v2Active: false
     property bool streamActive: false
+
+    // Update prompt. Download and Not now both leave the app in place.
+    // Download only opens a browser URL after the user chooses it.
+    property bool updatePromptOpen: false
+    property bool updateInfoOpen: false
+    property bool updatePromptDeferred: false
+    property string updateInfoTitle: ""
+    property string updateInfoMessage: ""
+    property bool updatePromptClosing: false
+    property bool updateInfoClosing: false
     property string classicTitle: ""
     readonly property bool allowShellSwitch: initialView === "qrc:/gui/PcView.qml"
 
@@ -53,6 +63,88 @@ ApplicationWindow {
         else {
             stackView.forceActiveFocus()
         }
+    }
+
+    function updatePromptMessage() {
+        var version = AutoUpdateChecker.availableVersion
+        var notes = AutoUpdateChecker.releaseNotes
+        var hasDisk = AutoUpdateChecker.downloadUrl !== ""
+        var body = hasDisk
+                ? qsTr("Twilight %1 is available. This copy is %2.\n\nDownload opens the disk image in your browser. Twilight does not download or replace this app on its own. When the file finishes downloading, open the disk image and drag Twilight to Applications.")
+                    .arg(version).arg(SystemProperties.versionString)
+                : qsTr("Twilight %1 is available. This copy is %2.\n\nView release opens the release page in your browser. Twilight does not download or replace this app on its own.")
+                    .arg(version).arg(SystemProperties.versionString)
+        if (notes !== "")
+            body += "\n\n" + qsTr("What's new:") + "\n" + notes
+        return body
+    }
+
+    function updateConfirmText() {
+        return AutoUpdateChecker.downloadUrl !== "" ? qsTr("Download") : qsTr("View release")
+    }
+
+    function openUpdatePrompt() {
+        if (AutoUpdateChecker.availableVersion === "")
+            return
+        if (streamActive) {
+            updatePromptDeferred = true
+            return
+        }
+
+        updatePromptDeferred = false
+        updateInfoOpen = false
+        updatePromptOpen = true
+        if (!v2Active)
+            classicUpdateDialog.open()
+    }
+
+    function acceptPendingUpdate() {
+        if (updatePromptClosing)
+            return
+
+        updatePromptClosing = true
+        var url = AutoUpdateChecker.downloadUrl !== "" ? AutoUpdateChecker.downloadUrl : AutoUpdateChecker.releasePageUrl
+        updatePromptOpen = false
+        // The browser downloads the disk image. This process does not.
+        if (url !== "")
+            Qt.openUrlExternally(url)
+        if (classicUpdateDialog.visible)
+            classicUpdateDialog.close()
+        updatePromptClosing = false
+    }
+
+    function dismissPendingUpdate() {
+        if (updatePromptClosing)
+            return
+
+        updatePromptClosing = true
+        updatePromptOpen = false
+        updatePromptDeferred = false
+        if (classicUpdateDialog.visible)
+            classicUpdateDialog.close()
+        updatePromptClosing = false
+    }
+
+    function openUpdateInfo(title, message) {
+        if (streamActive)
+            return
+
+        updateInfoTitle = title
+        updateInfoMessage = message
+        updateInfoOpen = true
+        if (!v2Active)
+            classicUpdateInfoDialog.open()
+    }
+
+    function dismissUpdateInfo() {
+        if (updateInfoClosing)
+            return
+
+        updateInfoClosing = true
+        updateInfoOpen = false
+        if (classicUpdateInfoDialog.visible)
+            classicUpdateInfoDialog.close()
+        updateInfoClosing = false
     }
 
     id: window
@@ -114,6 +206,51 @@ ApplicationWindow {
         if (SystemProperties.unmappedGamepads) {
             unmappedGamepadDialog.unmappedGamepads = SystemProperties.unmappedGamepads
             unmappedGamepadDialog.open()
+        }
+
+        AutoUpdateChecker.updateAvailable.connect(function(version, releaseUrl, downloadUrl, notes, manual) {
+            openUpdatePrompt()
+        })
+        AutoUpdateChecker.upToDate.connect(function(version, manual) {
+            if (manual)
+                openUpdateInfo(qsTr("You're up to date"),
+                               qsTr("You're running Twilight %1. The latest release is %2.")
+                               .arg(SystemProperties.versionString).arg(version))
+        })
+        AutoUpdateChecker.checkFailed.connect(function(message, manual) {
+            if (manual)
+                openUpdateInfo(qsTr("Could not check for updates"), message)
+        })
+        AutoUpdateChecker.start()
+    }
+
+    onStreamActiveChanged: {
+        if (!streamActive && updatePromptDeferred)
+            openUpdatePrompt()
+    }
+
+    onV2ActiveChanged: {
+        // The prompt stays up across a shell change. Closing the Classic
+        // dialog here is not a dismissal.
+        if (updatePromptOpen) {
+            updatePromptClosing = true
+            if (v2Active) {
+                if (classicUpdateDialog.visible)
+                    classicUpdateDialog.close()
+            } else {
+                classicUpdateDialog.open()
+            }
+            updatePromptClosing = false
+        }
+        if (updateInfoOpen) {
+            updateInfoClosing = true
+            if (v2Active) {
+                if (classicUpdateInfoDialog.visible)
+                    classicUpdateInfoDialog.close()
+            } else {
+                classicUpdateInfoDialog.open()
+            }
+            updateInfoClosing = false
         }
     }
   
@@ -385,37 +522,18 @@ ApplicationWindow {
             }
 
             NavigableToolButton {
-                property string browserUrl: ""
-
                 id: updateButton
 
                 iconSource: "qrc:/res/update.svg"
+                visible: AutoUpdateChecker.availableVersion !== ""
 
                 ToolTip.delay: 1000
                 ToolTip.timeout: 3000
-                ToolTip.visible: hovered || visible
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Update available for Twilight: Version %1").arg(AutoUpdateChecker.availableVersion)
 
-                // Invisible until we get a callback notifying us that
-                // an update is available
-                visible: false
-
-                onClicked: {
-                    if (SystemProperties.hasBrowser) {
-                        Qt.openUrlExternally(browserUrl);
-                    }
-                }
-
-                function updateAvailable(version, url)
-                {
-                    ToolTip.text = qsTr("Update available for Moonlight: Version %1").arg(version)
-                    updateButton.browserUrl = url
-                    updateButton.visible = true
-                }
-
-                Component.onCompleted: {
-                    AutoUpdateChecker.onUpdateAvailable.connect(updateAvailable)
-                    AutoUpdateChecker.start()
-                }
+                // Reopens the choice. It does not download by itself.
+                onClicked: openUpdatePrompt()
 
                 Keys.onDownPressed: {
                     stackView.currentItem.forceActiveFocus(Qt.TabFocus)
@@ -595,6 +713,57 @@ ApplicationWindow {
             // start streaming, so fake it by wiping out the text each time.
             text = ""
         }
+    }
+
+    NavigableDialog {
+        id: classicUpdateDialog
+        title: qsTr("Update available")
+        modal: true
+        z: 100
+        standardButtons: Dialog.NoButton
+
+        onRejected: window.dismissPendingUpdate()
+        onOpened: notNowButton.forceActiveFocus()
+
+        ColumnLayout {
+            Label {
+                text: {
+                    var version = AutoUpdateChecker.availableVersion
+                    var notes = AutoUpdateChecker.releaseNotes
+                    var download = AutoUpdateChecker.downloadUrl
+                    return window.updatePromptMessage()
+                }
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+                Layout.preferredWidth: 420
+                Layout.maximumWidth: 420
+            }
+        }
+
+        footer: DialogButtonBox {
+            Button {
+                id: notNowButton
+                text: qsTr("Not now")
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+            Button {
+                text: {
+                    var download = AutoUpdateChecker.downloadUrl
+                    return window.updateConfirmText()
+                }
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: window.acceptPendingUpdate()
+            }
+        }
+    }
+
+    NavigableMessageDialog {
+        id: classicUpdateInfoDialog
+        standardButtons: Dialog.Ok
+        text: window.updateInfoTitle === "" ? window.updateInfoMessage
+                                            : (window.updateInfoTitle + "\n\n" + window.updateInfoMessage)
+        onAccepted: window.dismissUpdateInfo()
+        onRejected: window.dismissUpdateInfo()
     }
 
     NavigableDialog {

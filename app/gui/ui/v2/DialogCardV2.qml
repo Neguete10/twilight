@@ -17,10 +17,11 @@ Item {
     property string fieldPlaceholder: ""
     signal confirmed()
     signal canceled()
+    property int layer: 40
 
     anchors.fill: parent
     visible: open
-    z: open ? 40 : 0
+    z: open ? layer : 0
 
     function close() {
         canceled()
@@ -86,6 +87,7 @@ Item {
                 width: parent.width
                 theme: dialog.theme
                 text: dialog.message
+                textFormat: Text.PlainText
                 color: dialog.theme ? dialog.theme.secondary : "#AAA"
                 font.pixelSize: 14
                 wrapMode: Text.WordWrap

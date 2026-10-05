@@ -259,6 +259,7 @@ SOURCES += \
     gui/sfsymbolprovider.cpp \
     streaming/streamutils.cpp \
     backend/autoupdatechecker.cpp \
+    backend/updateversion.cpp \
     path.cpp \
     settings/mappingmanager.cpp \
     gui/sdlgamepadkeynavigation.cpp \
@@ -307,6 +308,7 @@ HEADERS += \
     streaming/video/decoder.h \
     streaming/streamutils.h \
     backend/autoupdatechecker.h \
+    backend/updateversion.h \
     path.h \
     settings/mappingmanager.h \
     gui/sdlgamepadkeynavigation.h \
@@ -727,6 +729,7 @@ macx {
     TWILIGHT_PLIST_MODE = desktop
     TWILIGHT_ENTITLEMENTS = $$PWD/deploy/macos/Twilight-MAS.entitlements
     twilight-mas {
+        DEFINES += TWILIGHT_MAS
         TWILIGHT_BUNDLE_ID = com.henrique.twilight
         TWILIGHT_DISPLAY_NAME = Twilight
         TWILIGHT_PLIST_MODE = mas

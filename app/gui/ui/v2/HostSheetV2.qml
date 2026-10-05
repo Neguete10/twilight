@@ -15,6 +15,7 @@ Item {
     property bool showHidden: false
     property string wakeNotice: ""
     property bool wakeNoticeSent: false
+    property bool escapeEnabled: true
 
     signal closeRequested()
     signal wakeRequested()
@@ -211,7 +212,7 @@ Item {
 
     Shortcut {
         sequence: "Escape"
-        enabled: sheet.open
+        enabled: sheet.open && sheet.escapeEnabled
         onActivated: sheet.closeRequested()
     }
 }

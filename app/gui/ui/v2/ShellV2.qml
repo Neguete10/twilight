@@ -8,6 +8,7 @@ import ComputerManager 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
 import StreamHudStats 1.0
+import AutoUpdateChecker 1.0
 
 Item {
     id: shell
@@ -47,7 +48,8 @@ Item {
     property string testMessage: ""
     property string toastText: ""
 
-    readonly property bool modalOpen: settingsOpen || hostSheetOpen || addOpen || pairOpen || renameOpen || deleteOpen || quitOpen || errorOpen || testOpen || leaveOpen || quitting
+    readonly property bool updateDialogOpen: Window.window !== null && (Window.window.updatePromptOpen || Window.window.updateInfoOpen)
+    readonly property bool modalOpen: settingsOpen || hostSheetOpen || addOpen || pairOpen || renameOpen || deleteOpen || quitOpen || errorOpen || testOpen || leaveOpen || updateDialogOpen || quitting
 
     readonly property string selectedName: {
         var rev = hostRevision
@@ -445,6 +447,24 @@ Item {
                 anchors.rightMargin: 16
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 8
+                TwTextV2 {
+                    visible: AutoUpdateChecker.availableVersion !== ""
+                    anchors.verticalCenter: parent.verticalCenter
+                    theme: shell.theme
+                    text: qsTr("Update")
+                    font.pixelSize: 13
+                    font.weight: Font.DemiBold
+                    color: theme.accent
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (Window.window && Window.window.openUpdatePrompt)
+                                Window.window.openUpdatePrompt()
+                        }
+                    }
+                }
                 TwTextV2 {
                     anchors.verticalCenter: parent.verticalCenter
                     theme: shell.theme
@@ -1111,6 +1131,7 @@ Item {
     HostSheetV2 {
         id: hostSheet
         theme: shell.theme
+        escapeEnabled: !shell.updateDialogOpen
         open: shell.hostSheetOpen
         hostName: shell.selectedName
         online: shell.selectedOnline
@@ -1139,6 +1160,7 @@ Item {
     SettingsSheetV2 {
         id: settingsSheet
         theme: shell.theme
+        escapeEnabled: !shell.updateDialogOpen
         open: shell.settingsOpen
         onCloseRequested: {
             StreamingPreferences.save()
@@ -1243,6 +1265,50 @@ Item {
         confirmText: qsTr("OK")
         onConfirmed: shell.testOpen = false
         onCanceled: shell.testOpen = false
+    }
+
+    DialogCardV2 {
+        theme: shell.theme
+        layer: 60
+        open: Window.window ? Window.window.updatePromptOpen : false
+        title: qsTr("Update available")
+        message: {
+            var version = AutoUpdateChecker.availableVersion
+            var notes = AutoUpdateChecker.releaseNotes
+            var download = AutoUpdateChecker.downloadUrl
+            return Window.window ? Window.window.updatePromptMessage() : ""
+        }
+        confirmText: {
+            var download = AutoUpdateChecker.downloadUrl
+            return Window.window ? Window.window.updateConfirmText() : qsTr("Download")
+        }
+        cancelText: qsTr("Not now")
+        onConfirmed: {
+            if (Window.window)
+                Window.window.acceptPendingUpdate()
+        }
+        onCanceled: {
+            if (Window.window)
+                Window.window.dismissPendingUpdate()
+        }
+    }
+
+    DialogCardV2 {
+        theme: shell.theme
+        layer: 60
+        open: Window.window ? Window.window.updateInfoOpen : false
+        title: Window.window ? Window.window.updateInfoTitle : ""
+        message: Window.window ? Window.window.updateInfoMessage : ""
+        showCancel: false
+        confirmText: qsTr("OK")
+        onConfirmed: {
+            if (Window.window)
+                Window.window.dismissUpdateInfo()
+        }
+        onCanceled: {
+            if (Window.window)
+                Window.window.dismissUpdateInfo()
+        }
     }
 
     DialogCardV2 {
