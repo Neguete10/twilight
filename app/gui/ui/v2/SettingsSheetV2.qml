@@ -18,6 +18,9 @@ Item {
     property var fpsOptions: []
     property bool customResOpen: false
     property bool customFpsOpen: false
+    property bool licensesOpen: false
+    property string licenseFile: ""
+    property string licenseText: ""
     property int focusPos: 0
     // Not bound to enableMicrophone. Turning the switch on asks macOS
     // first, and the preference stays off until that result arrives.
@@ -46,10 +49,13 @@ Item {
             SdlGamepadKeyNavigation.setUiNavMode(false)
             customResOpen = false
             customFpsOpen = false
+            licensesOpen = false
             hideTimer.start()
         }
     }
     onSectionChanged: {
+        if (section !== "about")
+            licensesOpen = false
         var list = chain()
         if (focusPos >= list.length)
             focusPos = 0
@@ -290,10 +296,6 @@ Item {
                     ids.push("section:" + sectionItem.navId)
             }
         }
-        if (SystemProperties.hasBrowser) {
-            ids.push("help")
-            ids.push("discord")
-        }
         if (section === "video") {
             ids.push("res")
             ids.push("fps")
@@ -345,7 +347,31 @@ Item {
             if (SystemProperties.hasDesktopEnvironment)
                 ids.push("uiMode")
         }
+        else if (section === "about") {
+            if (SystemProperties.hasBrowser)
+                ids.push("aboutSource")
+            ids.push("aboutLicenses")
+            if (licensesOpen && licenseNav) {
+                for (var n = 0; n < licenseNav.count; n++)
+                    ids.push("license:" + n)
+            }
+        }
         return ids
+    }
+
+    function showLicense(fileName) {
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET", "qrc:/licenses/" + fileName, false)
+        xhr.send()
+        licenseFile = fileName
+        licenseText = xhr.responseText ? xhr.responseText : qsTr("Could not read %1.").arg(fileName)
+    }
+
+    function toggleLicenses() {
+        licensesOpen = !licensesOpen
+        if (licensesOpen && licenseText === "")
+            showLicense("GPL-3.0.txt")
+        focusId("aboutLicenses")
     }
 
     function currentFocusId() {
@@ -360,8 +386,10 @@ Item {
     function itemFor(id) {
         if (id === "update") return updateRow
         if (id === "close") return closeHit
-        if (id === "help") return helpLink
-        if (id === "discord") return discordLink
+        if (id === "aboutSource") return aboutSource
+        if (id === "aboutLicenses") return aboutLicenses
+        if (id.indexOf("license:") === 0 && licenseNav)
+            return licenseNav.itemAt(parseInt(id.substring(8), 10))
         if (id === "res") return resChoice
         if (id === "fps") return fpsChoice
         if (id === "bitrate") return bitrateSlider
@@ -437,8 +465,15 @@ Item {
         var id = currentFocusId()
         if (updateRow) updateRow.keyed = id === "update"
         if (closeHit) closeHit.keyed = id === "close"
-        if (helpLink) helpLink.keyed = id === "help"
-        if (discordLink) discordLink.keyed = id === "discord"
+        if (aboutSource) aboutSource.keyed = id === "aboutSource"
+        if (aboutLicenses) aboutLicenses.keyed = id === "aboutLicenses"
+        if (licenseNav) {
+            for (var n = 0; n < licenseNav.count; n++) {
+                var licenseItem = licenseNav.itemAt(n)
+                if (licenseItem)
+                    licenseItem.keyed = id === ("license:" + n)
+            }
+        }
         if (sectionNav) {
             for (var s = 0; s < sectionNav.count; s++) {
                 var sectionItem = sectionNav.itemAt(s)
@@ -543,10 +578,15 @@ Item {
         }
         else if (id === "close")
             closeRequested()
-        else if (id === "help")
-            Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
-        else if (id === "discord")
-            Qt.openUrlExternally("https://moonlight-stream.org/discord")
+        else if (id === "aboutSource" && SystemProperties.hasBrowser)
+            Qt.openUrlExternally("https://github.com/Neguete10/twilight")
+        else if (id === "aboutLicenses")
+            toggleLicenses()
+        else if (id.indexOf("license:") === 0 && licenseNav) {
+            var pickedLicense = licenseNav.itemAt(parseInt(id.substring(8), 10))
+            if (pickedLicense)
+                showLicense(pickedLicense.fileName)
+        }
         else if (id.indexOf("section:") === 0)
             section = id.substring(8)
         else if (id === "res") resChoice.pickKey()
@@ -687,72 +727,6 @@ Item {
                                     sheet.focusId("section:" + model.sectionId)
                                 }
                             }
-                        }
-                    }
-
-                    Rectangle {
-                        id: helpLink
-                        property bool keyed: false
-                        visible: SystemProperties.hasBrowser
-                        width: parent.width
-                        height: visible ? 36 : 0
-                        radius: 10
-                        color: helpNav.containsMouse ? sheet.theme.fill : "transparent"
-                        border.width: keyed ? 2 : 0
-                        border.color: sheet.theme.accent
-                        Row {
-                            anchors.fill: parent
-                            anchors.leftMargin: 8
-                            spacing: 8
-                            SymbolV2 {
-                                symbol: "info.circle"
-                                pointSize: 15
-                                theme: sheet.theme
-                                tint: sheet.theme.accent
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            TwTextV2 {
-                                text: qsTr("Help")
-                                theme: sheet.theme
-                                font.pixelSize: 13
-                                color: sheet.theme.accent
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                        }
-                        MouseArea {
-                            id: helpNav
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
-                        }
-                    }
-
-                    Rectangle {
-                        id: discordLink
-                        property bool keyed: false
-                        visible: SystemProperties.hasBrowser
-                        width: parent.width
-                        height: visible ? 36 : 0
-                        radius: 10
-                        color: discordNav.containsMouse ? sheet.theme.fill : "transparent"
-                        border.width: keyed ? 2 : 0
-                        border.color: sheet.theme.accent
-                        TwTextV2 {
-                            anchors.fill: parent
-                            anchors.leftMargin: 8
-                            verticalAlignment: Text.AlignVCenter
-                            text: qsTr("Discord")
-                            theme: sheet.theme
-                            font.pixelSize: 13
-                            color: sheet.theme.accent
-                        }
-                        MouseArea {
-                            id: discordNav
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Qt.openUrlExternally("https://moonlight-stream.org/discord")
                         }
                     }
                 }
@@ -1360,20 +1334,159 @@ Item {
 
                     }
 
-                    Loader {
-                        id: aboutLoader
+                    Column {
+                        id: aboutBlock
                         width: parent.width
-                        active: sheet.section === "about"
-                        visible: active
-                        height: item ? item.height : 0
-                        source: "qrc:/gui/AboutNotices.qml"
-                        onLoaded: {
-                            item.width = aboutLoader.width
-                            item.theme = sheet.theme
+                        spacing: 14
+                        visible: sheet.section === "about"
+
+                        TwTextV2 {
+                            width: parent.width
+                            theme: sheet.theme
+                            text: qsTr("Version %1").arg(SystemProperties.versionString)
+                            font.pixelSize: 16
+                            font.weight: Font.DemiBold
                         }
-                        onWidthChanged: {
-                            if (item)
-                                item.width = width
+
+                        TwTextV2 {
+                            width: parent.width
+                            theme: sheet.theme
+                            color: sheet.theme.secondary
+                            font.pixelSize: 14
+                            wrapMode: Text.WordWrap
+                            text: qsTr("Twilight is a modified version of Moonlight Qt. It is not the upstream Moonlight project. This program is free software under the GNU General Public License, version 3, and it comes with absolutely no warranty. The source for this version is on GitHub.")
+                        }
+
+                        Row {
+                            spacing: 8
+
+                            Rectangle {
+                                id: aboutSource
+                                property bool keyed: false
+                                visible: SystemProperties.hasBrowser
+                                width: visible ? sourceLabel.implicitWidth + 28 : 0
+                                height: visible ? 32 : 0
+                                radius: 10
+                                color: sourceArea.containsMouse ? sheet.theme.fillStrong : "transparent"
+                                border.width: keyed ? 2 : 1
+                                border.color: keyed ? sheet.theme.accent : sheet.theme.stroke
+                                TwTextV2 {
+                                    id: sourceLabel
+                                    anchors.centerIn: parent
+                                    theme: sheet.theme
+                                    text: qsTr("Source")
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                    color: sheet.theme.accent
+                                }
+                                MouseArea {
+                                    id: sourceArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        sheet.focusId("aboutSource")
+                                        Qt.openUrlExternally("https://github.com/Neguete10/twilight")
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                id: aboutLicenses
+                                property bool keyed: false
+                                width: licensesLabel.implicitWidth + 28
+                                height: 32
+                                radius: 10
+                                color: licensesArea.containsMouse ? sheet.theme.fillStrong : "transparent"
+                                border.width: keyed ? 2 : 1
+                                border.color: keyed ? sheet.theme.accent : sheet.theme.stroke
+                                TwTextV2 {
+                                    id: licensesLabel
+                                    anchors.centerIn: parent
+                                    theme: sheet.theme
+                                    text: sheet.licensesOpen ? qsTr("Hide licenses") : qsTr("Licenses")
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                    color: sheet.theme.accent
+                                }
+                                MouseArea {
+                                    id: licensesArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: sheet.toggleLicenses()
+                                }
+                            }
+                        }
+
+                        Column {
+                            id: licenseBox
+                            width: parent.width
+                            spacing: 6
+                            visible: sheet.licensesOpen
+
+                            Repeater {
+                                id: licenseNav
+                                model: [
+                                    { label: qsTr("GNU GPL 3.0"), file: "GPL-3.0.txt" },
+                                    { label: qsTr("qmdnsengine (MIT)"), file: "qmdnsengine-MIT.txt" },
+                                    { label: qsTr("h264bitstream (LGPL 2.1)"), file: "h264bitstream-LGPL-2.1.txt" },
+                                    { label: qsTr("SDL_GameControllerDB (zlib)"), file: "SDL_GameControllerDB-Zlib.txt" },
+                                    { label: qsTr("FFmpeg (LGPL 2.1)"), file: "FFmpeg-LGPL-2.1.txt" },
+                                    { label: qsTr("OpenSSL (Apache 2.0)"), file: "OpenSSL-Apache-2.0.txt" },
+                                    { label: qsTr("Opus (BSD)"), file: "Opus-BSD.txt" },
+                                    { label: qsTr("SDL2 (zlib)"), file: "SDL2-Zlib.txt" },
+                                    { label: qsTr("SDL2_ttf (zlib)"), file: "SDL2_ttf-Zlib.txt" },
+                                    { label: qsTr("libplacebo (LGPL 2.1)"), file: "libplacebo-LGPL-2.1.txt" }
+                                ]
+
+                                Rectangle {
+                                    property string fileName: modelData.file
+                                    property bool keyed: false
+                                    width: licenseBox.width
+                                    height: 32
+                                    radius: 8
+                                    color: sheet.licenseFile === fileName ? sheet.theme.selection : (licenseHit.containsMouse ? sheet.theme.fill : "transparent")
+                                    border.width: keyed ? 2 : 0
+                                    border.color: sheet.theme.accent
+                                    TwTextV2 {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
+                                        verticalAlignment: Text.AlignVCenter
+                                        theme: sheet.theme
+                                        text: modelData.label
+                                        font.pixelSize: 13
+                                        font.weight: sheet.licenseFile === fileName ? Font.DemiBold : Font.Normal
+                                        color: sheet.licenseFile === fileName ? sheet.theme.accent : sheet.theme.ink
+                                        elide: Text.ElideRight
+                                    }
+                                    MouseArea {
+                                        id: licenseHit
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            sheet.showLicense(modelData.file)
+                                            sheet.focusId("license:" + index)
+                                        }
+                                    }
+                                }
+                            }
+
+                            TextEdit {
+                                width: parent.width
+                                height: text === "" ? 0 : contentHeight
+                                visible: sheet.licenseText !== ""
+                                readOnly: true
+                                selectByMouse: true
+                                wrapMode: TextEdit.Wrap
+                                textFormat: TextEdit.PlainText
+                                color: sheet.theme.secondary
+                                font.pixelSize: 11
+                                font.family: "Menlo"
+                                text: sheet.licenseText
+                            }
                         }
                     }
                 }

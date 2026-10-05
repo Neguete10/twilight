@@ -190,9 +190,6 @@ Item {
         var ids = []
         if (updateUrl !== "")
             ids.push("update")
-        if (SystemProperties.hasBrowser)
-            ids.push("help")
-        ids.push("about")
         ids.push("classic")
         ids.push("settings")
         return ids
@@ -368,12 +365,6 @@ Item {
         var id = ids[headerPos]
         if (id === "update" && updateUrl !== "")
             Qt.openUrlExternally(updateUrl)
-        else if (id === "help")
-            Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
-        else if (id === "about") {
-            settingsSheet.section = "about"
-            settingsOpen = true
-        }
         else if (id === "classic")
             requestShell("v1")
         else if (id === "settings")
@@ -826,60 +817,6 @@ Item {
                         onClicked: {
                             shell.navZone = "header"
                             Qt.openUrlExternally(shell.updateUrl)
-                        }
-                    }
-                }
-                Rectangle {
-                    id: helpHit
-                    visible: SystemProperties.hasBrowser
-                    width: visible ? helpLabel.implicitWidth + 28 : 0
-                    height: 36
-                    radius: 18
-                    color: helpArea.containsMouse ? theme.fillStrong : theme.fill
-                    border.width: shell.headerArmed("help") ? 2 : 1
-                    border.color: shell.headerArmed("help") ? theme.accent : theme.stroke
-                    anchors.verticalCenter: parent.verticalCenter
-                    TwTextV2 {
-                        id: helpLabel
-                        anchors.centerIn: parent
-                        theme: shell.theme
-                        text: qsTr("Help")
-                        font.pixelSize: 13
-                        font.weight: Font.DemiBold
-                    }
-                    MouseArea {
-                        id: helpArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
-                    }
-                }
-                Rectangle {
-                    id: aboutHit
-                    width: aboutLabel.implicitWidth + 20
-                    height: 36
-                    radius: 10
-                    color: "transparent"
-                    border.width: shell.headerArmed("about") ? 2 : 0
-                    border.color: theme.accent
-                    anchors.verticalCenter: parent.verticalCenter
-                    TwTextV2 {
-                        id: aboutLabel
-                        anchors.centerIn: parent
-                        theme: shell.theme
-                        text: qsTr("About")
-                        font.pixelSize: 13
-                        color: aboutArea.containsMouse ? theme.accent : theme.secondary
-                    }
-                    MouseArea {
-                        id: aboutArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            settingsSheet.section = "about"
-                            shell.settingsOpen = true
                         }
                     }
                 }
@@ -1832,12 +1769,6 @@ Item {
         entries: shell.appMenuEntries
         onPicked: shell.pickAppMenu(entryId)
         onDismissed: shell.appMenuOpen = false
-    }
-
-    Shortcut {
-        sequence: StandardKey.HelpContents
-        enabled: !shell.modalOpen && SystemProperties.hasBrowser
-        onActivated: Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
     }
 
     Item {
