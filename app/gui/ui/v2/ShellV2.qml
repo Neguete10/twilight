@@ -8,6 +8,7 @@ import ComputerManager 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
 import StreamHudStats 1.0
+import SdlGamepadKeyNavigation 1.0
 
 Item {
     id: shell
@@ -44,10 +45,25 @@ Item {
     property string pendingAppName: ""
     property int pendingAppIndex: -1
     property string errorMessage: ""
+    property string errorHelpUrl: "https://github.com/moonlight-stream/moonlight-docs/wiki/Troubleshooting"
+    property string errorHelpText: ""
     property string testMessage: ""
     property string toastText: ""
+    property bool quitOnly: false
+    property bool appMenuOpen: false
+    property int menuAppIndex: -1
+    property var appMenuEntries: []
+    property string navZone: "hosts"
+    property int appCursor: 0
+    property int headerPos: 0
+    property bool navActive: false
+    property var slotByIndex: ({})
+    property int slotCount: 0
 
-    readonly property bool modalOpen: settingsOpen || hostSheetOpen || addOpen || pairOpen || renameOpen || deleteOpen || quitOpen || errorOpen || testOpen || leaveOpen || quitting
+    readonly property string updateUrl: (Window.window && Window.window.pendingUpdateUrl) ? Window.window.pendingUpdateUrl : ""
+    readonly property string updateVersion: (Window.window && Window.window.pendingUpdateVersion) ? Window.window.pendingUpdateVersion : ""
+
+    readonly property bool modalOpen: settingsOpen || hostSheetOpen || addOpen || pairOpen || renameOpen || deleteOpen || quitOpen || errorOpen || testOpen || leaveOpen || quitting || appMenuOpen
 
     readonly property string selectedName: {
         var rev = hostRevision
@@ -96,6 +112,8 @@ Item {
     }
 
     function showError(text) {
+        errorHelpUrl = "https://github.com/moonlight-stream/moonlight-docs/wiki/Troubleshooting"
+        errorHelpText = qsTr("Click Help for possible solutions.")
         errorMessage = text
         errorOpen = true
     }
@@ -104,6 +122,9 @@ Item {
         var old = appModel
         appModel = null
         desktopIndex = -1
+        slotByIndex = ({})
+        slotCount = 0
+        appCursor = 0
         if (old)
             old.destroy()
     }
@@ -128,6 +149,323 @@ Item {
     function onAppsChanged() {
         appRevision = appRevision + 1
         refreshDesktop()
+        rebuildSlots()
+    }
+
+    function rebuildSlots() {
+        var map = {}
+        var countSlots = 0
+        if (desktopShown && desktopIndex >= 0) {
+            map[desktopIndex] = countSlots
+            countSlots = countSlots + 1
+        }
+        if (appModel) {
+            var count = appModel.appCount()
+            for (var i = 0; i < count; i++) {
+                if (i === desktopIndex)
+                    continue
+                var name = appModel.appNameAt(i)
+                if (query !== "" && name.toLowerCase().indexOf(query.toLowerCase()) === -1)
+                    continue
+                map[i] = countSlots
+                countSlots = countSlots + 1
+            }
+        }
+        slotByIndex = map
+        slotCount = countSlots
+        if (appCursor >= slotCount)
+            appCursor = Math.max(0, slotCount - 1)
+    }
+
+    function appIndexForCursor() {
+        var keys = Object.keys(slotByIndex)
+        for (var i = 0; i < keys.length; i++) {
+            if (slotByIndex[keys[i]] === appCursor)
+                return parseInt(keys[i], 10)
+        }
+        return -1
+    }
+
+    function headerIds() {
+        var ids = []
+        if (updateUrl !== "")
+            ids.push("update")
+        if (SystemProperties.hasBrowser)
+            ids.push("help")
+        ids.push("about")
+        ids.push("classic")
+        ids.push("settings")
+        return ids
+    }
+
+    function headerArmed(id) {
+        if (navZone !== "header" || !navActive)
+            return false
+        var ids = headerIds()
+        return headerPos >= 0 && headerPos < ids.length && ids[headerPos] === id
+    }
+
+    function focusNav() {
+        if (modalOpen)
+            return
+        if (navZone === "search")
+            searchInput.forceActiveFocus()
+        else
+            navSink.forceActiveFocus()
+    }
+
+    function revealAppCursor() {
+        if (!appFlick || slotCount <= 0)
+            return
+        var y = 0
+        var desktopSlots = desktopShown ? 1 : 0
+        if (desktopSlots && appCursor > 0)
+            y = 148 + 16
+        if (!(desktopSlots && appCursor === 0)) {
+            var gridIndex = appCursor - desktopSlots
+            var cols = appGrid ? Math.max(1, appGrid.columns) : 2
+            var row = Math.floor(Math.max(0, gridIndex) / cols)
+            y = y + row * (236 + 16)
+        }
+        if (y < appFlick.contentY)
+            appFlick.contentY = y
+        else if (y + 200 > appFlick.contentY + appFlick.height)
+            appFlick.contentY = Math.max(0, y + 236 - appFlick.height)
+    }
+
+    function moveHost(delta) {
+        var count = computerModel.computerCount()
+        if (count <= 0) {
+            navZone = "addHost"
+            return
+        }
+        if (navZone === "addHost") {
+            if (delta < 0) {
+                navZone = "hosts"
+                selectHost(count - 1, false)
+                hostList.positionViewAtIndex(count - 1, ListView.Contain)
+            }
+            return
+        }
+        if (navZone !== "hosts")
+            navZone = "hosts"
+        var next = selectedIndex + delta
+        if (next < 0) {
+            navZone = "header"
+            headerPos = 0
+            return
+        }
+        if (next >= count) {
+            navZone = "addHost"
+            return
+        }
+        selectHost(next, false)
+        hostList.positionViewAtIndex(next, ListView.Contain)
+    }
+
+    function enterApps() {
+        if (selectedIndex < 0 || !selectedPaired) {
+            if (selectedIndex >= 0 && selectedOnline && !selectedPaired)
+                beginPair()
+            else if (selectedIndex >= 0)
+                hostSheetOpen = true
+            return
+        }
+        rebuildSlots()
+        navZone = slotCount > 0 ? "apps" : "hosts"
+        if (appCursor < 0 || appCursor >= slotCount)
+            appCursor = 0
+        revealAppCursor()
+    }
+
+    function moveApp(dx, dy) {
+        if (slotCount <= 0) {
+            navZone = "hosts"
+            return
+        }
+        var desktopSlots = desktopShown ? 1 : 0
+        var cols = appGrid ? Math.max(1, appGrid.columns) : 2
+        if (desktopSlots && appCursor === 0) {
+            if (dx < 0) {
+                navZone = "hosts"
+                return
+            }
+            if (dy > 0 && slotCount > 1)
+                appCursor = 1
+            else if (dy < 0) {
+                navZone = "search"
+                searchInput.forceActiveFocus()
+            }
+            revealAppCursor()
+            return
+        }
+        var gridIndex = appCursor - desktopSlots
+        var col = gridIndex % cols
+        if (dx < 0 && col === 0) {
+            navZone = "hosts"
+            return
+        }
+        if (dy < 0 && gridIndex < cols) {
+            if (desktopSlots)
+                appCursor = 0
+            else {
+                navZone = "search"
+                searchInput.forceActiveFocus()
+            }
+            revealAppCursor()
+            return
+        }
+        var next = gridIndex + dx + dy * cols
+        var gridCount = slotCount - desktopSlots
+        if (next < 0 || next >= gridCount)
+            return
+        appCursor = next + desktopSlots
+        revealAppCursor()
+    }
+
+    function activateHost() {
+        if (navZone === "addHost" || computerModel.computerCount() === 0) {
+            addOpen = true
+            return
+        }
+        if (selectedIndex < 0)
+            return
+        if (!selectedOnline) {
+            hostSheetOpen = true
+            return
+        }
+        if (!selectedPaired) {
+            beginPair()
+            return
+        }
+        if (!selectedSupported) {
+            showError(qsTr("This build of Twilight does not support the GeForce Experience version on %1.").arg(selectedName))
+            return
+        }
+        var directIndex = appModel ? appModel.getDirectLaunchAppIndex() : -1
+        if (directIndex >= 0) {
+            directLaunchConsumed = false
+            considerDirectLaunch()
+            return
+        }
+        enterApps()
+    }
+
+    function activateApp() {
+        var index = appIndexForCursor()
+        if (index < 0 || !appModel)
+            return
+        if (appModel.appRunningAt(index))
+            openAppMenu(index)
+        else
+            startApp(index, true)
+    }
+
+    function activateHeader() {
+        var ids = headerIds()
+        if (headerPos < 0 || headerPos >= ids.length)
+            return
+        var id = ids[headerPos]
+        if (id === "update" && updateUrl !== "")
+            Qt.openUrlExternally(updateUrl)
+        else if (id === "help")
+            Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
+        else if (id === "about") {
+            settingsSheet.section = "about"
+            settingsOpen = true
+        }
+        else if (id === "classic")
+            requestShell("v1")
+        else if (id === "settings")
+            settingsOpen = true
+    }
+
+    function moveHeader(delta) {
+        var ids = headerIds()
+        if (ids.length === 0)
+            return
+        var next = headerPos + delta
+        if (next < 0)
+            next = 0
+        if (next >= ids.length)
+            next = ids.length - 1
+        headerPos = next
+    }
+
+    function canHideApp(index) {
+        if (!appModel || index < 0)
+            return false
+        return appModel.appHiddenAt(index) || (!appModel.appRunningAt(index) && !appModel.appDirectLaunchAt(index))
+    }
+
+    function trySetHidden(index, hidden) {
+        if (!appModel || index < 0)
+            return
+        if (hidden && !canHideApp(index)) {
+            if (appModel.appRunningAt(index))
+                toast(qsTr("Quit %1 before hiding it.").arg(appModel.appNameAt(index)))
+            else
+                toast(qsTr("Turn off direct launch before hiding %1.").arg(appModel.appNameAt(index)))
+            return
+        }
+        appModel.setAppHidden(index, hidden)
+        if (hidden)
+            toast(qsTr("Hidden. It stays here so you can show it again. Host → Show hidden apps brings it back later."))
+    }
+
+    function trySetDirect(index, next) {
+        if (!appModel || index < 0)
+            return
+        if (next && appModel.appHiddenAt(index)) {
+            toast(qsTr("Show %1 in the library before turning on direct launch.").arg(appModel.appNameAt(index)))
+            return
+        }
+        appModel.setAppDirectLaunch(index, next)
+    }
+
+    function openAppMenu(index) {
+        if (!appModel || index < 0)
+            return
+        menuAppIndex = index
+        var running = appModel.appRunningAt(index)
+        var hidden = appModel.appHiddenAt(index)
+        var direct = appModel.appDirectLaunchAt(index)
+        var entries = [{ id: "launch", text: running ? qsTr("Resume") : qsTr("Launch"), enabled: true }]
+        if (running)
+            entries.push({ id: "quit", text: qsTr("Quit"), enabled: true })
+        entries.push({ id: "direct", text: direct ? qsTr("Direct launch on") : qsTr("Direct launch"), enabled: !hidden })
+        entries.push({ id: "hide", text: hidden ? qsTr("Show in library") : qsTr("Hide"), enabled: canHideApp(index) })
+        appMenuEntries = entries
+        appMenuOpen = true
+    }
+
+    function pickAppMenu(id) {
+        var index = menuAppIndex
+        appMenuOpen = false
+        if (!appModel || index < 0)
+            return
+        if (id === "launch")
+            startApp(index, true)
+        else if (id === "quit")
+            requestQuitOnly()
+        else if (id === "direct")
+            trySetDirect(index, !appModel.appDirectLaunchAt(index))
+        else if (id === "hide")
+            trySetHidden(index, !appModel.appHiddenAt(index))
+    }
+
+    function requestQuitOnly() {
+        if (!appModel || quitting)
+            return
+        if (appModel.getRunningAppId() === 0) {
+            toast(qsTr("Nothing is running on this host."))
+            return
+        }
+        quitOnly = true
+        pendingAppIndex = -1
+        pendingAppName = ""
+        quitAppName = appModel.getRunningAppName()
+        quitOpen = true
     }
 
     function rebuildApps() {
@@ -181,6 +519,7 @@ Item {
         var count = computerModel.computerCount()
         if (count <= 0) {
             selectHost(-1, false)
+            navZone = "addHost"
             return
         }
         if (selectedIndex < 0 || selectedIndex >= count || !appModel) {
@@ -242,6 +581,7 @@ Item {
         if (runningId !== 0 && runningId !== appId) {
             if (!quitExisting)
                 return
+            quitOnly = false
             pendingAppIndex = appIndex
             pendingAppName = name
             quitAppName = appModel.getRunningAppName()
@@ -268,12 +608,17 @@ Item {
 
     function afterQuit(error) {
         ComputerManager.quitAppCompleted.disconnect(afterQuit)
+        var launchNext = !quitOnly
+        var nextIndex = pendingAppIndex
+        var nextName = pendingAppName
+        quitOnly = false
         quitting = false
         if (error !== undefined && error !== null && ("" + error) !== "") {
             showError("" + error)
             return
         }
-        launchSession(pendingAppIndex, pendingAppName, false)
+        if (launchNext)
+            launchSession(nextIndex, nextName, false)
     }
 
     function addComplete(success, detectedPortBlocking) {
@@ -282,7 +627,10 @@ Item {
         var text = qsTr("Unable to connect to the specified PC.")
         if (detectedPortBlocking)
             text += "\n\n" + qsTr("This PC's Internet connection is blocking Twilight. Streaming over the Internet may not work while connected to this network.")
-        showError(text)
+        errorHelpUrl = "https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide"
+        errorHelpText = detectedPortBlocking ? "" : qsTr("Click Help for possible solutions.")
+        errorMessage = text
+        errorOpen = true
     }
 
     function pairComplete(error) {
@@ -346,6 +694,7 @@ Item {
     function requestShell(version) {
         if (Window.window && Window.window.streamActive)
             return
+        SdlGamepadKeyNavigation.setUiNavMode(false)
         persistPreferences()
         if (Window.window && Window.window.activateShell)
             Window.window.activateShell(version)
@@ -372,8 +721,13 @@ Item {
         computerModel.connectionTestCompleted.connect(testComplete)
         computerModel.wakeCompleted.connect(wakeComplete)
         noteComputersChanged()
-        forceActiveFocus()
+        if (SdlGamepadKeyNavigation.getConnectedGamepads() > 0 && selectedIndex < 0 && computerModel.computerCount() > 0)
+            selectHost(0, false)
+        focusNav()
     }
+
+    onModalOpenChanged: if (!modalOpen) focusNav()
+    onQueryChanged: rebuildSlots()
 
     // Component.onDestruction is Qt 5.10. Preferences are written when the
     // settings sheet closes, when the shell switches, and when the window closes.
@@ -445,12 +799,79 @@ Item {
                 anchors.rightMargin: 16
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 8
-                TwTextV2 {
+                Rectangle {
+                    id: updateHit
+                    visible: shell.updateUrl !== ""
+                    width: visible ? updateLabel.implicitWidth + 28 : 0
+                    height: 36
+                    radius: 18
+                    color: updateArea.containsMouse ? theme.fillStrong : theme.fill
+                    border.width: shell.headerArmed("update") ? 2 : 1
+                    border.color: shell.headerArmed("update") ? theme.accent : theme.stroke
                     anchors.verticalCenter: parent.verticalCenter
-                    theme: shell.theme
-                    text: qsTr("About")
-                    font.pixelSize: 13
-                    color: aboutArea.containsMouse ? theme.accent : theme.secondary
+                    TwTextV2 {
+                        id: updateLabel
+                        anchors.centerIn: parent
+                        theme: shell.theme
+                        text: qsTr("Update %1").arg(shell.updateVersion)
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                        color: theme.accent
+                    }
+                    MouseArea {
+                        id: updateArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            shell.navZone = "header"
+                            Qt.openUrlExternally(shell.updateUrl)
+                        }
+                    }
+                }
+                Rectangle {
+                    id: helpHit
+                    visible: SystemProperties.hasBrowser
+                    width: visible ? helpLabel.implicitWidth + 28 : 0
+                    height: 36
+                    radius: 18
+                    color: helpArea.containsMouse ? theme.fillStrong : theme.fill
+                    border.width: shell.headerArmed("help") ? 2 : 1
+                    border.color: shell.headerArmed("help") ? theme.accent : theme.stroke
+                    anchors.verticalCenter: parent.verticalCenter
+                    TwTextV2 {
+                        id: helpLabel
+                        anchors.centerIn: parent
+                        theme: shell.theme
+                        text: qsTr("Help")
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                    }
+                    MouseArea {
+                        id: helpArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
+                    }
+                }
+                Rectangle {
+                    id: aboutHit
+                    width: aboutLabel.implicitWidth + 20
+                    height: 36
+                    radius: 10
+                    color: "transparent"
+                    border.width: shell.headerArmed("about") ? 2 : 0
+                    border.color: theme.accent
+                    anchors.verticalCenter: parent.verticalCenter
+                    TwTextV2 {
+                        id: aboutLabel
+                        anchors.centerIn: parent
+                        theme: shell.theme
+                        text: qsTr("About")
+                        font.pixelSize: 13
+                        color: aboutArea.containsMouse ? theme.accent : theme.secondary
+                    }
                     MouseArea {
                         id: aboutArea
                         anchors.fill: parent
@@ -463,9 +884,11 @@ Item {
                     }
                 }
                 UiVersionToggle {
+                    id: versionToggle
                     anchors.verticalCenter: parent.verticalCenter
                     darkChrome: theme.dark
                     currentVersion: "v2"
+                    keyed: shell.headerArmed("classic")
                     onRequestVersion: shell.requestShell(version)
                 }
                 Rectangle {
@@ -473,8 +896,8 @@ Item {
                     height: 36
                     radius: 18
                     color: gearArea.containsMouse ? theme.fillStrong : theme.fill
-                    border.width: 1
-                    border.color: theme.stroke
+                    border.width: shell.headerArmed("settings") ? 2 : 1
+                    border.color: shell.headerArmed("settings") ? theme.accent : theme.stroke
                     anchors.verticalCenter: parent.verticalCenter
                     SymbolV2 {
                         anchors.centerIn: parent
@@ -549,6 +972,8 @@ Item {
                         height: 56
                         radius: 12
                         color: shell.selectedIndex === index ? theme.selection : (hostArea.containsMouse ? theme.fill : "transparent")
+                        border.width: shell.navZone === "hosts" && shell.navActive && shell.selectedIndex === index ? 2 : 0
+                        border.color: theme.accent
 
                         Rectangle {
                             width: 8
@@ -593,7 +1018,18 @@ Item {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: shell.selectHost(index, true)
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onClicked: {
+                                shell.navZone = "hosts"
+                                if (mouse.button === Qt.RightButton) {
+                                    shell.selectHost(index, false)
+                                    shell.hostSheetOpen = true
+                                }
+                                else {
+                                    shell.selectHost(index, true)
+                                }
+                                shell.focusNav()
+                            }
                         }
                     }
                 }
@@ -619,8 +1055,8 @@ Item {
                     height: 40
                     radius: 12
                     color: addArea.containsMouse ? theme.accent : theme.fill
-                    border.width: 1
-                    border.color: addArea.containsMouse ? theme.accent : theme.stroke
+                    border.width: shell.navZone === "addHost" && shell.navActive ? 2 : 1
+                    border.color: (addArea.containsMouse || (shell.navZone === "addHost" && shell.navActive)) ? theme.accent : theme.stroke
                     Row {
                         anchors.centerIn: parent
                         spacing: 8
@@ -645,7 +1081,10 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: shell.addOpen = true
+                        onClicked: {
+                            shell.navZone = "addHost"
+                            shell.addOpen = true
+                        }
                     }
                 }
             }
@@ -840,6 +1279,21 @@ Item {
                             selectByMouse: true
                             text: shell.query
                             onTextChanged: shell.query = text
+                            onActiveFocusChanged: if (activeFocus) shell.navZone = "search"
+                            Keys.onDownPressed: {
+                                shell.navZone = "apps"
+                                shell.focusNav()
+                            }
+                            Keys.onEscapePressed: {
+                                text = ""
+                                shell.navZone = "apps"
+                                shell.focusNav()
+                            }
+                            Keys.onUpPressed: {
+                                shell.navZone = "header"
+                                shell.headerPos = 0
+                                shell.focusNav()
+                            }
                         }
                         TwTextV2 {
                             anchors.fill: searchInput
@@ -856,6 +1310,7 @@ Item {
                     }
 
                     Flickable {
+                        id: appFlick
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: libraryHeader.bottom
@@ -878,8 +1333,8 @@ Item {
                                 height: visible ? 148 : 0
                                 radius: 18
                                 color: theme.glass
-                                border.width: 1
-                                border.color: theme.stroke
+                                border.width: shell.navZone === "apps" && shell.navActive && shell.slotByIndex[shell.desktopIndex] === shell.appCursor ? 2 : 1
+                                border.color: shell.navZone === "apps" && shell.navActive && shell.slotByIndex[shell.desktopIndex] === shell.appCursor ? theme.accent : theme.stroke
                                 clip: true
 
                                 Image {
@@ -920,33 +1375,83 @@ Item {
                                         text: qsTr("Stream the host display.")
                                     }
                                 }
-                                Rectangle {
-                                    id: streamButton
+                                Column {
                                     anchors.right: parent.right
                                     anchors.rightMargin: 20
                                     anchors.verticalCenter: parent.verticalCenter
-                                    width: streamLabel.implicitWidth + 36
-                                    height: 40
-                                    radius: 12
-                                    color: theme.accent
-                                    TwTextV2 {
-                                        id: streamLabel
-                                        anchors.centerIn: parent
-                                        theme: shell.theme
-                                        text: qsTr("Stream")
-                                        color: theme.accentInk
-                                        font.pixelSize: 14
-                                        font.weight: Font.DemiBold
+                                    spacing: 8
+                                    Rectangle {
+                                        id: streamButton
+                                        width: streamLabel.implicitWidth + 36
+                                        height: 40
+                                        radius: 12
+                                        color: theme.accent
+                                        TwTextV2 {
+                                            id: streamLabel
+                                            anchors.centerIn: parent
+                                            theme: shell.theme
+                                            text: shell.appModel && shell.appModel.appRunningAt(shell.desktopIndex) ? qsTr("Resume") : qsTr("Stream")
+                                            color: theme.accentInk
+                                            font.pixelSize: 14
+                                            font.weight: Font.DemiBold
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: shell.startApp(shell.desktopIndex, true)
+                                        }
                                     }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: shell.startApp(shell.desktopIndex, true)
+                                    Row {
+                                        spacing: 8
+                                        anchors.right: parent.right
+                                        Rectangle {
+                                            visible: shell.appModel && shell.appModel.appRunningAt(shell.desktopIndex)
+                                            width: visible ? desktopQuitLabel.implicitWidth + 24 : 0
+                                            height: 32
+                                            radius: 10
+                                            color: theme.danger
+                                            TwTextV2 {
+                                                id: desktopQuitLabel
+                                                anchors.centerIn: parent
+                                                theme: shell.theme
+                                                text: qsTr("Quit")
+                                                color: "#FFFFFF"
+                                                font.pixelSize: 13
+                                                font.weight: Font.DemiBold
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: shell.requestQuitOnly()
+                                            }
+                                        }
+                                        Rectangle {
+                                            width: 32
+                                            height: 32
+                                            radius: 10
+                                            color: theme.fill
+                                            border.width: 1
+                                            border.color: theme.stroke
+                                            opacity: shell.canHideApp(shell.desktopIndex) ? 1 : 0.4
+                                            SymbolV2 {
+                                                anchors.centerIn: parent
+                                                symbol: shell.appModel && shell.appModel.appHiddenAt(shell.desktopIndex) ? "eye" : "eye.slash"
+                                                pointSize: 14
+                                                theme: shell.theme
+                                                tint: theme.ink
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: shell.trySetHidden(shell.desktopIndex, !(shell.appModel && shell.appModel.appHiddenAt(shell.desktopIndex)))
+                                            }
+                                        }
                                     }
                                 }
                             }
 
                             Grid {
+                                id: appGrid
                                 width: parent.width
                                 columns: Math.max(2, Math.floor(width / 196))
                                 spacing: 16
@@ -973,8 +1478,8 @@ Item {
                                                 height: 180
                                                 radius: 14
                                                 color: theme.fill
-                                                border.width: model.running ? 2 : 1
-                                                border.color: model.running ? theme.accent : theme.stroke
+                                                border.width: (model.running || (shell.navZone === "apps" && shell.navActive && shell.slotByIndex[index] === shell.appCursor)) ? 2 : 1
+                                                border.color: (model.running || (shell.navZone === "apps" && shell.navActive && shell.slotByIndex[index] === shell.appCursor)) ? theme.accent : theme.stroke
                                                 clip: true
                                                 Image {
                                                     anchors.fill: parent
@@ -1021,7 +1526,55 @@ Item {
                                                     MouseArea {
                                                         anchors.fill: parent
                                                         cursorShape: Qt.PointingHandCursor
-                                                        onClicked: shell.appModel.setAppDirectLaunch(index, !model.directLaunch)
+                                                        onClicked: shell.trySetDirect(index, !model.directLaunch)
+                                                    }
+                                                }
+                                                Rectangle {
+                                                    z: 3
+                                                    anchors.left: parent.left
+                                                    anchors.bottom: parent.bottom
+                                                    anchors.margins: 8
+                                                    width: 28
+                                                    height: 28
+                                                    radius: 14
+                                                    color: Qt.rgba(0, 0, 0, 0.45)
+                                                    opacity: shell.canHideApp(index) ? 1 : 0.4
+                                                    SymbolV2 {
+                                                        anchors.centerIn: parent
+                                                        symbol: model.hidden ? "eye" : "eye.slash"
+                                                        pointSize: 13
+                                                        theme: shell.theme
+                                                        tint: "#FFFFFF"
+                                                    }
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: shell.trySetHidden(index, !model.hidden)
+                                                    }
+                                                }
+                                                Rectangle {
+                                                    z: 3
+                                                    visible: model.running
+                                                    anchors.right: parent.right
+                                                    anchors.bottom: parent.bottom
+                                                    anchors.margins: 8
+                                                    width: quitTileLabel.implicitWidth + 16
+                                                    height: 28
+                                                    radius: 14
+                                                    color: theme.danger
+                                                    TwTextV2 {
+                                                        id: quitTileLabel
+                                                        anchors.centerIn: parent
+                                                        theme: shell.theme
+                                                        text: qsTr("Quit")
+                                                        color: "#FFFFFF"
+                                                        font.pixelSize: 12
+                                                        font.weight: Font.DemiBold
+                                                    }
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: shell.requestQuitOnly()
                                                     }
                                                 }
                                                 MouseArea {
@@ -1030,10 +1583,15 @@ Item {
                                                     cursorShape: Qt.PointingHandCursor
                                                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                                                     onClicked: {
+                                                        shell.navZone = "apps"
+                                                        shell.appCursor = shell.slotByIndex[index] !== undefined ? shell.slotByIndex[index] : shell.appCursor
                                                         if (mouse.button === Qt.RightButton)
-                                                            shell.appModel.setAppHidden(index, !model.hidden)
-                                                        else
+                                                            shell.openAppMenu(index)
+                                                        else if (!model.running)
                                                             shell.startApp(index, true)
+                                                        else
+                                                            shell.openAppMenu(index)
+                                                        shell.focusNav()
                                                     }
                                                 }
                                             }
@@ -1121,6 +1679,7 @@ Item {
         supported: shell.selectedSupported
         details: shell.selectedDetails
         showHidden: shell.showHidden
+        keysOn: shell.hostSheetOpen && !shell.renameOpen && !shell.deleteOpen && !shell.pairOpen && !shell.errorOpen && !shell.testOpen && !shell.quitOpen && !shell.addOpen && !shell.leaveOpen && !shell.settingsOpen && !shell.appMenuOpen
         onCloseRequested: {
             hostSheet.wakeNotice = ""
             shell.hostSheetOpen = false
@@ -1211,8 +1770,10 @@ Item {
         theme: shell.theme
         open: shell.quitOpen
         title: qsTr("Quit the running app")
-        message: qsTr("Quit %1 before starting %2? Unsaved progress on the host will be lost.").arg(shell.quitAppName).arg(shell.pendingAppName)
-        confirmText: qsTr("Quit and stream")
+        message: shell.quitOnly
+                ? qsTr("Quit %1? Unsaved progress on the host will be lost.").arg(shell.quitAppName)
+                : qsTr("Quit %1 before starting %2? Unsaved progress on the host will be lost.").arg(shell.quitAppName).arg(shell.pendingAppName)
+        confirmText: shell.quitOnly ? qsTr("Quit") : qsTr("Quit and stream")
         danger: true
         onConfirmed: {
             shell.quitOpen = false
@@ -1220,7 +1781,10 @@ Item {
             ComputerManager.quitAppCompleted.connect(shell.afterQuit)
             shell.appModel.quitRunningApp()
         }
-        onCanceled: shell.quitOpen = false
+        onCanceled: {
+            shell.quitOnly = false
+            shell.quitOpen = false
+        }
     }
 
     DialogCardV2 {
@@ -1228,6 +1792,8 @@ Item {
         open: shell.errorOpen
         title: qsTr("Something went wrong")
         message: shell.errorMessage
+        helpUrl: shell.errorHelpUrl
+        helpText: shell.errorHelpText
         showCancel: false
         confirmText: qsTr("OK")
         onConfirmed: shell.errorOpen = false
@@ -1257,5 +1823,94 @@ Item {
             Qt.quit()
         }
         onCanceled: shell.leaveOpen = false
+    }
+
+    MenuCardV2 {
+        theme: shell.theme
+        open: shell.appMenuOpen
+        title: shell.menuAppIndex >= 0 && shell.appModel ? shell.appModel.appNameAt(shell.menuAppIndex) : ""
+        entries: shell.appMenuEntries
+        onPicked: shell.pickAppMenu(entryId)
+        onDismissed: shell.appMenuOpen = false
+    }
+
+    Shortcut {
+        sequence: StandardKey.HelpContents
+        enabled: !shell.modalOpen && SystemProperties.hasBrowser
+        onActivated: Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
+    }
+
+    Item {
+        id: navSink
+        focus: !shell.modalOpen && shell.navZone !== "search"
+        onActiveFocusChanged: shell.navActive = activeFocus
+        Keys.onPressed: {
+            if (shell.modalOpen || shell.navZone === "search")
+                return
+            var handled = false
+            if (event.key === Qt.Key_Hangup) {
+                shell.settingsOpen = true
+                handled = true
+            }
+            else if (event.key === Qt.Key_Menu) {
+                if (shell.navZone === "apps") {
+                    var appIndex = shell.appIndexForCursor()
+                    if (appIndex >= 0)
+                        shell.openAppMenu(appIndex)
+                }
+                else if (shell.selectedIndex >= 0)
+                    shell.hostSheetOpen = true
+                handled = true
+            }
+            else if (event.key === Qt.Key_Delete) {
+                if (shell.navZone !== "apps" && shell.selectedIndex >= 0)
+                    shell.deleteOpen = true
+                handled = true
+            }
+            else if (shell.navZone === "header") {
+                if (event.key === Qt.Key_Left)
+                    shell.moveHeader(-1)
+                else if (event.key === Qt.Key_Right)
+                    shell.moveHeader(1)
+                else if (event.key === Qt.Key_Down)
+                    shell.navZone = computerModel.computerCount() > 0 ? "hosts" : "addHost"
+                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)
+                    shell.activateHeader()
+                else
+                    return
+                handled = true
+            }
+            else if (shell.navZone === "apps") {
+                if (event.key === Qt.Key_Left)
+                    shell.moveApp(-1, 0)
+                else if (event.key === Qt.Key_Right)
+                    shell.moveApp(1, 0)
+                else if (event.key === Qt.Key_Up)
+                    shell.moveApp(0, -1)
+                else if (event.key === Qt.Key_Down)
+                    shell.moveApp(0, 1)
+                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)
+                    shell.activateApp()
+                else
+                    return
+                handled = true
+            }
+            else {
+                if (event.key === Qt.Key_Up)
+                    shell.moveHost(-1)
+                else if (event.key === Qt.Key_Down)
+                    shell.moveHost(1)
+                else if (event.key === Qt.Key_Right)
+                    shell.enterApps()
+                else if (event.key === Qt.Key_Left)
+                    shell.navZone = "hosts"
+                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)
+                    shell.activateHost()
+                else
+                    return
+                handled = true
+            }
+            event.accepted = handled
+        }
     }
 }

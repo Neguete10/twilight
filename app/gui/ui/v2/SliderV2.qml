@@ -7,7 +7,17 @@ Item {
     property real to: 1
     property real value: 0
     property real stepSize: 500
+    property bool keyed: false
     signal moved(real value)
+
+    function nudge(dir) {
+        var next = root.value + dir * root.stepSize
+        if (next < root.from)
+            next = root.from
+        if (next > root.to)
+            next = root.to
+        root.moved(next)
+    }
 
     implicitHeight: 28
     height: 28
@@ -48,8 +58,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         x: Math.max(0, Math.min(root.width - width, root.fraction * root.width - width / 2))
         color: "#FFFFFF"
-        border.width: 1
-        border.color: root.theme.stroke
+        border.width: root.keyed ? 2 : 1
+        border.color: root.keyed ? root.theme.accent : root.theme.stroke
     }
 
     MouseArea {

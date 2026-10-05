@@ -4,6 +4,7 @@ Item {
     id: root
     property bool darkChrome: true
     property string currentVersion: "v2"
+    property bool keyed: false
     signal requestVersion(string version)
 
     implicitWidth: 208
@@ -19,8 +20,8 @@ Item {
         anchors.fill: parent
         radius: height / 2
         color: root.track
-        border.width: 1
-        border.color: root.edge
+        border.width: root.keyed ? 2 : 1
+        border.color: root.keyed ? (root.darkChrome ? "#F5F5F7" : "#0B57D0") : root.edge
 
         Rectangle {
             id: pill

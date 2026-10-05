@@ -15,6 +15,9 @@ Item {
     property bool showHidden: false
     property string wakeNotice: ""
     property bool wakeNoticeSent: false
+    // False while a dialog is covering the sheet, so this chain does not steal keys.
+    property bool keysOn: false
+    property int focusPos: 0
 
     signal closeRequested()
     signal wakeRequested()
@@ -30,8 +33,82 @@ Item {
     enabled: open
     z: 20
     Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-    onOpenChanged: if (!open) hideTimer.start()
+    onOpenChanged: {
+        if (open) {
+            focusPos = 0
+            paintFocus()
+            keySink.forceActiveFocus()
+        }
+        else {
+            hideTimer.start()
+        }
+    }
+    onKeysOnChanged: if (keysOn) keySink.forceActiveFocus()
     Timer { id: hideTimer; interval: 180 }
+
+    function chain() {
+        var ids = []
+        if (wakeAction.visible)
+            ids.push("wake")
+        if (pairAction.visible)
+            ids.push("pair")
+        ids.push("test")
+        ids.push("rename")
+        ids.push("hidden")
+        ids.push("remove")
+        ids.push("close")
+        return ids
+    }
+
+    function paintFocus() {
+        var ids = chain()
+        if (focusPos < 0)
+            focusPos = 0
+        if (focusPos >= ids.length)
+            focusPos = Math.max(0, ids.length - 1)
+        var id = ids.length > 0 ? ids[focusPos] : ""
+        wakeAction.keyed = id === "wake"
+        pairAction.keyed = id === "pair"
+        testAction.keyed = id === "test"
+        renameAction.keyed = id === "rename"
+        hiddenSwitch.keyed = id === "hidden"
+        removeAction.keyed = id === "remove"
+        closeHit.keyed = id === "close"
+    }
+
+    function moveFocus(delta) {
+        var ids = chain()
+        if (ids.length === 0)
+            return
+        var next = focusPos + delta
+        if (next < 0)
+            next = 0
+        if (next >= ids.length)
+            next = ids.length - 1
+        focusPos = next
+        paintFocus()
+    }
+
+    function activateFocus() {
+        var ids = chain()
+        if (focusPos < 0 || focusPos >= ids.length)
+            return
+        var id = ids[focusPos]
+        if (id === "wake")
+            wakeAction.triggered()
+        else if (id === "pair")
+            pairAction.triggered()
+        else if (id === "test")
+            testAction.triggered()
+        else if (id === "rename")
+            renameAction.triggered()
+        else if (id === "hidden")
+            hiddenSwitch.activate()
+        else if (id === "remove")
+            removeAction.triggered()
+        else if (id === "close")
+            sheet.closeRequested()
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -77,10 +154,19 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Item {
+                    id: closeHit
+                    property bool keyed: false
                     width: 32
                     height: 32
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 8
+                        color: "transparent"
+                        border.width: closeHit.keyed ? 2 : 0
+                        border.color: sheet.theme.accent
+                    }
                     SymbolV2 {
                         anchors.centerIn: parent
                         symbol: "xmark"
@@ -137,6 +223,7 @@ Item {
                 spacing: 8
 
             HostActionV2 {
+                id: wakeAction
                 theme: sheet.theme
                 symbol: "bolt.fill"
                 title: qsTr("Wake")
@@ -156,6 +243,7 @@ Item {
                 text: sheet.wakeNotice
             }
             HostActionV2 {
+                id: pairAction
                 theme: sheet.theme
                 symbol: "checkmark"
                 title: qsTr("Pair")
@@ -163,12 +251,14 @@ Item {
                 onTriggered: sheet.pairRequested()
             }
             HostActionV2 {
+                id: testAction
                 theme: sheet.theme
                 symbol: "wifi"
                 title: qsTr("Test network")
                 onTriggered: sheet.testRequested()
             }
             HostActionV2 {
+                id: renameAction
                 theme: sheet.theme
                 symbol: "pencil"
                 title: qsTr("Rename")
@@ -181,6 +271,7 @@ Item {
                 title: qsTr("Show hidden apps")
                 subtitle: qsTr("Hidden apps stay out of the library until this is on.")
                 SwitchV2 {
+                    id: hiddenSwitch
                     theme: sheet.theme
                     checked: sheet.showHidden
                     onToggled: sheet.showHiddenToggled(next)
@@ -188,6 +279,7 @@ Item {
             }
 
             HostActionV2 {
+                id: removeAction
                 theme: sheet.theme
                 symbol: "trash"
                 title: qsTr("Remove host")
@@ -211,7 +303,35 @@ Item {
 
     Shortcut {
         sequence: "Escape"
-        enabled: sheet.open
+        enabled: sheet.open && sheet.keysOn
         onActivated: sheet.closeRequested()
+    }
+
+    Item {
+        id: keySink
+        focus: sheet.open && sheet.keysOn
+        Keys.onPressed: {
+            if (!sheet.open || !sheet.keysOn)
+                return
+            if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab) {
+                sheet.moveFocus(-1)
+                event.accepted = true
+            }
+            else if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
+                sheet.moveFocus(1)
+                event.accepted = true
+            }
+            else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+                sheet.activateFocus()
+                event.accepted = true
+            }
+            else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back) {
+                sheet.closeRequested()
+                event.accepted = true
+            }
+            else if (event.key === Qt.Key_Hangup) {
+                event.accepted = true
+            }
+        }
     }
 }

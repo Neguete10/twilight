@@ -18,6 +18,9 @@ ApplicationWindow {
     property bool v2Active: false
     property bool streamActive: false
     property string classicTitle: ""
+    // The Classic toolbar hides while Twilight is showing, so the shell reads these.
+    property string pendingUpdateVersion: ""
+    property string pendingUpdateUrl: ""
     readonly property bool allowShellSwitch: initialView === "qrc:/gui/PcView.qml"
 
     function activateShell(version) {
@@ -410,6 +413,8 @@ ApplicationWindow {
                     ToolTip.text = qsTr("Update available for Moonlight: Version %1").arg(version)
                     updateButton.browserUrl = url
                     updateButton.visible = true
+                    window.pendingUpdateVersion = version
+                    window.pendingUpdateUrl = url
                 }
 
                 Component.onCompleted: {
