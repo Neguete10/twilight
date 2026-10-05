@@ -330,12 +330,14 @@ Item {
             ids.push("warnings")
         }
         else if (section === "advanced") {
+            // Classic parity: "Quit app on host PC after ending stream".
+            // Keep this first in the Advanced chain.
+            ids.push("quitAfter")
             ids.push("codec")
             if (SystemProperties.hasPyroWaveMetal && SystemProperties.hasPyroWaveVulkan)
                 ids.push("pyro")
             ids.push("decoder")
             ids.push("optim")
-            ids.push("quitAfter")
             ids.push("awake")
             ids.push("presence")
             ids.push("classicHud")
@@ -1157,6 +1159,24 @@ Item {
                         spacing: 14
                         visible: sheet.section === "advanced"
 
+                        // Classic parity control. Same preference and behavior as
+                        // Moonlight's "Quit app on host PC after ending stream":
+                        // StreamingPreferences.quitAppAfter. A graceful stream end
+                        // quits the host app. An unexpected disconnect does not.
+                        // Keep this toggle in Twilight Settings.
+                        SettingRowV2 {
+                            width: parent.width
+                            theme: sheet.theme
+                            title: qsTr("Quit app on host PC after ending stream")
+                            subtitle: qsTr("This will close the app or game you are streaming when you end your stream. You will lose any unsaved progress!")
+                            SwitchV2 {
+                                id: quitAfterSwitch
+                                theme: sheet.theme
+                                checked: StreamingPreferences.quitAppAfter
+                                onToggled: StreamingPreferences.quitAppAfter = next
+                            }
+                        }
+
                         TwTextV2 { theme: sheet.theme; text: qsTr("Video codec"); color: sheet.theme.secondary; font.pixelSize: 12; font.weight: Font.DemiBold }
                         ChoiceV2 {
                             id: codecChoice
@@ -1219,18 +1239,6 @@ Item {
                                 theme: sheet.theme
                                 checked: StreamingPreferences.gameOptimizations
                                 onToggled: StreamingPreferences.gameOptimizations = next
-                            }
-                        }
-                        SettingRowV2 {
-                            width: parent.width
-                            theme: sheet.theme
-                            title: qsTr("Quit the app on the host when the stream ends")
-                            subtitle: qsTr("Unsaved progress on the host will be lost.")
-                            SwitchV2 {
-                                id: quitAfterSwitch
-                                theme: sheet.theme
-                                checked: StreamingPreferences.quitAppAfter
-                                onToggled: StreamingPreferences.quitAppAfter = next
                             }
                         }
                         SettingRowV2 {

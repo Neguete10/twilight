@@ -108,6 +108,9 @@ public:
     Q_PROPERTY(QString microphoneStatusText READ microphoneStatusText NOTIFY microphoneStatusTextChanged)
     Q_PROPERTY(bool multiController MEMBER multiController NOTIFY multiControllerChanged)
     Q_PROPERTY(bool enableMdns MEMBER enableMdns NOTIFY enableMdnsChanged)
+    // Classic parity: "Quit app on host PC after ending stream".
+    // Twilight Settings → Advanced must keep an on/off for this.
+    // A graceful stream end quits the host app. Unexpected disconnects do not.
     Q_PROPERTY(bool quitAppAfter MEMBER quitAppAfter NOTIFY quitAppAfterChanged)
     Q_PROPERTY(bool absoluteMouseMode MEMBER absoluteMouseMode NOTIFY absoluteMouseModeChanged)
     Q_PROPERTY(bool coreHidMouse MEMBER coreHidMouse NOTIFY coreHidMouseChanged)

@@ -12,7 +12,7 @@ The interactive app is the Twilight shell. There is no Classic shell and no vers
 | --- | --- |
 | Shell | Sidebar of hosts, app library, search, one-click stream, Desktop hero. Arrow keys and the gamepad move between hosts and apps. Menu opens the host sheet or the app menu. Start opens settings. |
 | Host sheet | Wake, pair, rename, remove, network test, show hidden apps. Up and down move, confirm activates. |
-| Settings | Video, Audio (including spatial, head tracking, and on macOS the host microphone), Input, Network, Advanced (codec and PyroWave GPU backend). Same `StreamingPreferences` object the stream uses. D-pad up and down walk the focus chain. Resolution and frame rate include a typed custom value, native and notch-excluded sizes, and the refresh rate of every attached display. |
+| Settings | Video, Audio (including spatial, head tracking, and on macOS the host microphone), Input, Network, Advanced (codec and PyroWave GPU backend). Advanced starts with Classic's **Quit app on host PC after ending stream** switch (`quitAppAfter`). Keep that Classic parity toggle. Same `StreamingPreferences` object the stream uses. D-pad up and down walk the focus chain. Resolution and frame rate include a typed custom value, native and notch-excluded sizes, and the refresh rate of every attached display. |
 | Stream start | Twilight launch card, then the existing `Session` |
 | In-stream HUD | Glass chips for FPS, bitrate, and RTT, plus End, while a Twilight stream is open |
 
@@ -37,6 +37,8 @@ The HUD is a separate frameless window, not a tool panel. On macOS its position 
 ## Extending
 
 Add pages under `app/gui/ui/v2/` and list them in `app/qml.qrc`. The shell is `ShellV2.qml`, loaded by a `Loader` in `app/gui/main.qml` for every interactive launch. Bind new settings to `StreamingPreferences` and call `save()` when the sheet closes.
+
+Classic parity that has to stay: Settings → Advanced → **Quit app on host PC after ending stream**. The switch reads and writes `StreamingPreferences.quitAppAfter` (QSettings key `quitAppAfter`, default off). When it is on, a graceful stream end quits the app on the host. An unexpected disconnect does not. That is the same path Classic and Moonlight use.
 
 ## Known gaps
 
