@@ -767,7 +767,8 @@ int main(int argc, char *argv[])
 
     switch (commandLineParserResult) {
     case GlobalCommandLineParser::NormalStartRequested:
-        initialView = "qrc:/gui/PcView.qml";
+        // Empty initialView loads the Twilight shell. Classic is not a choice.
+        initialView = "";
         break;
     case GlobalCommandLineParser::StreamRequested:
         {

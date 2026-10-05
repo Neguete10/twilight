@@ -17,7 +17,7 @@ The version in `app/version.txt` is `7.0.0`. The store build is English only. Th
 | Sandbox entitlements | `app/deploy/macos/Twilight-MAS.entitlements`. |
 | Multicast, gated | `TWILIGHT_MAS_MULTICAST=1` selects `app/deploy/macos/Twilight-MAS-multicast.entitlements`. The default store entitlements omit it. |
 | ATS | Desktop keeps `NSAllowsArbitraryLoads`. The store plist sets `NSAllowsLocalNetworking` and does not set the blanket key. `scripts/prepare-macos-infoplist.py`. |
-| About / licenses | Classic toolbar **About**, and Twilight settings → About (version and a short notice; full license text behind Licenses). Texts are in `app/licenses/` and `qrc:/licenses/`, and qmake copies them to `Contents/Resources/Licenses`. |
+| About / licenses | Twilight settings → About (version and a short notice; full license text behind Licenses). Texts are in `app/licenses/` and `qrc:/licenses/`, and qmake copies them to `Contents/Resources/Licenses`. |
 | Microphone prompt path | Usage string plus `com.apple.security.device.audio-input`. |
 | Store package | `TWILIGHT_MAS=1 scripts/generate-dmg.sh Release` writes a `productbuild` `.pkg`. It does not write a DMG and does not call `notarytool`. |
 | Privacy manifest | `app/deploy/macos/PrivacyInfo.xcprivacy`, copied to `Contents/Resources`. |
@@ -167,8 +167,7 @@ Disk-space and active-keyboard categories are not declared. This tree does not c
 
 GPL-3.0 section 5 wants a modified interactive program to say that it was modified, name a relevant version, state that there is no warranty, and show where to read the license. The About page does that.
 
-- Classic shell: toolbar **About**, on every page except the About page itself. That page shows `app/licenses/NOTICES.txt`, then the full text of the selected license.
-- Twilight shell: Settings → About. The page shows the version and a short notice (modified fork, GPL-3.0, no warranty, corresponding source). **Licenses** opens the same license texts. They are not dumped on the page until then.
+- Settings → About. The page shows the version and a short notice (modified fork, GPL-3.0, no warranty, corresponding source). **Licenses** opens the license texts. They are not dumped on the page until then.
 
 The same files are copied into `Twilight.app/Contents/Resources/Licenses`.
 

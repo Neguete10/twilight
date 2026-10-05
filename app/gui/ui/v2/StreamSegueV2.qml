@@ -4,8 +4,8 @@ import QtQuick.Window 2.2
 import SdlGamepadKeyNavigation 1.0
 import StreamHudStats 1.0
 
-// V2 stream launch. Mirrors StreamSegue.qml signal handling without touching
-// the classic StackView, so Classic stays intact.
+// Twilight stream launch. Mirrors StreamSegue.qml signal handling without
+// touching the stack the command-line windows still use.
 Item {
     id: segue
     property var host

@@ -190,7 +190,6 @@ Item {
         var ids = []
         if (updateUrl !== "")
             ids.push("update")
-        ids.push("classic")
         ids.push("settings")
         return ids
     }
@@ -365,8 +364,6 @@ Item {
         var id = ids[headerPos]
         if (id === "update" && updateUrl !== "")
             Qt.openUrlExternally(updateUrl)
-        else if (id === "classic")
-            requestShell("v1")
         else if (id === "settings")
             settingsOpen = true
     }
@@ -682,15 +679,6 @@ Item {
             console.warn("Twilight HUD window was not created: " + hudComponent.errorString())
     }
 
-    function requestShell(version) {
-        if (Window.window && Window.window.streamActive)
-            return
-        SdlGamepadKeyNavigation.setUiNavMode(false)
-        persistPreferences()
-        if (Window.window && Window.window.activateShell)
-            Window.window.activateShell(version)
-    }
-
     ComputerModel {
         id: computerModel
         Component.onCompleted: initialize(ComputerManager)
@@ -721,7 +709,7 @@ Item {
     onQueryChanged: rebuildSlots()
 
     // Component.onDestruction is Qt 5.10. Preferences are written when the
-    // settings sheet closes, when the shell switches, and when the window closes.
+    // settings sheet closes and when the window closes.
 
     Shortcut {
         sequence: StandardKey.Preferences
@@ -819,14 +807,6 @@ Item {
                             Qt.openUrlExternally(shell.updateUrl)
                         }
                     }
-                }
-                UiVersionToggle {
-                    id: versionToggle
-                    anchors.verticalCenter: parent.verticalCenter
-                    darkChrome: theme.dark
-                    currentVersion: "v2"
-                    keyed: shell.headerArmed("classic")
-                    onRequestVersion: shell.requestShell(version)
                 }
                 Rectangle {
                     width: 36

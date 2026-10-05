@@ -6,7 +6,7 @@ It sits beside Moonlight. Moonlight has not endorsed it.
 
 ## On the Mac
 
-**A new UI.** You land in Twilight's own shell: your hosts along the side, your games in a library. The classic Moonlight shell is still one click away, on the toolbar, and Twilight remembers which one you picked. The switch waits until the stream is closed.
+**A new UI.** You land in Twilight's own shell: your hosts along the side, your games in a library.
 
 **PyroWave on Vulkan and Metal.** Twilight can decode [PyroWave](https://github.com/Themaister/pyrowave) on either backend. Vulkan goes through MoltenVK. Metal is the native path, and settings can pick Automatic, Metal, or Vulkan when both are built in. A normal GameStream or Sunshine host does not send this codec. When a host does, both decoders are in the v7 build.
 

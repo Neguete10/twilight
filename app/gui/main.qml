@@ -1,6 +1,5 @@
 import QtQuick 2.9
 import QtQuick.Controls 2.2
-import QtQuick.Layouts 1.3
 import QtQuick.Window 2.2
 import QtQuick.Controls.Material 2.2
 
@@ -13,50 +12,13 @@ import SdlGamepadKeyNavigation 1.0
 ApplicationWindow {
     property bool pollingActive: false
 
-    // Twilight (V2) is the starting shell. Classic stays available.
-    // streamActive blocks a shell swap during a stream.
-    property bool v2Active: false
+    // Interactive launches use the Twilight shell. Command-line pair, stream,
+    // and quit windows pass their own initialView and stay on the stack.
+    readonly property bool twilightShell: initialView === ""
+    property bool v2Active: twilightShell
     property bool streamActive: false
-    property string classicTitle: ""
-    // The Classic toolbar hides while Twilight is showing, so the shell reads these.
     property string pendingUpdateVersion: ""
     property string pendingUpdateUrl: ""
-    readonly property bool allowShellSwitch: initialView === "qrc:/gui/PcView.qml"
-
-    function activateShell(version) {
-        if (streamActive || !allowShellSwitch) {
-            return
-        }
-
-        var next = version === "v2" ? "v2" : "v1"
-        if (((next === "v2") === v2Active) && StreamingPreferences.uiVersion === next) {
-            return
-        }
-
-        if (StreamingPreferences.uiVersion !== next) {
-            StreamingPreferences.uiVersion = next
-            StreamingPreferences.save()
-        }
-
-        v2Active = next === "v2"
-        title = v2Active ? "Twilight" : classicTitle
-
-        if (!v2Active && stackView.depth > 1) {
-            stackView.pop(null)
-        }
-
-        if (v2Active) {
-            if (width < 1100) {
-                width = 1180
-            }
-            if (height < 720) {
-                height = 800
-            }
-        }
-        else {
-            stackView.forceActiveFocus()
-        }
-    }
 
     id: window
     width: 1280
@@ -81,9 +43,14 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
-        classicTitle = title
-        if (allowShellSwitch && StreamingPreferences.uiVersion === "v2") {
-            activateShell("v2")
+        if (twilightShell) {
+            title = "Twilight"
+            if (width < 1100) {
+                width = 1180
+            }
+            if (height < 720) {
+                height = 800
+            }
         }
 
         // Show the window according to the user's preferences
@@ -128,6 +95,16 @@ ApplicationWindow {
         stackView.pop()
     }
 
+    // StreamSegue, QuitSegue, and the command-line windows still assign
+    // toolBar.visible. The Classic toolbar is gone, so this is not a header.
+    // It is created before the stack so a segue pushed during startup can see it.
+    Item {
+        id: toolBar
+        visible: false
+        width: 0
+        height: 0
+    }
+
     StackView {
         id: stackView
         anchors.fill: parent
@@ -139,7 +116,9 @@ ApplicationWindow {
             // Perform our early initialization before constructing
             // the initial view and pushing it to the StackView
             doEarlyInit()
-            push(initialView)
+            if (!twilightShell) {
+                push(initialView)
+            }
         }
 
         onCurrentItemChanged: {
@@ -166,21 +145,26 @@ ApplicationWindow {
                 quitConfirmationDialog.open()
             }
         }
+    }
 
-        Keys.onMenuPressed: {
-            settingsButton.clicked()
+    Item {
+        id: updateBridge
+        visible: false
+        width: 0
+        height: 0
+
+        function updateAvailable(version, url)
+        {
+            window.pendingUpdateVersion = version
+            window.pendingUpdateUrl = url
         }
 
-        // This is a keypress we've reserved for letting the
-        // SdlGamepadKeyNavigation object tell us to show settings
-        // when Menu is consumed by a focused control.
-        Keys.onHangupPressed: {
-            settingsButton.clicked()
+        Component.onCompleted: {
+            AutoUpdateChecker.onUpdateAvailable.connect(updateAvailable)
+            AutoUpdateChecker.start()
         }
     }
 
-    // Loaded only after the user picks Twilight. Inactive while Classic is showing,
-    // so a V2 QML error cannot take down the default shell.
     Loader {
         id: v2Shell
         anchors.fill: parent
@@ -252,290 +236,6 @@ ApplicationWindow {
         SdlGamepadKeyNavigation.notifyWindowFocus(visible && active)
     }
 
-    // Workaround for lack of instanceof in Qt 5.9.
-    //
-    // Based on https://stackoverflow.com/questions/13923794/how-to-do-a-is-a-typeof-or-instanceof-in-qml
-    function qmltypeof(obj, className) { // QtObject, string -> bool
-        // className plus "(" is the class instance without modification
-        // className plus "_QML" is the class instance with user-defined properties
-        var str = obj.toString();
-        return str.startsWith(className + "(") || str.startsWith(className + "_QML");
-    }
-
-    function navigateTo(url, objectType)
-    {
-        var existingItem = stackView.find(function(item, index) {
-            return qmltypeof(item, objectType)
-        })
-
-        if (existingItem !== null) {
-            // Pop to the existing item
-            stackView.pop(existingItem)
-        }
-        else {
-            // Create a new item
-            stackView.push(url)
-        }
-    }
-
-    header: ToolBar {
-        id: toolBar
-        visible: !v2Active
-        height: v2Active ? 0 : 60
-        anchors.topMargin: 5
-        anchors.bottomMargin: 5
-
-        Label {
-            id: titleLabel
-            visible: toolBar.width > 700
-            anchors.fill: parent
-            text: stackView.currentItem.objectName
-            font.pointSize: 20
-            elide: Label.ElideRight
-            horizontalAlignment: Qt.AlignHCenter
-            verticalAlignment: Qt.AlignVCenter
-        }
-
-        RowLayout {
-            spacing: 10
-            anchors.leftMargin: 10
-            anchors.rightMargin: 10
-            anchors.fill: parent
-
-            NavigableToolButton {
-                // Only make the button visible if the user has navigated somewhere.
-                visible: stackView.depth > 1
-
-                iconSource: "qrc:/res/arrow_left.svg"
-
-                onClicked: goBack()
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
-            // This label will appear when the window gets too small and
-            // we need to ensure the toolbar controls don't collide
-            Label {
-                id: titleRowLabel
-                font.pointSize: titleLabel.font.pointSize
-                elide: Label.ElideRight
-                horizontalAlignment: Qt.AlignHCenter
-                verticalAlignment: Qt.AlignVCenter
-                Layout.fillWidth: true
-
-                // We need this label to always be visible so it can occupy
-                // the remaining space in the RowLayout. To "hide" it, we
-                // just set the text to empty string.
-                text: !titleLabel.visible ? stackView.currentItem.objectName : ""
-            }
-
-            Label {
-                id: versionLabel
-                visible: qmltypeof(stackView.currentItem, "SettingsView")
-                text: qsTr("Version %1").arg(SystemProperties.versionString)
-                font.pointSize: 12
-                horizontalAlignment: Qt.AlignRight
-                verticalAlignment: Qt.AlignVCenter
-            }
-
-            NavigableToolButton {
-                id: discordButton
-                visible: SystemProperties.hasBrowser &&
-                         qmltypeof(stackView.currentItem, "SettingsView")
-
-                iconSource: "qrc:/res/discord.svg"
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Join our community on Discord")
-
-                // TODO need to make sure browser is brought to foreground.
-                onClicked: Qt.openUrlExternally("https://moonlight-stream.org/discord");
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
-            NavigableToolButton {
-                id: addPcButton
-                visible: qmltypeof(stackView.currentItem, "PcView")
-
-                iconSource:  "qrc:/res/ic_add_to_queue_white_48px.svg"
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Add PC manually") + (newPcShortcut.nativeText ? (" ("+newPcShortcut.nativeText+")") : "")
-
-                Shortcut {
-                    id: newPcShortcut
-                    sequence: StandardKey.New
-                    enabled: !v2Active
-                    onActivated: addPcButton.clicked()
-                }
-
-                onClicked: {
-                    addPcDialog.open()
-                }
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
-            NavigableToolButton {
-                property string browserUrl: ""
-
-                id: updateButton
-
-                iconSource: "qrc:/res/update.svg"
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered || visible
-
-                // Invisible until we get a callback notifying us that
-                // an update is available
-                visible: false
-
-                onClicked: {
-                    if (SystemProperties.hasBrowser) {
-                        Qt.openUrlExternally(browserUrl);
-                    }
-                }
-
-                function updateAvailable(version, url)
-                {
-                    ToolTip.text = qsTr("Update available for Moonlight: Version %1").arg(version)
-                    updateButton.browserUrl = url
-                    updateButton.visible = true
-                    window.pendingUpdateVersion = version
-                    window.pendingUpdateUrl = url
-                }
-
-                Component.onCompleted: {
-                    AutoUpdateChecker.onUpdateAvailable.connect(updateAvailable)
-                    AutoUpdateChecker.start()
-                }
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
-            ToolButton {
-                id: aboutButton
-                text: qsTr("About")
-                font.pixelSize: 14
-                Layout.preferredHeight: parent.height
-                visible: !qmltypeof(stackView.currentItem, "AboutView")
-                onClicked: navigateTo("qrc:/gui/AboutView.qml", "AboutView")
-
-                Keys.onReturnPressed: clicked()
-                Keys.onEnterPressed: clicked()
-                Keys.onRightPressed: nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocus)
-                Keys.onLeftPressed: nextItemInFocusChain(false).forceActiveFocus(Qt.TabFocus)
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("About Twilight, warranty, and licenses")
-            }
-
-            NavigableToolButton {
-                id: helpButton
-                visible: SystemProperties.hasBrowser
-
-                iconSource: "qrc:/res/question_mark.svg"
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Help") + (helpShortcut.nativeText ? (" ("+helpShortcut.nativeText+")") : "")
-
-                Shortcut {
-                    id: helpShortcut
-                    sequence: StandardKey.HelpContents
-                    enabled: !v2Active
-                    onActivated: helpButton.clicked()
-                }
-
-                // TODO need to make sure browser is brought to foreground.
-                onClicked: Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide");
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
-            NavigableToolButton {
-                // TODO: Implement gamepad mapping then unhide this button
-                visible: false
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Gamepad Mapper")
-
-                iconSource: "qrc:/res/ic_videogame_asset_white_48px.svg"
-
-                onClicked: navigateTo("qrc:/gui/GamepadMapper.qml", "GamepadMapper")
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
-            Loader {
-                id: versionToggleLoader
-                active: allowShellSwitch && !v2Active
-                visible: active
-                source: "qrc:/gui/ui/v2/UiVersionToggle.qml"
-                Layout.alignment: Qt.AlignVCenter
-                // Qt 6: Loader.implicitWidth/Height are read-only; size via Layout.
-                Layout.preferredWidth: item ? item.implicitWidth : 0
-                Layout.preferredHeight: item ? item.implicitHeight : 0
-
-                onLoaded: {
-                    item.darkChrome = true
-                    item.currentVersion = "v1"
-                    item.requestVersion.connect(activateShell)
-                }
-            }
-
-            NavigableToolButton {
-                id: settingsButton
-
-                iconSource:  "qrc:/res/settings.svg"
-
-                onClicked: navigateTo("qrc:/gui/SettingsView.qml", "SettingsView")
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-
-                Shortcut {
-                    id: settingsShortcut
-                    sequence: StandardKey.Preferences
-                    enabled: !v2Active
-                    onActivated: settingsButton.clicked()
-                }
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Settings") + (settingsShortcut.nativeText ? (" ("+settingsShortcut.nativeText+")") : "")
-            }
-        }
-    }
-
     ErrorMessageDialog {
         id: noHwDecoderDialog
         text: qsTr("No functioning hardware accelerated video decoder was detected by Moonlight. " +
@@ -599,49 +299,6 @@ ApplicationWindow {
             // StreamSegue assumes its dialog will be re-created each time we
             // start streaming, so fake it by wiping out the text each time.
             text = ""
-        }
-    }
-
-    NavigableDialog {
-        id: addPcDialog
-        property string label: qsTr("Enter the IP address of your host PC:")
-
-        standardButtons: Dialog.Ok | Dialog.Cancel
-
-        onOpened: {
-            // Force keyboard focus on the textbox so keyboard navigation works
-            editText.forceActiveFocus()
-        }
-
-        onClosed: {
-            editText.clear()
-        }
-
-        onAccepted: {
-            if (editText.text) {
-                ComputerManager.addNewHostManually(editText.text.trim())
-            }
-        }
-
-        ColumnLayout {
-            Label {
-                text: addPcDialog.label
-                font.bold: true
-            }
-
-            TextField {
-                id: editText
-                Layout.fillWidth: true
-                focus: true
-
-                Keys.onReturnPressed: {
-                    addPcDialog.accept()
-                }
-
-                Keys.onEnterPressed: {
-                    addPcDialog.accept()
-                }
-            }
         }
     }
 }

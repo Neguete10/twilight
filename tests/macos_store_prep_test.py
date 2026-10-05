@@ -121,7 +121,7 @@ def test_privacy_manifest():
 
 def test_notices():
     notices = (ROOT / "app/licenses/NOTICES.txt").read_text(encoding="utf-8")
-    qml = (ROOT / "app/gui/AboutNotices.qml").read_text(encoding="utf-8")
+    qml = (ROOT / "app/gui/ui/v2/SettingsSheetV2.qml").read_text(encoding="utf-8")
     qrc = (ROOT / "app/qml.qrc").read_text(encoding="utf-8")
     phrases = [
         "modified version of Moonlight Qt",
