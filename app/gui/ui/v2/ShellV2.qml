@@ -611,7 +611,9 @@ Item {
             "host": shell,
             "session": session,
             "appName": name,
-            "isResume": isResume
+            "isResume": isResume,
+            // Resolve on this Item, not inside StreamSegueV2's Timer (#28).
+            "hostWindow": Window.window
         })
     }
 

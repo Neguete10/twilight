@@ -1539,11 +1539,39 @@ void Session::getWindowDimensions(int& x, int& y,
     // Create our window on the same display that Qt's UI
     // was being displayed on.
     else {
-        Q_ASSERT(m_QtWindow != nullptr);
-        if (m_QtWindow != nullptr) {
-            QScreen* screen = m_QtWindow->screen();
+        QWindow* qtWindow = m_QtWindow;
+        // V2 used to pass a null window when Window.window was read from a
+        // Timer (#28). Recover from focus/top-level windows rather than
+        // silently centering on display 0.
+        if (qtWindow == nullptr) {
+            qtWindow = QGuiApplication::focusWindow();
+            if (qtWindow == nullptr) {
+                const auto topLevels = QGuiApplication::topLevelWindows();
+                for (QWindow* candidate : topLevels) {
+                    if (candidate != nullptr && candidate->isVisible()) {
+                        qtWindow = candidate;
+                        break;
+                    }
+                }
+            }
+            if (qtWindow != nullptr) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Session Qt window was null; using %s",
+                            qtWindow->title().isEmpty() ? "a top-level window"
+                                                        : qPrintable(qtWindow->title()));
+            }
+            else {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Session Qt window was null; stream defaults to display 0");
+            }
+        }
+
+        Q_ASSERT(qtWindow != nullptr);
+        if (qtWindow != nullptr) {
+            QScreen* screen = qtWindow->screen();
             if (screen != nullptr) {
                 QRect displayRect = screen->geometry();
+                bool matched = false;
 
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "Qt UI screen is at (%d,%d)",
@@ -1558,6 +1586,7 @@ void Session::getWindowDimensions(int& x, int& y,
                                         "SDL found matching display %d",
                                         i);
                             displayIndex = i;
+                            matched = true;
                             break;
                         }
                     }
@@ -1566,6 +1595,53 @@ void Session::getWindowDimensions(int& x, int& y,
                                     "SDL_GetDisplayBounds(%d) failed: %s",
                                     i, SDL_GetError());
                     }
+                }
+
+                // Exact origin match can fail when Qt and SDL disagree about
+                // Retina point/pixel placement. Prefer the display that
+                // contains the Twilight window's center.
+                if (!matched) {
+                    const QPoint center = qtWindow->geometry().center();
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "Qt/SDL origin mismatch; trying window center (%d,%d)",
+                                center.x(), center.y());
+                    for (int i = 0; i < SDL_GetNumVideoDisplays(); i++) {
+                        SDL_Rect displayBounds;
+                        if (SDL_GetDisplayBounds(i, &displayBounds) != 0) {
+                            continue;
+                        }
+                        if (center.x() >= displayBounds.x &&
+                            center.x() < displayBounds.x + displayBounds.w &&
+                            center.y() >= displayBounds.y &&
+                            center.y() < displayBounds.y + displayBounds.h) {
+                            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                        "SDL matched display %d by window center",
+                                        i);
+                            displayIndex = i;
+                            matched = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!matched) {
+                    const QByteArray qtName = screen->name().toUtf8();
+                    for (int i = 0; i < SDL_GetNumVideoDisplays(); i++) {
+                        const char* sdlName = SDL_GetDisplayName(i);
+                        if (sdlName != nullptr && qtName == sdlName) {
+                            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                        "SDL matched display %d by name %s",
+                                        i, sdlName);
+                            displayIndex = i;
+                            matched = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!matched) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                                "Could not match Qt screen to an SDL display; using display 0");
                 }
             }
             else {

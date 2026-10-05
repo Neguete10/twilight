@@ -8,7 +8,10 @@ import StreamHudStats 1.0
 // touching the stack the command-line windows still use.
 Item {
     id: segue
-    readonly property var hostWindow: Window.window
+    // Creator may pass Window.window from Shell (Item scope). Timer is a
+    // QtObject, so reading Window.window there returns undefined and Session
+    // falls back to display 0 (#28). Keep a snapshot, not a live binding.
+    property var hostWindow
     property var host
     property var session
     property string appName
@@ -80,6 +83,10 @@ Item {
     Component.onCompleted: {
         if (!session)
             return
+        // Snapshot before the timer. A live binding to Window.window can go
+        // undefined if the attached context shifts during the delay.
+        if (!hostWindow)
+            hostWindow = Window.window
         session.stageStarting.connect(stageStarting)
         session.stageFailed.connect(stageFailed)
         session.connectionStarted.connect(connectionStarted)
@@ -100,6 +107,10 @@ Item {
                 : qsTr("Ctrl+Alt+Shift+Q"))
             SdlGamepadKeyNavigation.disable()
             gc()
+            if (!hostWindow)
+                hostWindow = Window.window
+            if (!hostWindow)
+                console.warn("StreamSegueV2: hostWindow is null; stream may open on the primary display")
             session.exec(hostWindow)
         }
     }
