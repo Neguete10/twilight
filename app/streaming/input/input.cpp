@@ -334,7 +334,10 @@ void SdlInputHandler::raiseAllKeys()
                 (int)m_KeysDown.count());
 
     for (auto keyDown : m_KeysDown) {
-        LiSendKeyboardEvent(keyDown, KEY_ACTION_UP, 0);
+        // Same code handleKeyEvent sends on the press: the low byte is the
+        // Windows VK and 0x8000 marks it already mapped. A focus-loss release
+        // has to use that code too.
+        LiSendKeyboardEvent(static_cast<short>(0x8000 | keyDown), KEY_ACTION_UP, 0);
     }
 
     m_KeysDown.clear();

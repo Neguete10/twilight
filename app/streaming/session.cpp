@@ -2547,7 +2547,9 @@ void Session::execInternal()
     StreamHudStats::noteStreamWindow(m_Window);
     StreamHudStats::orderFront();
     if (StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming()) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        // Paint the chips before the SDL loop. processEvents() would dequeue
+        // NSEvents; SDL never sees a key-up taken that way.
+        StreamHudStats::flushStreamUi();
         StreamHudStats::orderFront();
     }
 #endif
@@ -2608,9 +2610,10 @@ void Session::execInternal()
 
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
-    // The Twilight HUD is the exception on macOS: while it is up, the idle
-    // wait is shorter and queued Qt events are drained there. Doing that on
-    // every SDL event re-enters Cocoa from inside the stream loop.
+    // On macOS, SDL learns about keys by dequeuing the Cocoa queue itself
+    // (the view's keyUp: is not what feeds SDL_KEYUP). processEvents()
+    // dequeues that same queue, so a WASD release taken by Qt never becomes
+    // a key-up on the host. Flush posted Qt events only.
     SDL_Event event;
 #ifdef Q_OS_DARWIN
     int twilightHudPump = 0;
@@ -2624,7 +2627,7 @@ void Session::execInternal()
         if (StreamHudStats::instance() != nullptr && StreamHudStats::instance()->streaming() &&
                 ++twilightHudPump >= 20) {
             twilightHudPump = 0;
-            QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+            StreamHudStats::flushStreamUi();
             StreamHudStats::followStream();
         }
 #endif
@@ -2649,7 +2652,7 @@ void Session::execInternal()
             presence.runCallbacks();
 #ifdef Q_OS_DARWIN
             if (twilightHud) {
-                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+                StreamHudStats::flushStreamUi();
                 StreamHudStats::followStream();
                 // Fullscreen spaces can cover the chips. Raise occasionally,
                 // not on every move, so the window does not flicker.
