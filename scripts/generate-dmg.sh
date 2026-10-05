@@ -1,4 +1,7 @@
-# Desktop DMGs require create-dmg: https://github.com/sindresorhus/create-dmg
+# Desktop DMGs require the create-dmg shell script:
+# https://github.com/create-dmg/create-dmg
+# Install it with: brew install create-dmg
+# The npm package named create-dmg does not accept a window layout or background.
 # TWILIGHT_MAS=1 does not create a DMG. It writes a productbuild .pkg.
 BUILD_CONFIG=$1
 
@@ -131,15 +134,66 @@ if [ "${TWILIGHT_MAS:-}" = "1" ]; then
 fi
 
 echo Creating DMG
+# The drag-and-drop window is the desktop path only. TWILIGHT_MAS already
+# exited above with a productbuild package.
+# create-dmg from https://github.com/create-dmg/create-dmg places
+# Twilight.app and an Applications symlink, then tells Finder the window
+# size and icon positions. The npm package of the same name cannot.
+if ! create-dmg --help 2>&1 | grep -q -- '--app-drop-link'; then
+  fail "Desktop DMGs need create-dmg from https://github.com/create-dmg/create-dmg (brew install create-dmg). It accepts --app-drop-link and --background. The npm package named create-dmg does not, and it leaves a bare disk image."
+fi
+
+# Window size, icon positions, and the caption live in one file so the
+# background arrow stays lined up with the icons.
+. "$SOURCE_ROOT/app/deploy/macos/dmg/layout.env"
+[ -n "$DMG_VOLNAME" ] && [ -n "$DMG_WINDOW_W" ] && [ -n "$DMG_WINDOW_H" ] && [ -n "$DMG_APP_X" ] && [ -n "$DMG_APPLICATIONS_X" ] || fail "app/deploy/macos/dmg/layout.env is incomplete"
+DMG_BACKGROUND="$SOURCE_ROOT/app/deploy/macos/dmg/background.png"
+DMG_BACKGROUND_2X="$SOURCE_ROOT/app/deploy/macos/dmg/background@2x.png"
+[ -f "$DMG_BACKGROUND" ] || fail "Missing $DMG_BACKGROUND. Regenerate with: python3 scripts/make_dmg_background.py"
+[ -f "$DMG_BACKGROUND_2X" ] || fail "Missing $DMG_BACKGROUND_2X. Regenerate with: python3 scripts/make_dmg_background.py"
+[ -f "$SOURCE_ROOT/app/twilight.icns" ] || fail "Missing $SOURCE_ROOT/app/twilight.icns"
+
+# HFS+ is create-dmg's default. Finder stores this window's icon positions
+# and background on that filesystem, so the image stays on that default.
+# Stage only the app. create-dmg adds the Applications symlink itself.
+# Both background resolutions go in .background. create-dmg copies the 1x
+# file again and points Finder at it. Finder then loads background@2x.png
+# from that same folder on a retina display.
+DMG_ROOT="$INSTALLER_FOLDER/dmg-root"
+rm -rf "$DMG_ROOT"
+mkdir -p "$DMG_ROOT/.background"
+ditto "$BUILD_FOLDER/app/Twilight.app" "$DMG_ROOT/Twilight.app" || fail "Could not stage Twilight.app"
+cp "$DMG_BACKGROUND" "$DMG_ROOT/.background/background.png"
+cp "$DMG_BACKGROUND_2X" "$DMG_ROOT/.background/background@2x.png"
+
+DMG_PATH="$INSTALLER_FOLDER/Twilight-$VERSION.dmg"
 if [ "$SIGNING_IDENTITY" != "" ]; then
-  create-dmg $BUILD_FOLDER/app/Twilight.app $INSTALLER_FOLDER --identity="$SIGNING_IDENTITY" || fail "create-dmg failed!"
+  create-dmg \
+    --volname "$DMG_VOLNAME" \
+    --volicon "$SOURCE_ROOT/app/twilight.icns" \
+    --background "$DMG_BACKGROUND" \
+    --window-pos "$DMG_WINDOW_X" "$DMG_WINDOW_Y" \
+    --window-size "$DMG_WINDOW_W" "$DMG_WINDOW_H" \
+    --icon-size "$DMG_ICON_SIZE" \
+    --text-size "$DMG_TEXT_SIZE" \
+    --icon "Twilight.app" "$DMG_APP_X" "$DMG_APP_Y" \
+    --app-drop-link "$DMG_APPLICATIONS_X" "$DMG_APPLICATIONS_Y" \
+    --codesign "$SIGNING_IDENTITY" \
+    "$DMG_PATH" \
+    "$DMG_ROOT" || fail "create-dmg failed!"
 else
-  create-dmg $BUILD_FOLDER/app/Twilight.app $INSTALLER_FOLDER
-  case $? in
-    0) ;;
-    2) ;;
-    *) fail "create-dmg failed!";;
-  esac
+  create-dmg \
+    --volname "$DMG_VOLNAME" \
+    --volicon "$SOURCE_ROOT/app/twilight.icns" \
+    --background "$DMG_BACKGROUND" \
+    --window-pos "$DMG_WINDOW_X" "$DMG_WINDOW_Y" \
+    --window-size "$DMG_WINDOW_W" "$DMG_WINDOW_H" \
+    --icon-size "$DMG_ICON_SIZE" \
+    --text-size "$DMG_TEXT_SIZE" \
+    --icon "Twilight.app" "$DMG_APP_X" "$DMG_APP_Y" \
+    --app-drop-link "$DMG_APPLICATIONS_X" "$DMG_APPLICATIONS_Y" \
+    "$DMG_PATH" \
+    "$DMG_ROOT" || fail "create-dmg failed!"
 fi
 
 # Developer ID notarization of the DMG. Skip it for TWILIGHT_MAS so a
@@ -147,11 +201,10 @@ fi
 # Notarization is not App Store review, and this script never submits for review.
 if [ "$NOTARY_KEYCHAIN_PROFILE" != "" ] && [ "${TWILIGHT_MAS:-}" != "1" ]; then
   echo Uploading to App Notary service
-  xcrun notarytool submit --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait $INSTALLER_FOLDER/Twilight\ $VERSION.dmg || fail "Notary submission failed"
+  xcrun notarytool submit --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait "$DMG_PATH" || fail "Notary submission failed"
 
   echo Stapling notary ticket to DMG
-  xcrun stapler staple -v $INSTALLER_FOLDER/Twilight\ $VERSION.dmg || fail "Notary ticket stapling failed!"
+  xcrun stapler staple -v "$DMG_PATH" || fail "Notary ticket stapling failed!"
 fi
 
-mv $INSTALLER_FOLDER/Twilight\ $VERSION.dmg $INSTALLER_FOLDER/Twilight-$VERSION.dmg
 echo Build successful

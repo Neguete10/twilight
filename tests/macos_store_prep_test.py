@@ -3,6 +3,7 @@
 
 import importlib.util
 import plistlib
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -208,12 +209,74 @@ def test_package_script():
     expect(multicast_at > mas_at > 0, "multicast entitlement is selected only on the store path")
 
 
+def png_size(path):
+    data = path.read_bytes()
+    expect(data[:8] == b"\x89PNG\r\n\x1a\n", "%s is a png" % path.name)
+    expect(data[12:16] == b"IHDR", "%s has an IHDR" % path.name)
+    return struct.unpack(">II", data[16:24])
+
+
+def load_dmg_layout():
+    values = {}
+    for raw in (ROOT / "app/deploy/macos/dmg/layout.env").read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        values[key.strip()] = value
+    return values
+
+
+def test_dmg_layout():
+    layout = load_dmg_layout()
+    width = int(layout["DMG_WINDOW_W"])
+    height = int(layout["DMG_WINDOW_H"])
+    expect(layout["DMG_VOLNAME"] == "Twilight", "volume name is Twilight")
+    expect(int(layout["DMG_APP_X"]) < int(layout["DMG_APPLICATIONS_X"]), "Twilight.app sits left of Applications")
+    expect("Applications" in layout["DMG_CAPTION"], "caption tells people to use Applications")
+    one = png_size(ROOT / "app/deploy/macos/dmg/background.png")
+    two = png_size(ROOT / "app/deploy/macos/dmg/background@2x.png")
+    expect(one == (width, height), "background.png matches the Finder window")
+    expect(two == (width * 2, height * 2), "retina background is twice the window")
+
+    script = (ROOT / "scripts" / "generate-dmg.sh").read_text(encoding="utf-8")
+    expect('. "$SOURCE_ROOT/app/deploy/macos/dmg/layout.env"' in script, "dmg script sources the layout")
+    for flag in (
+        "--volname",
+        "--background",
+        "--window-pos",
+        "--window-size",
+        "--icon-size",
+        '--icon "Twilight.app"',
+        "--app-drop-link",
+    ):
+        expect(flag in script, "desktop dmg passes %s" % flag)
+    expect("--filesystem" not in script, "Finder window styling stays on the default HFS+ image")
+    expect("background@2x.png" in script, "retina background is staged")
+    expect('"$DMG_ROOT/Twilight.app"' in script, "staged bundle is Twilight.app")
+    expect("ln -s /Applications" not in script, "Applications alias is create-dmg's drop link")
+    creating = script.find("echo Creating DMG")
+    mas_exit = script.find("exit 0")
+    expect(0 < mas_exit < creating, "store package exits before the disk image")
+    expect("create-dmg $BUILD_FOLDER/app/Twilight.app" not in script, "bare create-dmg invocation is gone")
+    expect("--identity=" not in script, "desktop dmg does not use the npm identity flag")
+    expect("Twilight\\ $VERSION.dmg" not in script, "dmg filename is hyphenated")
+    expect('"$DMG_PATH"' in script, "notarization uses the hyphenated dmg path")
+    generator = (ROOT / "scripts" / "make_dmg_background.py").read_text(encoding="utf-8")
+    expect("python3 scripts/make_dmg_background.py" in generator, "background regen command is documented")
+    expect("layout.env" in generator, "generator reads the shared layout")
+
+
 def main():
     test_plist_rewrite()
     test_entitlements()
     test_privacy_manifest()
     test_notices()
     test_package_script()
+    test_dmg_layout()
     if FAILURES:
         print("%d failure(s)" % FAILURES)
         return 1

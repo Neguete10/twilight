@@ -30,4 +30,4 @@ The notarized disk image is on the [v7.0.0 release](https://github.com/Neguete10
 
 ## Building
 
-To build it, init the submodules and run `scripts/generate-dmg.sh Release`. You will want Qt 6 (`qmake` and `macdeployqt`), Xcode, and [create-dmg](https://github.com/sindresorhus/create-dmg). PyroWave's Vulkan and Metal decoders also need `CONFIG+=pyrowave`. That flag is described in `app/app.pro`. The disk-image script leaves it off.
+To build it, init the submodules and run `scripts/generate-dmg.sh Release`. You will want Qt 6 (`qmake` and `macdeployqt`), Xcode, and the [create-dmg](https://github.com/create-dmg/create-dmg) shell script (`brew install create-dmg`). The disk image opens with Twilight.app on the left and an Applications folder alias on the right. The window picture is `app/deploy/macos/dmg/background.png`. Regenerate it, and the retina copy beside it, with `python3 scripts/make_dmg_background.py` (Pillow). Positions for both live in `app/deploy/macos/dmg/layout.env`. PyroWave's Vulkan and Metal decoders also need `CONFIG+=pyrowave`. That flag is described in `app/app.pro`. The disk-image script leaves it off.
