@@ -22,9 +22,11 @@ CONFIG += c++11
 unix:!macx {
     TARGET = moonlight
 } else {
-    # Executable name stays Moonlight (CFBundleExecutable and QSettings).
-    # The .app folder is Twilight.app; see QMAKE_APPLICATION_BUNDLE_NAME.
-    TARGET = Moonlight
+    # Local twilight-local-test: process/executable name is Twilight so crash
+    # and quit dialogs say Twilight, not Moonlight. QSettings still uses the
+    # hard-coded applicationName "Moonlight" in main.cpp. The .app folder is
+    # Twilight.app via QMAKE_APPLICATION_BUNDLE_NAME.
+    TARGET = Twilight
 }
 
 include(../globaldefs.pri)
@@ -687,7 +689,7 @@ macx {
     # CFBundleName, CFBundleDisplayName, and InfoPlist.strings are Twilight.
     # On a live 387b7f64 build those were already Twilight and Dock hover
     # still said Moonlight, which is the .app folder name. The folder is
-    # Twilight.app. CFBundleExecutable and the binary stay Moonlight.
+    # Twilight.app. CFBundleExecutable and the binary are Twilight (local-test).
     # Bundle id stays com.moonlight-stream.Moonlight unless twilight-mas
     # swaps it. See docs/TWILIGHT_MAS.md.
     # Makefile builds name the folder from this variable and the binary

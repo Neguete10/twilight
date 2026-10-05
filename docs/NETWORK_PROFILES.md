@@ -1,13 +1,14 @@
 # Network profiles
 
-Twilight can store named stream presets and apply one in a single tap from
-classic Settings. A profile is the picture you are about to stream: resolution,
-frame rate, bitrate, codec, HDR, YUV 4:4:4, decoder, PyroWave backend, window
-mode, V-Sync, frame pacing, and audio (including spatial audio and head
-tracking). Language, mouse, gamepad, and host options stay as they are.
+The profile book and `StreamingPreferences::applyNetworkProfileSettings` are
+unchanged. Twilight does not show a profile picker. The Classic settings page
+that used to call this API was removed with the Classic shell. A profile is
+the picture you are about to stream: resolution, frame rate, bitrate, codec,
+HDR, YUV 4:4:4, decoder, PyroWave backend, window mode, V-Sync, frame pacing,
+and audio (including spatial audio and head tracking). Language, mouse,
+gamepad, and host options stay as they are.
 
-The controls live at the top of the left column in `app/gui/SettingsView.qml`.
-Nothing in this path is under `app/gui/ui/v2`.
+Nothing under `app/gui/ui/v2` reads or writes profiles.
 
 ## What a tap does
 
@@ -23,9 +24,8 @@ change it before saving. Custom does not change anything.
 Bitrate for an intent is `StreamingPreferences::getDefaultBitrate` for that
 size, frame rate, and YUV 4:4:4 flag (all three intents leave 4:4:4 off).
 V-Sync stays on and frame pacing stays off. The PyroWave backend and video
-decoder stay on Automatic. After the intent loads, the resolution, FPS, bitrate
-slider, and codec controls on the same page follow the new values. Edit those,
-then save.
+decoder stay on Automatic. After the intent loads, the live settings hold the
+new resolution, frame rate, bitrate, and codec.
 
 **Save profile** stores the settings currently shown, plus the intent you picked.
 Saving the same name again (ASCII case-insensitive) replaces that profile and
@@ -39,16 +39,17 @@ before you leave home, for example).
 **Apply** copies that saved picture back onto the live settings and writes it
 with the normal `StreamingPreferences::save()` path, under the same `QSettings`
 file as the rest of the client. You do not have to be on the bound network.
-The next stream uses whatever Apply last wrote. Opening Settings does not
+The next stream uses whatever Apply last wrote. Loading the app does not
 apply a profile by itself.
 
-When exactly one saved profile matches the network you are on, Settings also
-shows one button, `Apply <name>`. Several matches stay in the list; each row
-that matches is marked and its button says "Apply for this network".
+When exactly one saved profile matches the network you are on, the store
+publishes that match (`soleMatchName`, `matchingProfileCount`). Several
+matches stay in the list, and each matching row is marked. The Twilight shell
+does not show those rows.
 
 ## How the network is detected
 
-Detection runs when Settings opens and when you press Refresh network.
+Detection runs when `refreshNetwork()` is called.
 
 1. **SSID, macOS only.** `CWWiFiClient` / `CWInterface` in
    `app/settings/network_identity_mac.mm` reads the Wi-Fi name. The match key
@@ -91,15 +92,15 @@ The book is one string in the existing `QSettings` store, key `networkprofiles`.
 The first line is `twilight-net-profiles/1`. Each profile is one line of 22
 unit-separator fields (id, name, network key, label, binding, intent, then the
 picture numbers). Newlines and separators inside a name or SSID are escaped.
-A blob that fails to parse is left on disk untouched; Settings shows that the
-saved profiles could not be read. At most 32 profiles are kept. Names are
-limited to 64 characters. Resolution, frame rate, and bitrate have to sit in
-the same ranges the classic custom fields already allow (256–8192, 10–9999 FPS,
-500–500000 kbps).
+A blob that fails to parse is left on disk untouched. The store logs that and
+sets `statusMessage`. Nothing in the Twilight shell displays it. At most 32
+profiles are kept. Names are limited to 64 characters. Resolution, frame rate,
+and bitrate have to sit in the ranges the custom fields already allow
+(256–8192, 10–9999 FPS, 500–500000 kbps).
 
 The retired codec value HEVC+HDR (3) is applied as Automatic plus HDR on, the
 same way a normal settings reload treats it. Frame pacing is stored, and it is
-forced off when V-Sync is off so the checkbox on the page and the profile
+forced off when V-Sync is off so a saved profile and the live V-Sync flag
 agree. A bitrate above 150 Mbps with the unlock flag off is clamped to 150 Mbps
 on apply, which is the slider's normal maximum.
 
@@ -108,7 +109,6 @@ on apply, which is the slider's normal maximum.
 - `app/settings/network_profile_logic.h` — intents, fallback choice, match, serialize
 - `app/settings/network_identity_mac.mm` — CoreWLAN and the location prompt
 - `app/settings/network_profile.cpp` — `QSettings` and the QML singleton `NetworkProfiles`
-- `app/gui/SettingsView.qml` — the classic settings section
 - `tests/network_profile_test.cpp` — the rules above, without Qt or a Mac
 
 ```bash

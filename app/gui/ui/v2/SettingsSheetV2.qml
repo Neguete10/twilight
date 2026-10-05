@@ -1301,7 +1301,7 @@ Item {
                             color: sheet.theme.tertiary
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
-                            text: qsTr("The window mode applies the next time the app opens. Packet size stays in Classic.")
+                            text: qsTr("The window mode applies the next time the app opens. Packet size keeps the value already saved.")
                         }
 
                     }

@@ -184,9 +184,11 @@ void StreamingPreferences::reload()
                                                static_cast<int>(settings.value(SER_STARTWINDOWED, true).toBool() ? UIDisplayMode::UI_WINDOWED
                                                                                                                  : UIDisplayMode::UI_MAXIMIZED)).toInt());
     {
-        // Missing key starts on Twilight. An explicit "v1" still restores Classic.
-        const QString version = settings.value(SER_UIVERSION).toString().trimmed().toLower();
-        m_UiVersion = (version == QLatin1String("v1")) ? QStringLiteral("v1") : QStringLiteral("v2");
+        // Classic (v1) is gone. Any stored value, including "v1", stays on Twilight.
+        m_UiVersion = QStringLiteral("v2");
+        if (settings.value(SER_UIVERSION).toString() != QLatin1String("v2")) {
+            settings.setValue(SER_UIVERSION, m_UiVersion);
+        }
     }
     m_LastSelectedHostUuid = settings.value(SER_LASTHOSTUUID).toString();
     m_ShowTwilightHud = settings.value(SER_TWILIGHTHUD, false).toBool();
@@ -304,14 +306,13 @@ void StreamingPreferences::setLastSelectedHostUuid(const QString& uuid)
 
 void StreamingPreferences::setUiVersion(const QString& version)
 {
-    const QString normalized = (version.trimmed().compare(QLatin1String("v2"), Qt::CaseInsensitive) == 0)
-            ? QStringLiteral("v2")
-            : QStringLiteral("v1");
-    if (m_UiVersion == normalized) {
+    Q_UNUSED(version);
+    // The shell is Twilight. v1 is no longer a user-facing choice.
+    if (m_UiVersion == QLatin1String("v2")) {
         return;
     }
 
-    m_UiVersion = normalized;
+    m_UiVersion = QStringLiteral("v2");
     publishHudSamplingFlag();
 
     QSettings settings;

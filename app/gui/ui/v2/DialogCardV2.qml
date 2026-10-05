@@ -31,11 +31,12 @@ Item {
     property string focusSlot: "confirm"
     signal confirmed()
     signal canceled()
-    property int layer: 40
+    // Named overlayZ to avoid clashing with Qt Quick Item.layer (FINAL).
+    property int overlayZ: 40
 
     anchors.fill: parent
     visible: open
-    z: open ? layer : 0
+    z: open ? overlayZ : 0
 
     readonly property bool helpVisible: helpUrl !== "" && SystemProperties.hasBrowser
 

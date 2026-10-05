@@ -91,8 +91,8 @@ popd
 
 echo Saving dSYM file
 pushd $BUILD_FOLDER
-dsymutil app/Twilight.app/Contents/MacOS/Moonlight -o Moonlight-$VERSION.dsym || fail "dSYM creation failed!"
-cp -R Moonlight-$VERSION.dsym $INSTALLER_FOLDER || fail "dSYM copy failed!"
+dsymutil app/Twilight.app/Contents/MacOS/Twilight -o Twilight-$VERSION.dsym || fail "dSYM creation failed!"
+cp -R Twilight-$VERSION.dsym $INSTALLER_FOLDER || fail "dSYM copy failed!"
 popd
 
 echo Creating app bundle

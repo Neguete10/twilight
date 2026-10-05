@@ -138,8 +138,8 @@ public:
     Q_PROPERTY(bool swapFaceButtons MEMBER swapFaceButtons NOTIFY swapFaceButtonsChanged)
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
-    // "v2" (Twilight, the starting shell) or "v1" (Classic).
-    // Stored under the QSettings key "uiVersion". A missing key is v2.
+    // Always "v2" (Twilight). A stored "v1" is ignored and rewritten.
+    // Stored under the QSettings key "uiVersion".
     Q_PROPERTY(QString uiVersion READ uiVersion WRITE setUiVersion NOTIFY uiVersionChanged)
     // UUID of the host last chosen in the Twilight shell. Empty if none.
     // Stored under the QSettings key "lastSelectedHostUuid".

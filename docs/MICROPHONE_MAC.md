@@ -34,7 +34,7 @@ Opus bytes are capped at 247 so the 4-byte microphone header plus the Opus packe
 Capture stays off unless all of these are true:
 
 1. macOS.
-2. Settings → Audio → "Stream microphone to the host" is checked, and macOS has granted microphone access. Classic and Twilight both show this switch, and both call `setMicrophoneEnabled`.
+2. Settings → Audio → "Stream microphone to the host" is checked, and macOS has granted microphone access. The Twilight switch calls `setMicrophoneEnabled`.
 3. The host is not GeForce Experience (`NvComputer::isNvidiaServerSoftware`).
 4. `LiIsControlStreamEncrypted()` is true. That flag follows the host version (7.1.431 or newer), which is when moonlight-common-c encrypts control packets. Voice is not sent on an unencrypted control stream.
 
