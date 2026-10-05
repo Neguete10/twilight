@@ -555,7 +555,11 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED(externalPort);
     ASSIGN_IF_CHANGED(pairState);
     ASSIGN_IF_CHANGED(serverCodecModeSupport);
-    ASSIGN_IF_CHANGED(currentGameId);
+    // While a quit is in flight, a serverinfo sample can still list the app
+    // we just cancelled. Adopting that id puts the tile back on Live.
+    if (!(this->pendingQuit && that.currentGameId != 0)) {
+        ASSIGN_IF_CHANGED(currentGameId);
+    }
     ASSIGN_IF_CHANGED(activeAddress);
     ASSIGN_IF_CHANGED(state);
     ASSIGN_IF_CHANGED(gfeVersion);

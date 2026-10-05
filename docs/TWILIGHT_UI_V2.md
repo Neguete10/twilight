@@ -22,7 +22,7 @@ The main window toolbar has a **Twilight / Classic** control. Twilight is the le
 | Stream start | Twilight launch card, then the existing `Session` |
 | In-stream HUD | Glass chips for FPS, bitrate, and RTT, plus End, while a Twilight stream is open |
 
-Pin on an app tile is Moonlight's existing direct-launch flag (one app per host). Right-click a tile, or press the menu button, for launch, quit, direct launch, and hide. Hide stays off while that app is running or set to direct launch, unless it is already hidden. Show hidden apps on the host sheet is Classic's View All Apps. A running tile has its own Quit button, which quits the host app and does not start another. Help and an update pill sit in the shell header when there is something to open. Discord is in Settings, next to Help.
+Pin on an app tile is Moonlight's existing direct-launch flag (one app per host). Right-click a tile, or press the menu button, for launch, quit, direct launch, and hide. Hide stays off while that app is running or set to direct launch, unless it is already hidden. Show hidden apps on the host sheet is Classic's View All Apps. A running tile has its own Quit button, which quits the host app and does not start another. An update pill sits in the shell header when an update is available. About is a Settings section: version, a short notice, Check for Updates, and Source when a browser is available. There is no Licenses control in Twilight Settings. Error dialogs still have a Help button. The shell header does not show Help, About, or Discord.
 
 ## Icons and type
 

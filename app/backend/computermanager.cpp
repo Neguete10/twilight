@@ -637,6 +637,7 @@ public:
 
 signals:
     void quitAppFailed(QString error);
+    void quitAppSucceeded();
 
 private:
     void run()
@@ -647,6 +648,7 @@ private:
             if (m_Computer->currentGameId != 0) {
                 http.quitApp();
             }
+            emit quitAppSucceeded();
         } catch (const GfeHttpResponseException& e) {
             {
                 QWriteLocker lock(&m_Computer->lock);
@@ -674,10 +676,36 @@ private:
 
 void ComputerManager::quitRunningApp(NvComputer* computer)
 {
-    QWriteLocker lock(&computer->lock);
-    computer->pendingQuit = true;
+    {
+        QWriteLocker lock(&computer->lock);
+        computer->pendingQuit = true;
+    }
 
     PendingQuitTask* quit = new PendingQuitTask(this, computer);
+    // Keep the task alive until the main thread has seen the result.
+    // QThreadPool would otherwise delete it before a queued completion runs.
+    quit->setAutoDelete(false);
+    connect(quit, &PendingQuitTask::quitAppSucceeded, this, [this, computer, quit]() {
+        {
+            QWriteLocker lock(&computer->lock);
+            if (!computer->pendingQuit) {
+                quit->deleteLater();
+                return;
+            }
+            computer->currentGameId = 0;
+            computer->pendingQuit = false;
+        }
+        // Same notifications as a poll that sees the app stop, without
+        // waiting for the next serverinfo pass (that pass used to be the
+        // only completion, and a stale poll kept the tile on Live).
+        emit computerStateChanged(computer);
+        emit quitAppCompleted(QVariant());
+        saveHost(computer);
+        quit->deleteLater();
+    }, Qt::QueuedConnection);
+    connect(quit, &PendingQuitTask::quitAppFailed, this, [quit](QString) {
+        quit->deleteLater();
+    }, Qt::QueuedConnection);
     QThreadPool::globalInstance()->start(quit);
 }
 

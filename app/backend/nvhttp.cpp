@@ -5,6 +5,7 @@
 #include <QUuid>
 #include <QtNetwork/QNetworkReply>
 #include <QEventLoop>
+#include <QThread>
 #include <QTimer>
 #include <QXmlStreamReader>
 #include <QSslKey>
@@ -250,12 +251,18 @@ NvHTTP::quitApp()
     verifyResponseStatus(response);
 
     // Newer GFE versions will just return success even if quitting fails
-    // if we're not the original requester.
-    if (getCurrentGame(getServerInfo(NvHTTP::NVLL_ERROR)) != 0) {
-        // Generate a synthetic GfeResponseException letting the caller know
-        // that they can't kill someone else's stream.
-        throw GfeHttpResponseException(599, "");
+    // if we're not the original requester. Sunshine can also still list the
+    // app for a moment after a cancel that did stop it, so recheck briefly
+    // before reporting that this client cannot quit the stream.
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        if (getCurrentGame(getServerInfo(NvHTTP::NVLL_ERROR)) == 0) {
+            return;
+        }
+        if (attempt + 1 < 8) {
+            QThread::msleep(250);
+        }
     }
+    throw GfeHttpResponseException(599, "");
 }
 
 QVector<NvDisplayMode>

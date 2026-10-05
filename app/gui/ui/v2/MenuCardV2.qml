@@ -29,8 +29,9 @@ Item {
             if (!entry)
                 continue
             var enabledEntry = entry.enabled !== false
+            var action = entry["action"] ? ("" + entry["action"]) : ""
             rows.append({
-                entryId: entry.id ? ("" + entry.id) : "",
+                entryId: action,
                 label: entry.text ? ("" + entry.text) : "",
                 enabledEntry: enabledEntry ? "1" : "0"
             })

@@ -51,6 +51,11 @@ Item {
     property string testMessage: ""
     property string toastText: ""
     property bool quitOnly: false
+    // Captured when Quit is confirmed. Cancel and a click falling through
+    // onto Resume must not turn a quit-only into a launch.
+    property bool quitLaunchNext: false
+    property int savedNextIndex: -1
+    property string savedNextName: ""
     property bool appMenuOpen: false
     property int menuAppIndex: -1
     property var appMenuEntries: []
@@ -192,9 +197,6 @@ Item {
         var ids = []
         if (updateUrl !== "" || AutoUpdateChecker.availableVersion !== "")
             ids.push("update")
-        if (SystemProperties.hasBrowser)
-            ids.push("help")
-        ids.push("about")
         ids.push("classic")
         ids.push("settings")
         return ids
@@ -370,12 +372,6 @@ Item {
         var id = ids[headerPos]
         if (id === "update" && updateUrl !== "")
             Qt.openUrlExternally(updateUrl)
-        else if (id === "help")
-            Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
-        else if (id === "about") {
-            settingsSheet.section = "about"
-            settingsOpen = true
-        }
         else if (id === "classic")
             requestShell("v1")
         else if (id === "settings")
@@ -432,27 +428,36 @@ Item {
         var running = appModel.appRunningAt(index)
         var hidden = appModel.appHiddenAt(index)
         var direct = appModel.appDirectLaunchAt(index)
-        var entries = [{ id: "launch", text: running ? qsTr("Resume") : qsTr("Launch"), enabled: true }]
+        // "action", not "id": QML does not round-trip an "id" field on a plain object.
+        var entries = [{ action: "launch", text: running ? qsTr("Resume") : qsTr("Launch"), enabled: true }]
         if (running)
-            entries.push({ id: "quit", text: qsTr("Quit"), enabled: true })
-        entries.push({ id: "direct", text: direct ? qsTr("Direct launch on") : qsTr("Direct launch"), enabled: !hidden })
-        entries.push({ id: "hide", text: hidden ? qsTr("Show in library") : qsTr("Hide"), enabled: canHideApp(index) })
+            entries.push({ action: "quit", text: qsTr("Quit"), enabled: true })
+        entries.push({ action: "direct", text: direct ? qsTr("Direct launch on") : qsTr("Direct launch"), enabled: !hidden })
+        entries.push({ action: "hide", text: hidden ? qsTr("Show in library") : qsTr("Hide"), enabled: canHideApp(index) })
         appMenuEntries = entries
         appMenuOpen = true
     }
 
-    function pickAppMenu(id) {
+    function pickAppMenu(action) {
         var index = menuAppIndex
-        appMenuOpen = false
-        if (!appModel || index < 0)
+        if (!appModel || index < 0) {
+            appMenuOpen = false
             return
-        if (id === "launch")
-            startApp(index, true)
-        else if (id === "quit")
+        }
+        // Open the quit dialog before closing the menu so modalOpen stays
+        // true. Closing first drops focus onto the grid, and the same
+        // confirm key resumes the running app instead of quitting it.
+        if (action === "quit") {
             requestQuitOnly()
-        else if (id === "direct")
+            appMenuOpen = false
+            return
+        }
+        appMenuOpen = false
+        if (action === "launch")
+            startApp(index, true)
+        else if (action === "direct")
             trySetDirect(index, !appModel.appDirectLaunchAt(index))
-        else if (id === "hide")
+        else if (action === "hide")
             trySetHidden(index, !appModel.appHiddenAt(index))
     }
 
@@ -608,13 +613,34 @@ Item {
         })
     }
 
+    function confirmQuit() {
+        if (!appModel || quitting)
+            return
+        // Snapshot before the dialog closes. Hiding it delivers the same
+        // click to whatever is underneath (often Resume) and Cancel clears
+        // quitOnly. Either one used to start another session instead of
+        // stopping the host app.
+        savedNextIndex = pendingAppIndex
+        savedNextName = pendingAppName
+        quitLaunchNext = !quitOnly && savedNextIndex >= 0
+        quitting = true
+        quitOpen = false
+        appModel.quitRunningApp()
+    }
+
     function afterQuit(error) {
-        ComputerManager.quitAppCompleted.disconnect(afterQuit)
-        var launchNext = !quitOnly
-        var nextIndex = pendingAppIndex
-        var nextName = pendingAppName
-        quitOnly = false
+        if (!quitting)
+            return
+        var launchNext = quitLaunchNext
+        var nextIndex = savedNextIndex
+        var nextName = savedNextName
         quitting = false
+        quitOnly = false
+        quitLaunchNext = false
+        pendingAppIndex = -1
+        pendingAppName = ""
+        savedNextIndex = -1
+        savedNextName = ""
         if (error !== undefined && error !== null && ("" + error) !== "") {
             showError("" + error)
             return
@@ -713,6 +739,13 @@ Item {
         onRowsInserted: shell.noteComputersChanged()
         onRowsRemoved: shell.noteComputersChanged()
         onDataChanged: shell.hostRevision = shell.hostRevision + 1
+    }
+
+    // Stays for the life of the shell. Connecting shell.afterQuit from the
+    // dialog did not keep the slot, so Quit never left "Quitting…".
+    Connections {
+        target: ComputerManager
+        onQuitAppCompleted: shell.afterQuit(error)
     }
 
     Component.onCompleted: {
@@ -831,60 +864,6 @@ Item {
                                 Window.window.openUpdatePrompt()
                             else if (shell.updateUrl !== "")
                                 Qt.openUrlExternally(shell.updateUrl)
-                        }
-                    }
-                }
-                Rectangle {
-                    id: helpHit
-                    visible: SystemProperties.hasBrowser
-                    width: visible ? helpLabel.implicitWidth + 28 : 0
-                    height: 36
-                    radius: 18
-                    color: helpArea.containsMouse ? theme.fillStrong : theme.fill
-                    border.width: shell.headerArmed("help") ? 2 : 1
-                    border.color: shell.headerArmed("help") ? theme.accent : theme.stroke
-                    anchors.verticalCenter: parent.verticalCenter
-                    TwTextV2 {
-                        id: helpLabel
-                        anchors.centerIn: parent
-                        theme: shell.theme
-                        text: qsTr("Help")
-                        font.pixelSize: 13
-                        font.weight: Font.DemiBold
-                    }
-                    MouseArea {
-                        id: helpArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
-                    }
-                }
-                Rectangle {
-                    id: aboutHit
-                    width: aboutLabel.implicitWidth + 20
-                    height: 36
-                    radius: 10
-                    color: "transparent"
-                    border.width: shell.headerArmed("about") ? 2 : 0
-                    border.color: theme.accent
-                    anchors.verticalCenter: parent.verticalCenter
-                    TwTextV2 {
-                        id: aboutLabel
-                        anchors.centerIn: parent
-                        theme: shell.theme
-                        text: qsTr("About")
-                        font.pixelSize: 13
-                        color: aboutArea.containsMouse ? theme.accent : theme.secondary
-                    }
-                    MouseArea {
-                        id: aboutArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            settingsSheet.section = "about"
-                            shell.settingsOpen = true
                         }
                     }
                 }
@@ -1493,6 +1472,23 @@ Item {
                                                     source: model.boxart
                                                     opacity: model.hidden ? 0.4 : 1
                                                 }
+                                                MouseArea {
+                                                    z: 0
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                                    onClicked: {
+                                                        shell.navZone = "apps"
+                                                        shell.appCursor = shell.slotByIndex[index] !== undefined ? shell.slotByIndex[index] : shell.appCursor
+                                                        if (mouse.button === Qt.RightButton)
+                                                            shell.openAppMenu(index)
+                                                        else if (!model.running)
+                                                            shell.startApp(index, true)
+                                                        else
+                                                            shell.openAppMenu(index)
+                                                        shell.focusNav()
+                                                    }
+                                                }
                                                 Rectangle {
                                                     visible: model.running
                                                     anchors.left: parent.left
@@ -1580,23 +1576,6 @@ Item {
                                                         anchors.fill: parent
                                                         cursorShape: Qt.PointingHandCursor
                                                         onClicked: shell.requestQuitOnly()
-                                                    }
-                                                }
-                                                MouseArea {
-                                                    z: 1
-                                                    anchors.fill: parent
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                                    onClicked: {
-                                                        shell.navZone = "apps"
-                                                        shell.appCursor = shell.slotByIndex[index] !== undefined ? shell.slotByIndex[index] : shell.appCursor
-                                                        if (mouse.button === Qt.RightButton)
-                                                            shell.openAppMenu(index)
-                                                        else if (!model.running)
-                                                            shell.startApp(index, true)
-                                                        else
-                                                            shell.openAppMenu(index)
-                                                        shell.focusNav()
                                                     }
                                                 }
                                             }
@@ -1782,13 +1761,10 @@ Item {
                 : qsTr("Quit %1 before starting %2? Unsaved progress on the host will be lost.").arg(shell.quitAppName).arg(shell.pendingAppName)
         confirmText: shell.quitOnly ? qsTr("Quit") : qsTr("Quit and stream")
         danger: true
-        onConfirmed: {
-            shell.quitOpen = false
-            shell.quitting = true
-            ComputerManager.quitAppCompleted.connect(shell.afterQuit)
-            shell.appModel.quitRunningApp()
-        }
+        onConfirmed: shell.confirmQuit()
         onCanceled: {
+            if (shell.quitting)
+                return
             shell.quitOnly = false
             shell.quitOpen = false
         }
@@ -1883,12 +1859,6 @@ Item {
         entries: shell.appMenuEntries
         onPicked: shell.pickAppMenu(entryId)
         onDismissed: shell.appMenuOpen = false
-    }
-
-    Shortcut {
-        sequence: StandardKey.HelpContents
-        enabled: !shell.modalOpen && SystemProperties.hasBrowser
-        onActivated: Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide")
     }
 
     Item {
