@@ -8,6 +8,7 @@ import StreamHudStats 1.0
 // touching the stack the command-line windows still use.
 Item {
     id: segue
+    readonly property var hostWindow: Window.window
     property var host
     property var session
     property string appName
@@ -99,7 +100,7 @@ Item {
                 : qsTr("Ctrl+Alt+Shift+Q"))
             SdlGamepadKeyNavigation.disable()
             gc()
-            session.exec(Window.window)
+            session.exec(hostWindow)
         }
     }
 
