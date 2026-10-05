@@ -369,8 +369,13 @@ Item {
         if (headerPos < 0 || headerPos >= ids.length)
             return
         var id = ids[headerPos]
-        if (id === "update" && updateUrl !== "")
-            Qt.openUrlExternally(updateUrl)
+        if (id === "update") {
+            // Same as clicking the header Update chip: ask first (PR25).
+            if (Window.window && Window.window.openUpdatePrompt)
+                Window.window.openUpdatePrompt()
+            else if (updateUrl !== "")
+                Qt.openUrlExternally(updateUrl)
+        }
         else if (id === "settings")
             settingsOpen = true
     }

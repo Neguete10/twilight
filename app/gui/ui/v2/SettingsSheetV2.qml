@@ -551,7 +551,7 @@ Item {
         else if (id === "close")
             closeRequested()
         else if (id === "checkUpdate")
-            AutoUpdateChecker.start()
+            AutoUpdateChecker.checkNow()
         else if (id === "aboutSource" && SystemProperties.hasBrowser)
             Qt.openUrlExternally("https://github.com/Neguete10/twilight")
         else if (id.indexOf("section:") === 0)
@@ -1351,7 +1351,7 @@ Item {
                                 id: checkUpdateLabel
                                 anchors.centerIn: parent
                                 theme: sheet.theme
-                                text: qsTr("Check for Updates")
+                                text: AutoUpdateChecker.checking ? qsTr("Checking…") : qsTr("Check for Updates")
                                 font.pixelSize: 13
                                 font.weight: Font.DemiBold
                             }
@@ -1362,7 +1362,7 @@ Item {
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     sheet.focusId("checkUpdate")
-                                    AutoUpdateChecker.start()
+                                    AutoUpdateChecker.checkNow()
                                 }
                             }
                         }
