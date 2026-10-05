@@ -13,6 +13,7 @@ Item {
     signal toastRequested(string message)
 
     property string section: "video"
+    property bool escapeEnabled: true
     property var resolutionOptions: []
     property var fpsOptions: []
     // Not bound to enableMicrophone. Turning the switch on asks macOS
@@ -822,7 +823,7 @@ Item {
 
     Shortcut {
         sequence: "Escape"
-        enabled: sheet.open
+        enabled: sheet.open && sheet.escapeEnabled
         onActivated: sheet.closeRequested()
     }
 }

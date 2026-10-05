@@ -1,6 +1,7 @@
 import QtQuick 2.9
 import QtQuick.Controls 2.2
 
+import AutoUpdateChecker 1.0
 import SystemProperties 1.0
 
 // GPL-3.0 interactive notice plus the third-party license texts in qrc.
@@ -65,6 +66,31 @@ Item {
             color: root.mutedColor
             font.pixelSize: 13
             wrapMode: Text.WordWrap
+        }
+
+        Text {
+            width: parent.width
+            text: AutoUpdateChecker.macAppStoreBuild
+                  ? qsTr("This copy of Twilight updates through the Mac App Store. It does not download a disk image.")
+                  : AutoUpdateChecker.checksGitHubReleases
+                    ? qsTr("Twilight can look for a newer release on GitHub. Nothing is downloaded until you choose to update.")
+                    : qsTr("This build does not check GitHub for Twilight releases.")
+            color: root.mutedColor
+            font.pixelSize: 13
+            wrapMode: Text.WordWrap
+        }
+
+        Button {
+            text: AutoUpdateChecker.checking ? qsTr("Checking…") : qsTr("Check for Updates")
+            enabled: !AutoUpdateChecker.checking
+            onClicked: AutoUpdateChecker.checkNow()
+        }
+
+        CheckBox {
+            visible: AutoUpdateChecker.checksGitHubReleases
+            text: qsTr("Check for updates when Twilight opens")
+            checked: AutoUpdateChecker.checkOnLaunch
+            onToggled: AutoUpdateChecker.checkOnLaunch = checked
         }
 
         TextEdit {
