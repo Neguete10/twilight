@@ -124,7 +124,13 @@ Item {
                     onClicked: {
                         if (!chips.confirming) {
                             chips.confirming = true
-                            confirmTimer.restart()
+                            // macOS cannot run this Timer from the stream loop.
+                            // processEvents() there dequeues the key-up SDL is
+                            // waiting for. The stream flush expires the confirm.
+                            if (Qt.platform.os === "osx" || Qt.platform.os === "macos")
+                                StreamHudStats.armHudConfirm(2200)
+                            else
+                                confirmTimer.restart()
                         }
                         else {
                             StreamHudStats.requestDisconnect()
@@ -139,5 +145,10 @@ Item {
         id: confirmTimer
         interval: 2200
         onTriggered: chips.confirming = false
+    }
+
+    Connections {
+        target: StreamHudStats
+        onHudConfirmExpired: chips.confirming = false
     }
 }

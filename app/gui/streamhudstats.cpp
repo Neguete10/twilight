@@ -5,13 +5,26 @@
 
 #include <SDL.h>
 
+#include <QCoreApplication>
+#include <QEventLoop>
 #include <QMetaObject>
 #include <QPointer>
 #include <QSurfaceFormat>
 #include <QWindow>
 
-// raise is ignored on macOS: the chips are ordered front on every sync.
-// Passing false on other platforms only moves the window.
+#ifdef Q_OS_DARWIN
+// Qt delivers this from its Cocoa dispatcher after posted events. Calling it
+// here flushes mouse and expose events the HUD view already queued. It does
+// not call nextEventMatchingMask, so SDL still dequeues key-ups itself.
+class QWindowSystemInterface {
+public:
+    static bool flushWindowSystemEvents(QEventLoop::ProcessEventsFlags flags);
+};
+#endif
+
+// macOS orders the chips with orderFrontRegardless and does not call
+// QWindow::raise() (that would make the chips key). Other platforms raise
+// only when the caller asks.
 void twilightHudSync(QWindow* window, void* sdlWindow, bool raise);
 void twilightHudDetach(QWindow* window);
 
@@ -55,7 +68,9 @@ StreamHudStats* StreamHudStats::instance()
 StreamHudStats::StreamHudStats(QObject* parent)
     : QObject(parent),
       m_Streaming(false),
-      m_HasSample(false)
+      m_HasSample(false),
+      m_ConfirmArmed(false),
+      m_ConfirmDeadline(0)
 {
 }
 
@@ -141,6 +156,7 @@ void StreamHudStats::noteSessionEnded()
     }
     m_Streaming = false;
     m_HasSample = false;
+    m_ConfirmArmed = false;
     m_FpsText.clear();
     m_BitrateText.clear();
     m_LatencyText.clear();
@@ -192,6 +208,32 @@ void StreamHudStats::followStream()
         return;
     }
     twilightHudSync(s_HudWindow.data(), s_StreamWindow, false);
+}
+
+void StreamHudStats::armHudConfirm(int msec)
+{
+    if (msec < 0) {
+        msec = 0;
+    }
+    m_ConfirmArmed = true;
+    m_ConfirmDeadline = SDL_GetTicks() + static_cast<quint32>(msec);
+}
+
+void StreamHudStats::flushStreamUi()
+{
+    QCoreApplication::sendPostedEvents();
+#ifdef Q_OS_DARWIN
+    QWindowSystemInterface::flushWindowSystemEvents(QEventLoop::AllEvents);
+    // The flush posts the scene-graph update. Deliver that too.
+    QCoreApplication::sendPostedEvents();
+#endif
+
+    StreamHudStats* self = instance();
+    if (self != nullptr && self->m_Streaming && self->m_ConfirmArmed
+            && SDL_TICKS_PASSED(SDL_GetTicks(), self->m_ConfirmDeadline)) {
+        self->m_ConfirmArmed = false;
+        emit self->hudConfirmExpired();
+    }
 }
 
 void StreamHudStats::orderFront()

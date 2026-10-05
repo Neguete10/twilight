@@ -35,6 +35,11 @@ public:
     Q_INVOKABLE void noteSessionEnded();
     Q_INVOKABLE void requestDisconnect();
 
+    // macOS stream loop cannot run the QML Timer: that needs processEvents(),
+    // which dequeues the key-up SDL is waiting for. flushStreamUi() expires
+    // this deadline instead. Other platforms still use the QML Timer.
+    Q_INVOKABLE void armHudConfirm(int msec);
+
     // The QML HUD window. Kept so the stream loop can raise it after SDL
     // creates the fullscreen window. Parent stays null.
     Q_INVOKABLE void attachWindow(QObject* window);
@@ -52,6 +57,10 @@ public:
     // Safe to call from the main thread during Session::execInternal().
     Q_INVOKABLE static void orderFront();
 
+    // Deliver queued Qt work (HUD samples, the End button) without dequeuing
+    // Cocoa NSEvents. The macOS stream loop must not call processEvents().
+    static void flushStreamUi();
+
     // Detach the HUD while the stream window's level, collection behavior,
     // fullscreen state, or frame is changing, then reattach when the matching
     // end runs. Nested. followStream and orderFront during the mutation are
@@ -63,6 +72,7 @@ public:
 signals:
     void streamingChanged();
     void statsChanged();
+    void hudConfirmExpired();
 
 public slots:
     void applySample(double fps, double bitrateMbps, bool hasBitrate, bool hasLatency, double latencyMs, QString codec);
@@ -72,6 +82,8 @@ private:
 
     bool m_Streaming;
     bool m_HasSample;
+    bool m_ConfirmArmed;
+    quint32 m_ConfirmDeadline;
     QString m_FpsText;
     QString m_BitrateText;
     QString m_LatencyText;

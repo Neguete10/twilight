@@ -132,7 +132,8 @@ void twilightHudSync(QWindow* window, void* sdlWindow, bool raise)
     if (!window->isVisible()) {
         window->show();
     }
-    window->raise();
+    // Do not call QWindow::raise(). AppKit would try to make this window
+    // key, and a key-up that follows is not delivered to the SDL view.
 
     NSWindow* nativeWindow = nativeWindowFor(window);
     if (nativeWindow == nil) {
