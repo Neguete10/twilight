@@ -19,7 +19,19 @@ if [ ! -f "$SRC/CMakeLists.txt" ]; then
 fi
 
 build_metal() {
-    cmake -S "$SRC" -B "$BUILD"
+    # Same floor as QMAKE_MACOSX_DEPLOYMENT_TARGET. A stale cmake cache
+    # from an SDK-default configure would keep minos at the SDK version.
+    deployment_target=$(sh "$ROOT/scripts/macos-deployment-target.sh") || fail "macOS deployment target is not set"
+    export MACOSX_DEPLOYMENT_TARGET="$deployment_target"
+    cache="$BUILD/CMakeCache.txt"
+    if [ -f "$cache" ]; then
+        cached=$(sed -n 's/^CMAKE_OSX_DEPLOYMENT_TARGET:STRING=//p' "$cache" | head -n 1)
+        if [ "$cached" != "$deployment_target" ]; then
+            echo "Resetting $BUILD (deployment target ${cached:-unset}, want $deployment_target)"
+            rm -rf "$BUILD"
+        fi
+    fi
+    cmake -S "$SRC" -B "$BUILD" -DCMAKE_OSX_DEPLOYMENT_TARGET="$deployment_target"
     cmake --build "$BUILD"
 }
 

@@ -439,12 +439,18 @@ PyroWave Vulkan decoder (macOS, MoltenVK). Leave the submodule at
 ```bash
 git submodule update --init pyrowave
 cd pyrowave && bash checkout_granite.sh && cd ..
-cmake -S pyrowave -B pyrowave/build -DPYROWAVE_SHARED=ON
-cmake --build pyrowave/build --target pyrowave-shared
+scripts/build-pyrowave-shared.sh
 # SDL with Vulkan/MoltenVK, libplacebo as -lplacebo, then:
 qmake CONFIG+=pyrowave
 make
 ```
+
+On macOS that script passes `CMAKE_OSX_DEPLOYMENT_TARGET` from
+`QMAKE_MACOSX_DEPLOYMENT_TARGET` in `globaldefs.pri` (macOS 11.0, the same
+floor as `LSMinimumSystemVersion` in `app/Info.plist`). Do not configure
+this tree with a bare `cmake` invocation: an unset deployment target
+stamps the SDK version, which is why the 7.0.0 dylibs were built for
+macOS 27.
 
 That qmake line on macOS also compiles the Metal client and, on a makefile
 build, `libpyrowave-metal` itself.
@@ -458,14 +464,14 @@ A fresh clone does not fill submodules until init. This checks out
 
 ```bash
 git submodule update --init pyrowave-metal
-# Vulkan libpyrowave-shared is still the cmake steps above, then:
+# Vulkan libpyrowave-shared is still scripts/build-pyrowave-shared.sh, then:
 qmake CONFIG+=pyrowave
 make
 ```
 
-`make` runs `scripts/build-pyrowave-metal.sh`, which is
-`cmake -S pyrowave-metal/metal -B pyrowave-metal/build` and
-`cmake --build pyrowave-metal/build`, then copies
+`make` runs `scripts/build-pyrowave-metal.sh`, which configures
+`pyrowave-metal/metal` with the same macOS 11.0 deployment target and
+builds `libpyrowave-metal`, then copies
 `libpyrowave-metal*.dylib` into `Twilight.app/Contents/Frameworks`.
 Do not commit that dylib. It is cmake output under `pyrowave-metal/build/`
 and is not part of the pinned commit. The submodule is marked

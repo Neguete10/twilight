@@ -69,9 +69,16 @@ if [ "${TWILIGHT_MAS:-}" = "1" ]; then
   echo "Entitlements: $MAS_ENTITLEMENTS"
   echo "Installer identity is used only for productbuild. Nothing is uploaded."
 fi
+MACOS_DEPLOYMENT_TARGET=$(sh "$SOURCE_ROOT/scripts/macos-deployment-target.sh") || fail "macOS deployment target is not set"
+export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
+echo "macOS deployment target: $MACOS_DEPLOYMENT_TARGET"
+
 echo Configuring the project
 pushd $BUILD_FOLDER
-qmake $SOURCE_ROOT/moonlight-qt.pro QMAKE_APPLE_DEVICE_ARCHS="x86_64 arm64" $QMAKE_CONFIG_ARGS || fail "Qmake failed!"
+qmake $SOURCE_ROOT/moonlight-qt.pro \
+  QMAKE_APPLE_DEVICE_ARCHS="x86_64 arm64" \
+  QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
+  $QMAKE_CONFIG_ARGS || fail "Qmake failed!"
 popd
 
 echo Compiling Moonlight in $BUILD_CONFIG configuration

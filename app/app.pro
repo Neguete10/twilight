@@ -29,6 +29,15 @@ unix:!macx {
 
 include(../globaldefs.pri)
 
+macx {
+    # globaldefs.pri sets QMAKE_MACOSX_DEPLOYMENT_TARGET for this app and
+    # the static libraries. An empty value would let clang use the SDK minos.
+    isEmpty(QMAKE_MACOSX_DEPLOYMENT_TARGET) {
+        error("QMAKE_MACOSX_DEPLOYMENT_TARGET is unset. See globaldefs.pri. Refusing to build Twilight with the SDK minos.")
+    }
+    message("Twilight macOS deployment target: $$QMAKE_MACOSX_DEPLOYMENT_TARGET")
+}
+
 # Precompile QML files to avoid writing qmlcache on portable versions.
 # Since this binds the app against the Qt runtime version, we will only
 # do this for Windows and Mac (when disable-prebuilts is not defined),
