@@ -51,14 +51,22 @@ mkdir $BUILD_ROOT
 mkdir $BUILD_FOLDER
 mkdir $INSTALLER_FOLDER
 
-# Desktop DMG is the default. Signed desktop builds use
-# spatial-audio.entitlements. Unsigned builds embed no entitlements.
+# Desktop DMG is the default. Signed Developer ID desktop builds use
+# empty entitlements (no app-sandbox). Do not pass spatial-audio.entitlements
+# here: its com.apple.developer.* keys require Apple grants and cause
+# launchd spawn failure (POSIX 163) without them. Matches shipping 7.0.0.
+# Unsigned builds embed no entitlements.
 # TWILIGHT_MAS=1 selects CONFIG+=twilight-mas and writes a productbuild
 # .pkg. It does not upload, notarize, or submit a build.
 # TWILIGHT_MAS_MULTICAST=1 also selects the multicast entitlement. Leave
 # it unset until the provisioning profile contains Apple's grant.
 QMAKE_CONFIG_ARGS=
 MAS_ENTITLEMENTS="$SOURCE_ROOT/app/deploy/macos/Twilight-MAS.entitlements"
+# Desktop ships PyroWave (Vulkan/Metal). generate-dmg used to leave
+# CONFIG+=pyrowave off; 7.0.1 without it hid Settings→Video→PyroWave and
+# omitted the decoder + libpyrowave dylibs. Homebrew libplacebo/vulkan are
+# arm64-only, so desktop PyroWave builds match 7.0.0 (arm64), not universal.
+DEVICE_ARCHS="x86_64 arm64"
 if [ "${TWILIGHT_MAS:-}" = "1" ]; then
   QMAKE_CONFIG_ARGS="CONFIG+=twilight-mas"
   if [ "${TWILIGHT_MAS_MULTICAST:-}" = "1" ]; then
@@ -71,6 +79,13 @@ if [ "${TWILIGHT_MAS:-}" = "1" ]; then
   echo "Hardened Runtime: codesign --options runtime"
   echo "Entitlements: $MAS_ENTITLEMENTS"
   echo "Installer identity is used only for productbuild. Nothing is uploaded."
+else
+  # TWILIGHT_PYROWAVE=0 skips the decoder for a codec-free desktop DMG.
+  if [ "${TWILIGHT_PYROWAVE:-1}" != "0" ]; then
+    QMAKE_CONFIG_ARGS="CONFIG+=pyrowave"
+    DEVICE_ARCHS="arm64"
+    echo "Desktop PyroWave: CONFIG+=pyrowave, arch $DEVICE_ARCHS"
+  fi
 fi
 MACOS_DEPLOYMENT_TARGET=$(sh "$SOURCE_ROOT/scripts/macos-deployment-target.sh") || fail "macOS deployment target is not set"
 export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
@@ -79,7 +94,7 @@ echo "macOS deployment target: $MACOS_DEPLOYMENT_TARGET"
 echo Configuring the project
 pushd $BUILD_FOLDER
 qmake $SOURCE_ROOT/moonlight-qt.pro \
-  QMAKE_APPLE_DEVICE_ARCHS="x86_64 arm64" \
+  QMAKE_APPLE_DEVICE_ARCHS="$DEVICE_ARCHS" \
   QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
   $QMAKE_CONFIG_ARGS || fail "Qmake failed!"
 popd
@@ -117,9 +132,10 @@ if [ "$SIGNING_IDENTITY" != "" ]; then
       --sign "$SIGNING_IDENTITY" \
       $BUILD_FOLDER/app/Twilight.app || fail "Signing failed!"
   else
-    # Preserve the CoreAudio/spatial-audio signing entitlements for desktop builds.
+    # Developer ID desktop: hardened runtime, no entitlements plist.
+    # spatial-audio.entitlements is MAS-oriented (app-sandbox + restricted
+    # com.apple.developer.*). Embedding it on Developer ID breaks open.
     codesign --force --deep --options runtime --timestamp \
-      --entitlements $SOURCE_ROOT/app/deploy/macos/spatial-audio.entitlements \
       --sign "$SIGNING_IDENTITY" \
       $BUILD_FOLDER/app/Twilight.app || fail "Signing failed!"
   fi
