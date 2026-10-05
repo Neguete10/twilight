@@ -10,6 +10,9 @@ Item {
     id: segue
     property var host
     property var session
+    // Window.window is only valid on Item. The start timer is a QtObject, so
+    // reading it there returns undefined and Session falls back to display 0.
+    readonly property var hostWindow: Window.window
     property string appName
     property bool isResume: false
     property string stageText: isResume ? qsTr("Resuming %1").arg(appName) : qsTr("Starting %1").arg(appName)
@@ -99,7 +102,7 @@ Item {
                 : qsTr("Ctrl+Alt+Shift+Q"))
             SdlGamepadKeyNavigation.disable()
             gc()
-            session.exec(Window.window)
+            session.exec(hostWindow)
         }
     }
 
