@@ -1,3 +1,4 @@
+#!/bin/bash
 # Desktop DMGs require the create-dmg shell script:
 # https://github.com/create-dmg/create-dmg
 # Install it with: brew install create-dmg
@@ -64,9 +65,9 @@ QMAKE_CONFIG_ARGS=
 MAS_ENTITLEMENTS="$SOURCE_ROOT/app/deploy/macos/Twilight-MAS.entitlements"
 # Desktop ships PyroWave (Vulkan/Metal). generate-dmg used to leave
 # CONFIG+=pyrowave off; 7.0.1 without it hid Settings→Video→PyroWave and
-# omitted the decoder + libpyrowave dylibs. Homebrew libplacebo/vulkan are
-# arm64-only, so desktop PyroWave builds match 7.0.0 (arm64), not universal.
-DEVICE_ARCHS="x86_64 arm64"
+# omitted the decoder + libpyrowave dylibs. Desktop builds are Apple
+# Silicon only (macOS 13). v19's libplacebo is universal; the app is arm64.
+DEVICE_ARCHS="arm64"
 if [ "${TWILIGHT_MAS:-}" = "1" ]; then
   QMAKE_CONFIG_ARGS="CONFIG+=twilight-mas"
   if [ "${TWILIGHT_MAS_MULTICAST:-}" = "1" ]; then
@@ -91,11 +92,47 @@ MACOS_DEPLOYMENT_TARGET=$(sh "$SOURCE_ROOT/scripts/macos-deployment-target.sh") 
 export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
 echo "macOS deployment target: $MACOS_DEPLOYMENT_TARGET"
 
+# Third-party libraries for the deployment target:
+# scripts/build-macos-deps.sh (official Qt 6.11.2, moonlight-qt-deps v19
+# libplacebo and MoltenVK, and a Vulkan loader built from source). 7.0.1
+# bundled Homebrew's copies, which carry the build Mac's OS as minos.
+# Desktop builds refuse to fall back to Homebrew. TWILIGHT_ALLOW_HOMEBREW_DEPS=1
+# is for local unsigned experiments only.
+MACOS_DEPS_ENV="${TWILIGHT_MACOS_DEPS:-$BUILD_ROOT/macos-deps}/env.sh"
+QMAKE_DEPS_ARGS=()
+if [ -f "$MACOS_DEPS_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$MACOS_DEPS_ENV"
+  [ "$TWILIGHT_DEPS_TARGET" = "$MACOS_DEPLOYMENT_TARGET" ] || fail "$MACOS_DEPS_ENV was built for $TWILIGHT_DEPS_TARGET, not $MACOS_DEPLOYMENT_TARGET. Re-run scripts/build-macos-deps.sh"
+  echo "Using macOS deps from $TWILIGHT_DEPS_PREFIX and Qt from $TWILIGHT_QT_DIR"
+  unset PKG_CONFIG_PATH CPATH LIBRARY_PATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH || true
+  QMAKE_DEPS_ARGS=(
+    "QMAKE_CFLAGS+=-I$TWILIGHT_DEPS_PREFIX/include"
+    "QMAKE_CXXFLAGS+=-I$TWILIGHT_DEPS_PREFIX/include"
+    "QMAKE_OBJECTIVE_CFLAGS+=-I$TWILIGHT_DEPS_PREFIX/include"
+    "QMAKE_LFLAGS+=-L$TWILIGHT_DEPS_PREFIX/lib"
+  )
+elif [ "${TWILIGHT_MAS:-}" != "1" ]; then
+  if [ "${TWILIGHT_ALLOW_HOMEBREW_DEPS:-}" = "1" ] && [ "$SIGNING_IDENTITY" == "" ]; then
+    echo "WARNING: $MACOS_DEPS_ENV missing; using Homebrew libraries. The bundle check below will likely fail."
+  else
+    fail "Missing $MACOS_DEPS_ENV. Run scripts/build-macos-deps.sh first so the bundle does not ship Homebrew libraries built for this Mac's OS."
+  fi
+fi
+case "$(command -v qmake)" in
+  /opt/homebrew/*|/usr/local/*)
+    [ "${TWILIGHT_ALLOW_HOMEBREW_DEPS:-}" = "1" ] || fail "qmake on PATH is Homebrew's ($(command -v qmake)). Its Qt is built for this Mac's OS. Use the Qt from scripts/build-macos-deps.sh." ;;
+esac
+if command -v qmake >/dev/null 2>&1; then
+  echo "qmake: $(command -v qmake) ($(qmake -query QT_VERSION))"
+fi
+
 echo Configuring the project
 pushd $BUILD_FOLDER
 qmake $SOURCE_ROOT/moonlight-qt.pro \
   QMAKE_APPLE_DEVICE_ARCHS="$DEVICE_ARCHS" \
   QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
+  "${QMAKE_DEPS_ARGS[@]}" \
   $QMAKE_CONFIG_ARGS || fail "Qmake failed!"
 popd
 
@@ -118,6 +155,34 @@ macdeployqt $BUILD_FOLDER/app/Twilight.app $EXTRA_ARGS -qmldir=$SOURCE_ROOT/app/
 
 echo Removing dSYM files from app bundle
 find $BUILD_FOLDER/app/Twilight.app/ -name '*.dSYM' | xargs rm -rf
+
+# PyroWave's Vulkan backend loads libvulkan, and the loader finds MoltenVK
+# through Contents/Resources/vulkan/icd.d. v19's libplacebo is linked, so
+# macdeployqt copies it; the loader and MoltenVK are not linked.
+if [ -n "${TWILIGHT_DEPS_PREFIX:-}" ] && [[ "$QMAKE_CONFIG_ARGS" == *pyrowave* ]]; then
+  [ -f "$TWILIGHT_DEPS_PREFIX/lib/libMoltenVK.dylib" ] || fail "Missing $TWILIGHT_DEPS_PREFIX/lib/libMoltenVK.dylib. Run scripts/build-macos-deps.sh prebuilts"
+  [ -e "$TWILIGHT_DEPS_PREFIX/lib/libvulkan.1.dylib" ] || fail "Missing $TWILIGHT_DEPS_PREFIX/lib/libvulkan.1.dylib. Run scripts/build-macos-deps.sh vulkan"
+  [ -f "$TWILIGHT_DEPS_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" ] || fail "Missing MoltenVK ICD json. Run scripts/build-macos-deps.sh prebuilts"
+  echo Bundling MoltenVK and the Vulkan loader
+  FRAMEWORKS="$BUILD_FOLDER/app/Twilight.app/Contents/Frameworks"
+  mkdir -p "$FRAMEWORKS"
+  cp -a "$TWILIGHT_DEPS_PREFIX/lib/libMoltenVK.dylib" "$FRAMEWORKS/libMoltenVK.dylib" || fail "MoltenVK copy failed!"
+  cp -a "$TWILIGHT_DEPS_PREFIX/lib"/libvulkan*.dylib "$FRAMEWORKS/" || fail "Vulkan loader copy failed!"
+  if [ ! -f "$FRAMEWORKS/libplacebo.dylib" ]; then
+    cp -a "$TWILIGHT_DEPS_PREFIX/lib/libplacebo.dylib" "$FRAMEWORKS/libplacebo.dylib" || fail "libplacebo copy failed!"
+  fi
+  mkdir -p "$BUILD_FOLDER/app/Twilight.app/Contents/Resources/vulkan/icd.d"
+  cp "$TWILIGHT_DEPS_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" "$BUILD_FOLDER/app/Twilight.app/Contents/Resources/vulkan/icd.d/" || fail "MoltenVK ICD copy failed!"
+fi
+
+# Drop Qt PDF plug-ins (they need QtPdf, which this app does not ship) and
+# strip LC_RPATH entries that point at Homebrew or another absolute prefix.
+# Do this before signing. Developer ID signing below is unchanged:
+# hardened runtime, no entitlements plist.
+python3 "$SOURCE_ROOT/scripts/prepare-macos-bundle.py" "$BUILD_FOLDER/app/Twilight.app" || fail "Could not strip outside rpaths or drop orphan plug-ins"
+
+echo "Checking bundle minos <= $MACOS_DEPLOYMENT_TARGET"
+"$SOURCE_ROOT/scripts/check-macos-minos.sh" "$BUILD_FOLDER/app/Twilight.app" "$MACOS_DEPLOYMENT_TARGET" || fail "Bundle has Mach-O files newer than macOS $MACOS_DEPLOYMENT_TARGET or links outside the bundle"
 
 if [ "$SIGNING_IDENTITY" != "" ]; then
   echo Signing app bundle
@@ -186,6 +251,7 @@ DMG_ROOT="$INSTALLER_FOLDER/dmg-root"
 rm -rf "$DMG_ROOT"
 mkdir -p "$DMG_ROOT/.background"
 ditto "$BUILD_FOLDER/app/Twilight.app" "$DMG_ROOT/Twilight.app" || fail "Could not stage Twilight.app"
+"$SOURCE_ROOT/scripts/check-macos-minos.sh" "$DMG_ROOT/Twilight.app" "$MACOS_DEPLOYMENT_TARGET" || fail "Staged Twilight.app has Mach-O files newer than macOS $MACOS_DEPLOYMENT_TARGET or links outside the bundle"
 cp "$DMG_BACKGROUND" "$DMG_ROOT/.background/background.png"
 cp "$DMG_BACKGROUND_2X" "$DMG_ROOT/.background/background@2x.png"
 

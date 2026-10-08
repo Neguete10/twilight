@@ -68,8 +68,24 @@ static QElapsedTimer s_LoggerTime;
 static QTextStream s_LoggerStream(stderr);
 static QThreadPool s_LoggerThread;
 static bool s_SuppressVerboseOutput;
-static QRegularExpression k_RikeyRegex("&rikey=\\w+");
-static QRegularExpression k_RikeyIdRegex("&rikeyid=[\\d-]+");
+
+// Heap, not static QRegularExpression objects. A static regex is destroyed
+// during process exit, and Qt logs again from its own static destructors
+// while the message handler is still installed (crash in ~QRegularExpression
+// from qtLogToDiskHandler). These two are never freed.
+static const QRegularExpression& rikeyRegex()
+{
+    static const QRegularExpression* const pattern =
+        new QRegularExpression(QStringLiteral("&rikey=\\w+"));
+    return *pattern;
+}
+
+static const QRegularExpression& rikeyIdRegex()
+{
+    static const QRegularExpression* const pattern =
+        new QRegularExpression(QStringLiteral("&rikeyid=[\\d-]+"));
+    return *pattern;
+}
 #ifdef LOG_TO_FILE
 // Max log file size of 10 MB
 static const uint64_t k_MaxLogSizeBytes = 10 * 1024 * 1024;
@@ -110,8 +126,8 @@ void logToLoggerStream(QString& message)
 #endif
 
     // Strip session encryption keys and IVs from the logs
-    message.replace(k_RikeyRegex, "&rikey=REDACTED");
-    message.replace(k_RikeyIdRegex, "&rikeyid=REDACTED");
+    message.replace(rikeyRegex(), "&rikey=REDACTED");
+    message.replace(rikeyIdRegex(), "&rikeyid=REDACTED");
 
 #ifdef LOG_TO_FILE
     auto oldLogSize = s_LogBytesWritten.fetchAndAddRelaxed(message.size());
@@ -307,6 +323,30 @@ LONG WINAPI UnhandledExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
 }
 
 #endif
+
+static void sdlLogAfterShutdown(void*, int, SDL_LogPriority, const char*)
+{
+}
+
+// Qt and SDL log again while main's locals and the process-lifetime statics
+// are destroyed. Drop our handlers first so that logging does not touch the
+// redaction regexes or the logger thread.
+static int finishMain(int code)
+{
+    s_LoggerThread.waitForDone();
+    qInstallMessageHandler(nullptr);
+    SDL_LogSetOutputFunction(sdlLogAfterShutdown, nullptr);
+#ifdef HAVE_FFMPEG
+    av_log_set_callback(av_log_default_callback);
+#endif
+#ifdef Q_OS_WIN32
+    // Without an explicit flush, console redirection for the list command
+    // doesn't work reliably (sometimes the target file contains no text).
+    fflush(stderr);
+    fflush(stdout);
+#endif
+    return code;
+}
 
 int main(int argc, char *argv[])
 {
@@ -523,7 +563,7 @@ int main(int argc, char *argv[])
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_TIMER) failed: %s",
                      SDL_GetError());
-        return -1;
+        return finishMain(-1);
     }
 
 #ifdef STEAM_LINK
@@ -533,7 +573,7 @@ int main(int argc, char *argv[])
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_VIDEO) failed: %s",
                      SDL_GetError());
-        return -1;
+        return finishMain(-1);
     }
 #endif
 
@@ -817,7 +857,7 @@ int main(int argc, char *argv[])
         // Load the main.qml file
         engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
         if (engine.rootObjects().isEmpty())
-            return -1;
+            return finishMain(-1);
     }
 
     int err = app.exec();
@@ -826,15 +866,5 @@ int main(int argc, char *argv[])
     // sometimes freezing and blocking process exit.
     QThreadPool::globalInstance()->waitForDone(30000);
 
-    // Wait for pending log messages to be printed
-    s_LoggerThread.waitForDone();
-
-#ifdef Q_OS_WIN32
-    // Without an explicit flush, console redirection for the list command
-    // doesn't work reliably (sometimes the target file contains no text).
-    fflush(stderr);
-    fflush(stdout);
-#endif
-
-    return err;
+    return finishMain(err);
 }

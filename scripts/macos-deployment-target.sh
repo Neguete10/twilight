@@ -9,7 +9,7 @@ PRI="$ROOT/globaldefs.pri"
 
 target=$(sed -n 's/^[[:space:]]*QMAKE_MACOSX_DEPLOYMENT_TARGET[[:space:]]*=[[:space:]]*\([0-9][0-9.]*\)[[:space:]]*$/\1/p' "$PRI")
 if [ -z "$target" ]; then
-    echo "globaldefs.pri must set QMAKE_MACOSX_DEPLOYMENT_TARGET (for example 11.0). An empty value lets clang stamp the SDK version as minos." >&2
+    echo "globaldefs.pri must set QMAKE_MACOSX_DEPLOYMENT_TARGET (for example 13.0). An empty value lets clang stamp the SDK version as minos." >&2
     exit 1
 fi
 

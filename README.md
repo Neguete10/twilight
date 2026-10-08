@@ -26,8 +26,16 @@ It sits beside Moonlight. Moonlight has not endorsed it.
 
 ## Download
 
-The notarized disk image is on the [v7.0.0 release](https://github.com/Neguete10/twilight/releases/tag/v7.0.0): [Twilight-7.0.0.dmg](https://github.com/Neguete10/twilight/releases/download/v7.0.0/Twilight-7.0.0.dmg). Developer ID signed, notarized by Apple, a direct download. It wants macOS 11 or later.
+The notarized disk image is on the [v7.0.0 release](https://github.com/Neguete10/twilight/releases/tag/v7.0.0): [Twilight-7.0.0.dmg](https://github.com/Neguete10/twilight/releases/download/v7.0.0/Twilight-7.0.0.dmg). Developer ID signed, notarized by Apple, a direct download. That 7.0.0 image wants macOS 11 or later. This tree is 7.0.2: Apple Silicon only, macOS 13 (Ventura) or later.
 
 ## Building
 
-To build it, init the submodules and run `scripts/generate-dmg.sh Release`. You will want Qt 6 (`qmake` and `macdeployqt`), Xcode, and the [create-dmg](https://github.com/create-dmg/create-dmg) shell script (`brew install create-dmg`). The disk image opens with Twilight.app on the left and an Applications folder alias on the right. The window picture is `app/deploy/macos/dmg/background.png`. Regenerate it, and the retina copy beside it, with `python3 scripts/make_dmg_background.py` (Pillow). Positions for both live in `app/deploy/macos/dmg/layout.env`. PyroWave's Vulkan and Metal decoders also need `CONFIG+=pyrowave`. That flag is described in `app/app.pro`. The disk-image script leaves it off.
+Init the submodules, build the macOS dependencies, then make the disk image. The dependency script downloads official Qt 6.11.2 and [moonlight-qt-deps v19](https://github.com/moonlight-stream/moonlight-qt-deps/releases/tag/v19) (libplacebo and MoltenVK, minimum OS 13, MoltenVK 12) and compiles the Vulkan loader, which that zip does not contain. Do not point `qmake` at Homebrew Qt. Its libraries are stamped with the build Mac's OS and will not launch on macOS 13–15.
+
+```bash
+git submodule update --init --recursive
+scripts/build-macos-deps.sh
+scripts/generate-dmg.sh Release
+```
+
+You will want Xcode, CMake, Ninja, and the [create-dmg](https://github.com/create-dmg/create-dmg) shell script (`brew install cmake ninja create-dmg`). `scripts/generate-dmg.sh Release` turns on `CONFIG+=pyrowave` (Metal and Vulkan) and builds an arm64 app. Signing stays Developer ID with the hardened runtime and no entitlements plist. The disk image opens with Twilight.app on the left and an Applications folder alias on the right. The window picture is `app/deploy/macos/dmg/background.png`. Regenerate it, and the retina copy beside it, with `python3 scripts/make_dmg_background.py` (Pillow). Positions for both live in `app/deploy/macos/dmg/layout.env`.

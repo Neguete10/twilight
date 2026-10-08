@@ -16,6 +16,9 @@ QT -= core gui
 !system(python3 $$PWD/../scripts/apply_mic_control_packet.py) {
     error("Failed to apply the microphone control-stream patch to moonlight-common-c")
 }
+!system(python3 $$PWD/../scripts/apply_limelog_eager.py) {
+    error("Failed to apply the eager Limelog patch to moonlight-common-c")
+}
 
 TARGET = moonlight-common-c
 TEMPLATE = lib

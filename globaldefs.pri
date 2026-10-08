@@ -19,12 +19,14 @@ CONFIG(release, debug|release) {
 
 # macOS minos for every qmake target that includes this file: the Twilight
 # app and the static libraries linked into it. This is the same floor as
-# LSMinimumSystemVersion (11.0.0) in app/Info.plist. scripts/macos-deployment-target.sh
+# LSMinimumSystemVersion (13.0.0) in app/Info.plist. scripts/macos-deployment-target.sh
 # reads the assignment below and passes it to the PyroWave dylib builds.
 # Do not remove it. With no deployment target, clang stamps the SDK version,
 # which is why the 7.0.0 binary (minos 27.0) would not launch on Sequoia.
+# 13.0 matches upstream Moonlight 6.2.0 and official Qt 6.11.2. The app is
+# Apple Silicon only.
 macx {
-    QMAKE_MACOSX_DEPLOYMENT_TARGET = 11.0
+    QMAKE_MACOSX_DEPLOYMENT_TARGET = 13.0
     isEmpty(QMAKE_MACOSX_DEPLOYMENT_TARGET) {
         error("QMAKE_MACOSX_DEPLOYMENT_TARGET is empty. Refusing to build with the SDK minos.")
     }

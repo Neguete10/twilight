@@ -52,10 +52,11 @@ Metal/VideoToolbox. Video codec = PyroWave is unchanged.
 - Live decode of a Vibeshine / Vibepollo stream on either backend. This VM
   has no Mac GPU, no MoltenVK, and no host.
 - The default Mac link (`-lssl.3 -lcrypto.3 -lavcodec.61 …`, no `-lplacebo`)
-  is unchanged. `CONFIG+=pyrowave` adds `-lpyrowave-shared -lplacebo` and
-  expects SDL to load MoltenVK. The prebuilts on this branch may not contain
-  libplacebo or an SDL built with `SDL_vulkan.h`. `andyg.pyrowave-macos` links
-  `-lplacebo` and a newer FFmpeg (`avcodec.62`).
+  is unchanged. `CONFIG+=pyrowave` adds `-lpyrowave-shared -lplacebo`.
+  Release builds take libplacebo and MoltenVK from moonlight-qt-deps v19
+  and a Vulkan loader built by `scripts/build-macos-deps.sh`. SDL loads
+  that loader; the loader reads `Contents/Resources/vulkan/icd.d` and opens
+  the bundled MoltenVK. v19's libplacebo already contains shaderc.
 - Record framing (see below). This client does not send the RTSP attributes
   that select it, so a current Vibeshine host should stay on length-prefixed
   frames. That was not tested live.
@@ -446,8 +447,9 @@ make
 ```
 
 On macOS that script passes `CMAKE_OSX_DEPLOYMENT_TARGET` from
-`QMAKE_MACOSX_DEPLOYMENT_TARGET` in `globaldefs.pri` (macOS 11.0, the same
-floor as `LSMinimumSystemVersion` in `app/Info.plist`). Do not configure
+`QMAKE_MACOSX_DEPLOYMENT_TARGET` in `globaldefs.pri` (macOS 13.0, the same
+floor as `LSMinimumSystemVersion` in `app/Info.plist`, and the same floor
+as upstream Moonlight 6.2.0 with Qt 6.11.2). Do not configure
 this tree with a bare `cmake` invocation: an unset deployment target
 stamps the SDK version, which is why the 7.0.0 dylibs were built for
 macOS 27.
@@ -470,7 +472,7 @@ make
 ```
 
 `make` runs `scripts/build-pyrowave-metal.sh`, which configures
-`pyrowave-metal/metal` with the same macOS 11.0 deployment target and
+`pyrowave-metal/metal` with the same macOS 13.0 deployment target and
 builds `libpyrowave-metal`, then copies
 `libpyrowave-metal*.dylib` into `Twilight.app/Contents/Frameworks`.
 Do not commit that dylib. It is cmake output under `pyrowave-metal/build/`
@@ -566,10 +568,14 @@ that layout against `scripts/testdata/`.
    `pyrowave.cpp` to that revision’s Vulkan header.
 4. Metal refuses to load if `pyrowave_get_api_version` is not 0.5.x. A newer
    `pyrowave_metal.h` needs a matching edit to `pyrowave_metal_api.h`.
-5. This branch’s Mac prebuilts may lack libplacebo and a Vulkan-enabled SDL.
-   `andyg.pyrowave-macos` is the reference for those library versions.
-   `SDL_WINDOW_VULKAN` has to be in that SDL. The stream window requests it
-   only for the Vulkan backend.
+5. Release Mac builds get libplacebo and MoltenVK from
+   [moonlight-qt-deps v19](https://github.com/moonlight-stream/moonlight-qt-deps/releases/tag/v19)
+   (`scripts/build-macos-deps.sh`), not from Homebrew. v19 has no Vulkan
+   loader, so that script builds `libvulkan` for macOS 13. shaderc is
+   already inside v19's libplacebo; PyroWave does not link it (Granite's
+   runtime shader compiler is off). `SDL_WINDOW_VULKAN` has to be in the
+   SDL this tree already vendors. The stream window requests it only for
+   the Vulkan backend.
 6. App Store submission is out of scope. PyroWave itself is MIT. The MoltenVK
    build also compiles Granite; check that license before shipping. The
    Metal library is the MIT `metal/` port and does not need MoltenVK. Its

@@ -2,10 +2,11 @@ QT += core quick network quickcontrols2 svg
 CONFIG += c++11
 
 # Teach moonlight-common-c the PyroWave capability bits, adaptive triggers,
-# the microphone control-stream send, and a direct audio-decode call before
-# either project compiles against Limelight.h. Idempotent. See
-# docs/PYROWAVE_MAC.md, docs/DUALSENSE_MAC.md, docs/MICROPHONE_MAC.md,
-# and docs/PIP_MAC.md.
+# the microphone control-stream send, a direct audio-decode call, and an
+# eager macOS Limelog before either project compiles against Limelight.h.
+# Idempotent. See docs/PYROWAVE_MAC.md, docs/DUALSENSE_MAC.md,
+# docs/MICROPHONE_MAC.md, and docs/PIP_MAC.md. The common-c pin stays
+# 583754fc; these scripts are the delta.
 !system(python3 $$PWD/../scripts/apply_pyrowave_protocol.py) {
     error("Failed to apply the PyroWave protocol patch to moonlight-common-c")
 }
@@ -17,6 +18,9 @@ CONFIG += c++11
 }
 !system(python3 $$PWD/../scripts/apply_audio_decode_direct.py) {
     error("Failed to apply the direct audio-decode patch to moonlight-common-c")
+}
+!system(python3 $$PWD/../scripts/apply_limelog_eager.py) {
+    error("Failed to apply the eager Limelog patch to moonlight-common-c")
 }
 
 unix:!macx {
@@ -377,6 +381,15 @@ pyrowave {
         HEADERS += \
             streaming/video/pyrowave_metal.h \
             streaming/video/pyrowave_metal_api.h
+        # Release builds point this at scripts/build-macos-deps.sh (v19
+        # libplacebo, minos 13). A normal qmake uses it when that prefix
+        # is already there, ahead of Homebrew's copy.
+        depsLib = $$PWD/../build/macos-deps/prefix/lib
+        depsInc = $$PWD/../build/macos-deps/prefix/include
+        exists($$depsLib/libplacebo.dylib) {
+            INCLUDEPATH = $$depsInc $$INCLUDEPATH
+            LIBS += -L$$depsLib
+        }
         LIBS += -L$$PWD/../pyrowave/build -lpyrowave-shared -lplacebo
     }
     unix:!macx {

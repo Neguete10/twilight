@@ -60,12 +60,12 @@ def test_floor_matches_plist():
     target = result.stdout.strip()
     expect(result.returncode == 0, "macos-deployment-target.sh exits 0")
     expect(result.stderr == "", "macos-deployment-target.sh is silent on success")
-    expect(target == "11.0", "deployment target is 11.0, got %r" % target)
-    expect(minimum == "11.0.0", "Info.plist minimum stays 11.0.0, got %r" % minimum)
+    expect(target == "13.0", "deployment target is 13.0, got %r" % target)
+    expect(minimum == "13.0.0", "Info.plist minimum stays 13.0.0, got %r" % minimum)
     expect(same_floor(minimum, target), "deployment target matches LSMinimumSystemVersion")
 
     pri = (ROOT / "globaldefs.pri").read_text(encoding="utf-8")
-    expect("QMAKE_MACOSX_DEPLOYMENT_TARGET = 11.0" in pri, "globaldefs.pri sets the deployment target")
+    expect("QMAKE_MACOSX_DEPLOYMENT_TARGET = 13.0" in pri, "globaldefs.pri sets the deployment target")
     expect("SDK minos" in pri, "globaldefs.pri refuses an empty deployment target")
 
     app_pro = (ROOT / "app" / "app.pro").read_text(encoding="utf-8")

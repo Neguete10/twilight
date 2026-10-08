@@ -6,7 +6,7 @@ Twilight is the product name for this fork of Moonlight Qt. This is the checklis
 
 Canonical corresponding source: <https://github.com/Neguete10/twilight>. Lineage: Andy Grundman's [moonlight-qt](https://github.com/andygrundman/moonlight-qt), itself a fork of [moonlight-stream/moonlight-qt](https://github.com/moonlight-stream/moonlight-qt).
 
-The version in `app/version.txt` is `7.0.1`. The store build is English only. There is no language picker.
+The version in `app/version.txt` is `7.0.2`. The store build is English only. There is no language picker. Desktop release builds are Apple Silicon only and the floor is macOS 13 (`LSMinimumSystemVersion` 13.0.0).
 
 ## What is ready in this tree
 
@@ -43,7 +43,7 @@ TWILIGHT_MAS=1 scripts/generate-dmg.sh Release
 `SIGNING_IDENTITY` signs `Twilight.app`. `INSTALLER_SIGNING_IDENTITY` is the only identity passed to `productbuild`. `PROVISIONING_PROFILE` is copied to `Contents/embedded.provisionprofile` before `codesign`. Output:
 
 ```text
-build/installer-Release/Twilight-7.0.1.pkg
+build/installer-Release/Twilight-7.0.2.pkg
 ```
 
 The package command is:

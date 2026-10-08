@@ -168,7 +168,7 @@ def test_notices():
     expect(b"Apache License" in (ROOT / "app/licenses/OpenSSL-Apache-2.0.txt").read_bytes(), "OpenSSL Apache text")
     expect(b"Nathan Osman" in (ROOT / "app/licenses/qmdnsengine-MIT.txt").read_bytes(), "qmdnsengine copyright")
     version = (ROOT / "app/version.txt").read_text(encoding="utf-8").strip()
-    expect(version == "7.0.1", "version is 7.0.1")
+    expect(version == "7.0.2", "version is 7.0.2")
 
 
 def test_package_script():
