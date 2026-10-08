@@ -39,6 +39,7 @@ Item {
             StreamingPreferences.refreshMicrophoneStatus()
             SystemProperties.refreshDisplays()
             rebuildChoices()
+            bitrateInput.text = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
             SdlGamepadKeyNavigation.setUiNavMode(true)
             focusPos = 0
             paintFocus()
@@ -250,6 +251,62 @@ Item {
         customFpsOpen = false
     }
 
+    function commitBitrateKbps(kbps) {
+        if (kbps > 150000)
+            StreamingPreferences.unlockBitrate = true
+        StreamingPreferences.bitrateKbps = kbps
+        bitrateInput.text = StreamingPreferences.bitrateMbpsText(kbps)
+    }
+
+    function commitBitrateText(raw) {
+        var kbps = StreamingPreferences.bitrateKbpsFromMbpsText(raw)
+        var shown = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
+        if (kbps < 0) {
+            bitrateInput.text = shown
+            if ((raw + "").trim() !== shown) {
+                toastRequested(qsTr("Enter a bitrate from %1 to %2 Mb/s. That number was not applied.")
+                               .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
+                               .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps())))
+            }
+            return
+        }
+        commitBitrateKbps(kbps)
+    }
+
+    function commitSliderBitrate(kbps) {
+        var current = StreamingPreferences.bitrateKbps
+        var floor = StreamingPreferences.minimumBitrateKbps()
+        var cap = StreamingPreferences.maximumBitrateKbps()
+        if (current < floor || current > cap) {
+            toastRequested(qsTr("The slider replaced the saved %1 Mb/s. It only sets values from %2 to %3.")
+                           .arg(StreamingPreferences.bitrateMbpsText(current))
+                           .arg(StreamingPreferences.bitrateMbpsText(floor))
+                           .arg(StreamingPreferences.bitrateMbpsText(cap)))
+        }
+        commitBitrateKbps(kbps)
+    }
+
+    function requestClose() {
+        // Dropping focus commits the field. forceActiveFocus() would break
+        // keySink's focus binding.
+        if (bitrateInput.activeFocus)
+            bitrateInput.focus = false
+        closeRequested()
+    }
+
+    function applyUnlimited() {
+        var cap = StreamingPreferences.maximumBitrateKbps()
+        var current = StreamingPreferences.bitrateKbps
+        if (current === cap)
+            return
+        if (current > cap) {
+            toastRequested(qsTr("Unlimited sends %1 Mb/s. %2 Mb/s is more than this client will ask a host for, so it was not kept.")
+                           .arg(StreamingPreferences.bitrateMbpsText(cap))
+                           .arg(StreamingPreferences.bitrateMbpsText(current)))
+        }
+        commitBitrateKbps(cap)
+    }
+
     function applyYuv(next) {
         if (StreamingPreferences.enableYUV444 === next)
             return
@@ -296,6 +353,7 @@ Item {
             ids.push("res")
             ids.push("fps")
             ids.push("bitrate")
+            ids.push("bitrateUnlimited")
             ids.push("vsync")
             ids.push("pace")
             ids.push("window")
@@ -367,7 +425,8 @@ Item {
         if (id === "aboutSource") return aboutSource
         if (id === "res") return resChoice
         if (id === "fps") return fpsChoice
-        if (id === "bitrate") return bitrateSlider
+        if (id === "bitrate") return bitrateRow
+        if (id === "bitrateUnlimited") return unlimitedChip
         if (id === "vsync") return vsyncSwitch
         if (id === "pace") return paceSwitch
         if (id === "window") return windowChoice
@@ -470,6 +529,7 @@ Item {
         if (id !== "decoder") decoderChoice.clearKey()
         if (id !== "uiMode") uiModeChoice.clearKey()
         bitrateSlider.keyed = id === "bitrate"
+        unlimitedChip.keyed = id === "bitrateUnlimited"
         vsyncSwitch.keyed = id === "vsync"
         paceSwitch.keyed = id === "pace"
         hdrSwitch.keyed = id === "hdr"
@@ -549,7 +609,7 @@ Item {
             }
         }
         else if (id === "close")
-            closeRequested()
+            requestClose()
         else if (id === "checkUpdate")
             AutoUpdateChecker.checkNow()
         else if (id === "aboutSource" && SystemProperties.hasBrowser)
@@ -566,6 +626,7 @@ Item {
         else if (id === "pyro") pyroChoice.pickKey()
         else if (id === "decoder") decoderChoice.pickKey()
         else if (id === "uiMode") uiModeChoice.pickKey()
+        else if (id === "bitrateUnlimited") sheet.applyUnlimited()
         else if (id === "vsync") vsyncSwitch.activate()
         else if (id === "pace") paceSwitch.activate()
         else if (id === "hdr") hdrSwitch.activate()
@@ -607,7 +668,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: sheet.theme.scrim
-        MouseArea { anchors.fill: parent; onClicked: sheet.closeRequested() }
+        MouseArea { anchors.fill: parent; onClicked: sheet.requestClose() }
     }
 
     Rectangle {
@@ -788,19 +849,140 @@ Item {
 
                         TwTextV2 {
                             theme: sheet.theme
-                            text: qsTr("Bitrate · %1 Mb/s").arg((StreamingPreferences.bitrateKbps / 1000).toFixed(1))
+                            text: StreamingPreferences.bitrateKbps === StreamingPreferences.maximumBitrateKbps()
+                                  ? qsTr("Bitrate · Unlimited")
+                                  : qsTr("Bitrate · %1 Mb/s").arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
                             color: sheet.theme.secondary
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
                         }
-                        SliderV2 {
-                            id: bitrateSlider
+                        Item {
+                            id: bitrateRow
+                            width: parent.width
+                            height: 36
+
+                            Rectangle {
+                                id: unlimitedChip
+                                property bool keyed: false
+                                property bool on: StreamingPreferences.bitrateKbps === StreamingPreferences.maximumBitrateKbps()
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: unlimitedLabel.implicitWidth + 28
+                                height: 32
+                                radius: 10
+                                color: on ? sheet.theme.accent : sheet.theme.fill
+                                border.width: keyed ? 2 : 1
+                                border.color: keyed ? sheet.theme.ink : (on ? sheet.theme.accent : sheet.theme.stroke)
+                                TwTextV2 {
+                                    id: unlimitedLabel
+                                    anchors.centerIn: parent
+                                    theme: sheet.theme
+                                    text: qsTr("Unlimited")
+                                    font.pixelSize: 13
+                                    font.weight: unlimitedChip.on ? Font.DemiBold : Font.Normal
+                                    color: unlimitedChip.on ? sheet.theme.accentInk : sheet.theme.ink
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: sheet.applyUnlimited()
+                                }
+                            }
+
+                            Rectangle {
+                                id: bitrateField
+                                anchors.right: unlimitedChip.left
+                                anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 108
+                                height: 32
+                                radius: 10
+                                color: sheet.theme.field
+                                border.width: bitrateInput.activeFocus ? 2 : 1
+                                border.color: bitrateInput.activeFocus ? sheet.theme.accent : sheet.theme.stroke
+
+                                TextInput {
+                                    id: bitrateInput
+                                    anchors.left: parent.left
+                                    anchors.right: bitrateUnit.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 4
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    horizontalAlignment: TextInput.AlignRight
+                                    clip: true
+                                    selectByMouse: true
+                                    color: sheet.theme.ink
+                                    font.family: sheet.theme.fontFamily
+                                    font.pixelSize: 14
+                                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                    Component.onCompleted: text = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
+                                    onEditingFinished: sheet.commitBitrateText(text)
+                                    Keys.onReturnPressed: {
+                                        focus = false
+                                        event.accepted = true
+                                    }
+                                    Keys.onEnterPressed: {
+                                        focus = false
+                                        event.accepted = true
+                                    }
+                                    Keys.onEscapePressed: {
+                                        text = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
+                                        focus = false
+                                        event.accepted = true
+                                    }
+                                }
+
+                                TwTextV2 {
+                                    id: bitrateUnit
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    theme: sheet.theme
+                                    text: qsTr("Mb/s")
+                                    color: sheet.theme.secondary
+                                    font.pixelSize: 12
+                                }
+                            }
+
+                            SliderV2 {
+                                id: bitrateSlider
+                                anchors.left: parent.left
+                                anchors.right: bitrateField.left
+                                anchors.rightMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                theme: sheet.theme
+                                from: StreamingPreferences.minimumBitrateKbps()
+                                to: StreamingPreferences.maximumBitrateKbps()
+                                value: Math.max(from, Math.min(to, StreamingPreferences.bitrateKbps))
+                                onMoved: sheet.commitSliderBitrate(value)
+                            }
+
+                            Connections {
+                                target: StreamingPreferences
+                                onBitrateChanged: bitrateInput.text = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
+                            }
+                        }
+                        TwTextV2 {
                             width: parent.width
                             theme: sheet.theme
-                            from: 500
-                            to: 500000
-                            value: Math.min(StreamingPreferences.bitrateKbps, 500000)
-                            onMoved: StreamingPreferences.bitrateKbps = value
+                            color: sheet.theme.secondary
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            text: (StreamingPreferences.bitrateKbps < StreamingPreferences.minimumBitrateKbps()
+                                   || StreamingPreferences.bitrateKbps > StreamingPreferences.maximumBitrateKbps())
+                                  ? qsTr("Saved %1 Mb/s is outside %2–%3. It is still sent until you change it. The slider stops at %4 Mb/s. GeForce Experience will not encode above %5 Mb/s.")
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
+                                    .arg(StreamingPreferences.gfeBitrateCapKbps() / 1000)
+                                  : qsTr("%1–%2 Mb/s. Unlimited sends %3 Mb/s, the most this client asks a host for. GeForce Experience will not encode above %4 Mb/s.")
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
+                                    .arg(StreamingPreferences.gfeBitrateCapKbps() / 1000)
                         }
 
                         SettingRowV2 {
@@ -1428,7 +1610,7 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
-                onClicked: sheet.closeRequested()
+                onClicked: sheet.requestClose()
             }
         }
     }
@@ -1473,18 +1655,18 @@ Item {
 
     Shortcut {
         sequence: "Escape"
-        enabled: sheet.open && sheet.escapeEnabled && !sheet.customResOpen && !sheet.customFpsOpen
-        onActivated: sheet.closeRequested()
+        enabled: sheet.open && sheet.escapeEnabled && !sheet.customResOpen && !sheet.customFpsOpen && !bitrateInput.activeFocus
+        onActivated: sheet.requestClose()
     }
 
     Item {
         id: keySink
-        focus: sheet.open && !sheet.customResOpen && !sheet.customFpsOpen
+        focus: sheet.open && !sheet.customResOpen && !sheet.customFpsOpen && !bitrateInput.activeFocus
         Keys.onPressed: {
-            if (!sheet.open || sheet.customResOpen || sheet.customFpsOpen)
+            if (!sheet.open || sheet.customResOpen || sheet.customFpsOpen || bitrateInput.activeFocus)
                 return
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back) {
-                sheet.closeRequested()
+                sheet.requestClose()
                 event.accepted = true
             }
             else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab
