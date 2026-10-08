@@ -6,7 +6,7 @@
 
 #include <Limelight.h>
 
-#include <opus/opus.h>
+#include <opus.h>
 
 #include <SDL.h>
 

@@ -28,6 +28,9 @@
 #endif
 #if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_VULKAN)
 #include "video/pyrowave_backend.h"
+// chooseDecoder() is static on this base, so the probed backend cannot be a
+// Session member. 0 is PyroWaveGpuBackend::None. The constructor clears it.
+static int s_PyroWaveBackend = 0;
 #endif
 
 #ifdef HAVE_SLVIDEO
@@ -325,7 +328,8 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
         static_assert(static_cast<int>(StreamingPreferences::PWBC_VULKAN) == static_cast<int>(PyroWaveBackendRequest::Vulkan),
                       "PyroWave backend enums diverged");
 
-        if (m_Preferences == nullptr) {
+        StreamingPreferences* preferences = StreamingPreferences::get();
+        if (preferences == nullptr) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "PyroWave: no preferences for backend selection");
             return false;
@@ -338,10 +342,10 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
 #ifdef HAVE_PYROWAVE_VULKAN
         availability.vulkan = true;
 #endif
-        const auto request = static_cast<PyroWaveBackendRequest>(m_Preferences->pyroWaveBackend);
-        const bool alreadyProbed = m_PyroWaveBackend != static_cast<int>(PyroWaveGpuBackend::None);
+        const auto request = static_cast<PyroWaveBackendRequest>(preferences->pyroWaveBackend);
+        const bool alreadyProbed = s_PyroWaveBackend != static_cast<int>(PyroWaveGpuBackend::None);
         const PyroWaveGpuBackend primary = alreadyProbed
-                ? static_cast<PyroWaveGpuBackend>(m_PyroWaveBackend)
+                ? static_cast<PyroWaveGpuBackend>(s_PyroWaveBackend)
                 : selectPyroWaveBackend(request, availability);
         if (!alreadyProbed) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -373,7 +377,7 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
             }
             if (decoder != nullptr && decoder->initialize(&params)) {
                 chosenDecoder = decoder;
-                m_PyroWaveBackend = static_cast<int>(which);
+                s_PyroWaveBackend = static_cast<int>(which);
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "PyroWave backend selected: %s (%s)",
                             pyroWaveBackendName(which),
@@ -706,6 +710,9 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_PipSnapBackUntil(0)
 #endif
 {
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_VULKAN)
+    s_PyroWaveBackend = static_cast<int>(PyroWaveGpuBackend::None);
+#endif
 }
 
 Session::~Session()

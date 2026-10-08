@@ -31,6 +31,16 @@ win32 {
 }
 macx {
     INCLUDEPATH += $$PWD/../libs/mac/include
+
+    # 7feb0a6 (andygrundman/moonlight-common-c) has no LiSendRawControlStreamPacket
+    # or LiIsControlStreamEncrypted. This static library is compiled before
+    # app.pro, so the patch has to run here or the app links undefined
+    # _LiSendRawControlStreamPacket / _LiIsControlStreamEncrypted. The script
+    # is idempotent. The functions use file-scope state in ControlStream.c, and
+    # this repo cannot publish a commit on that submodule remote.
+    !system(python3 $$PWD/../scripts/apply_mic_control_packet.py) {
+        error("Failed to apply the microphone control-stream patch")
+    }
 }
 unix:!macx {
     CONFIG += link_pkgconfig

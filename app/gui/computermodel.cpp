@@ -15,7 +15,12 @@ void ComputerModel::initialize(ComputerManager* computerManager)
     connect(m_ComputerManager, &ComputerManager::pairingCompleted,
             this, &ComputerModel::handlePairingCompleted);
 
+    // The shell's host list is already bound when saved hosts are copied in.
+    // Filling m_Computers without a reset leaves that view at zero rows even
+    // after a later poll reports the host online.
+    beginResetModel();
     m_Computers = m_ComputerManager->getComputers();
+    endResetModel();
 }
 
 QVariant ComputerModel::data(const QModelIndex& index, int role) const

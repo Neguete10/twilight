@@ -167,6 +167,13 @@ rm -rf "$APP_BUNDLE/Contents/Frameworks/Qt3D*"
 echo Removing dSYM files from app bundle
 find "$APP_BUNDLE/" -name '*.dSYM' | xargs rm -rf
 
+# v19 ships libMoltenVK and libplacebo, not the Vulkan loader or an ICD manifest.
+# Without libvulkan.1.dylib and Contents/Resources/vulkan/icd.d/MoltenVK_icd.json,
+# SDL opens MoltenVK directly: the decoder reports ready and then decodes nothing.
+if [ "${TWILIGHT_PYROWAVE:-1}" != "0" ]; then
+  sh "$SOURCE_ROOT/scripts/bundle-macos-vulkan.sh" "$APP_BUNDLE" || fail "Vulkan loader bundling failed"
+fi
+
 python3 "$SOURCE_ROOT/scripts/check-macos-minos.py" "$APP_BUNDLE" || fail "A Mach-O in the bundle requires a newer macOS than 13.0"
 
 if [ "${TWILIGHT_MAS:-}" = "1" ]; then

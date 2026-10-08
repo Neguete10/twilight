@@ -123,6 +123,7 @@ void Stats::SubmitVideoBytesAndReassemblyTime(PDECODE_UNIT decodeUnit, uint32_t 
     std::lock_guard<std::mutex> lock(m_mutex);
     m_ActiveWndVideoStats.receivedFrames++;
     m_ActiveWndVideoStats.totalFrames++;
+    m_ActiveWndVideoStats.receivedVideoBytes += (uint64_t) decodeUnit->fullLength;
 
     // bandwidth
     m_bwTracker.AddBytes(decodeUnit->fullLength);
@@ -241,6 +242,7 @@ void Stats::SubmitRenderStats(double preWaitTimeMs, double renderTimeMs, bool hi
 void Stats::addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst)
 {
     dst.receivedFrames += src.receivedFrames;
+    dst.receivedVideoBytes += src.receivedVideoBytes;
     dst.decodedFrames += src.decodedFrames;
     dst.renderedFrames += src.renderedFrames;
     dst.totalFrames += src.totalFrames;

@@ -15,6 +15,7 @@ extern "C"
 
 typedef struct _VIDEO_STATS {
     uint32_t receivedFrames;
+    uint64_t receivedVideoBytes;
     uint32_t decodedFrames;
     uint32_t renderedFrames;
     uint32_t totalFrames;

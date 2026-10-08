@@ -72,3 +72,11 @@ clang++ -std=c++14 -dynamiclib \
     -install_name @rpath/libtwilight-pyrowave-vkshim.dylib \
     -o "$BUILD/libtwilight-pyrowave-vkshim.dylib" \
     "$SHIM_SRC"
+
+# Granite dlopens libvulkan from this dylib. @loader_path finds the loader
+# once both sit in Twilight.app/Contents/Frameworks.
+for lib in "$BUILD"/libpyrowave-shared*.dylib; do
+    [ -f "$lib" ] || continue
+    [ -L "$lib" ] && continue
+    install_name_tool -add_rpath @loader_path "$lib" 2>/dev/null || true
+done

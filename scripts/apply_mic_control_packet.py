@@ -3,8 +3,11 @@
 
 The 7feb0a6 pin (upstream f900dd4 plus PyroWave) still has no microphone
 sender. Vibelight sends Opus on the encrypted control stream with
-LiSendRawControlStreamPacket(). qmake applies this delta in place. It is
-idempotent. Do not roll the submodule back, and do not run the PyroWave
+LiSendRawControlStreamPacket(). moonlight-common-c.pro applies this delta
+before that static library compiles, and app.pro applies it again. It is
+idempotent. The functions close over ControlStream.c, and this repo cannot
+publish a commit on andygrundman/moonlight-common-c, so the change stays in
+this script. Do not roll the submodule back, and do not run the PyroWave
 or adaptive-trigger protocol scripts: those packets are already in this pin.
 
 Pass a src directory as argv[1] to test the patch against a copy of the

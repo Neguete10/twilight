@@ -159,6 +159,10 @@ win32:!winrt {
     CONFIG += discord-rpc
 }
 macx {
+    # sfsymbol_mac.mm defines twilightRenderSfSymbol. Without this, the
+    # fallback in sfsymbolprovider.cpp is a second copy of that symbol.
+    DEFINES += TWILIGHT_HAS_SF_SYMBOLS
+
     !disable-prebuilts {
         LIBS += -lssl.3 -lcrypto.3 -lavcodec.63 -lavutil.61 -lswscale.10 -lopus.0 -lSDL2 -lSDL2_ttf -lplacebo
         CONFIG += discord-rpc libplacebo
@@ -235,14 +239,17 @@ SOURCES += \
     gui/streamhudstats.cpp \
     streaming/session_twilight.cpp \
     streaming/audio/microphone/mic_wire.cpp \
-    streaming/audio/microphone/mic_permission.cpp \
     streaming/input/corehid_mouse_decoder.cpp \
     streaming/input/dualsense_effects.cpp \
-    streaming/input/dualsense_hid.cpp \
     streaming/input/gamepad_overlay.cpp
 
 !macx {
-    SOURCES += streaming/audio/microphone/mic_capture.cpp
+    # macOS provides these in mic_permission_mac.mm and dualsense_hid_mac.mm.
+    # Compiling the stubs too duplicates MacMicrophonePermission and DualSenseHidOutput.
+    SOURCES += \
+        streaming/audio/microphone/mic_capture.cpp \
+        streaming/audio/microphone/mic_permission.cpp \
+        streaming/input/dualsense_hid.cpp
 }
 
 macx {
@@ -255,9 +262,9 @@ macx {
         streaming/input/dualsense_hid_mac.mm \
         streaming/mac/pip_window.mm
 
-    # moonlight-common-c 7feb0a6 has no microphone sender. The patch adds
-    # LiSendRawControlStreamPacket. It is not the PyroWave or adaptive-trigger
-    # protocol scripts; those packets are already in this pin.
+    # moonlight-common-c.pro applies the same idempotent patch before this
+    # library's objects are linked. Keep it here so a qmake of app.pro alone
+    # still updates the pin. 7feb0a6 has no microphone sender.
     !system(python3 $$PWD/../scripts/apply_mic_control_packet.py) {
         error("Failed to apply the microphone control-stream patch")
     }

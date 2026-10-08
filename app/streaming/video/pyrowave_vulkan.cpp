@@ -1137,6 +1137,13 @@ int PyroWaveVulkanVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
     }
     std::vector<PyroWavePacketView> packets;
     if (!pyroWaveUnpackLengthPrefixedFrame(frame.data(), frame.size(), packets, nullptr)) {
+        static bool loggedUnpack = false;
+        if (!loggedUnpack) {
+            loggedUnpack = true;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "PyroWave: dropped a %u-byte frame that is not length-prefixed",
+                         (unsigned) frame.size());
+        }
         return DR_OK;
     }
     PyroWaveSequenceHeader sequence{};
@@ -1180,6 +1187,11 @@ int PyroWaveVulkanVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
     {
         std::lock_guard<std::mutex> lock(m_FrameLock);
         if (pyrowave_decoder_decode_gpu_buffer(m_Decoder, &acquire, &release, &gb) != PYROWAVE_SUCCESS) {
+            static bool loggedDecode = false;
+            if (!loggedDecode) {
+                loggedDecode = true;
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "PyroWave: GPU decode failed");
+            }
             return DR_OK;
         }
         m_LastReleaseVal.store(sigVal);
