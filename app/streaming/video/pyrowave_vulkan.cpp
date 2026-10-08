@@ -8,6 +8,8 @@
 
   #include "pyrowave_vulkan.h"  // this decoder's header (pulls vulkan + libplacebo + SDL_vulkan)
   #include "pyrowave_packets.h"
+  // Same frame parser the Metal decoder uses (record framing and length-prefixed).
+  #include "pyrowavebitstream.h"
 
   // PyroWave C API. vulkan.h is already included by our header; the angle-bracket form resolves to
   // the pyrowave submodule (not this same-named local header).
@@ -21,6 +23,7 @@
   #endif
 
   #include <cstring>
+  #include <string>
   #include <vector>
 
 #ifndef __APPLE__
@@ -1126,32 +1129,76 @@ int PyroWaveVulkanVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
 
     uint64_t decodeStartUs = LiGetMicroseconds();
 
-    // Vibeshine's default framing (clients that do not send pyrowaveAdaptiveFec /
-    // FEATURE_RECORD_FRAMING): [u32 count]{[u32 size][bytes]}*. Record framing
-    // is a different layout and is not parsed here.
-    std::vector<uint8_t> frame;
-    frame.reserve((size_t) du->fullLength);
-    for (PLENTRY e = du->bufferList; e; e = e->next) {
-        const uint8_t* d = reinterpret_cast<const uint8_t*>(e->data);
-        frame.insert(frame.end(), d, d + e->length);
-    }
-    std::vector<PyroWavePacketView> packets;
-    if (!pyroWaveUnpackLengthPrefixedFrame(frame.data(), frame.size(), packets, nullptr)) {
-        static bool loggedUnpack = false;
-        if (!loggedUnpack) {
-            loggedUnpack = true;
+    // moonlight-common-c delivers Vibeshine record framing (sequence header,
+    // block records, padding, lost and record-start segments) or the older
+    // length-prefixed envelope. PyroWaveFraming::parse is the Metal decoder's
+    // parser. A length-prefixed-only unpack drops every record frame.
+    std::vector<uint32_t> words;
+    std::vector<PyroWaveFraming::Segment> segments;
+    if (!assemblePyroWaveDecodeUnit(du, words, &segments)) {
+        static bool loggedAssemble = false;
+        if (!loggedAssemble) {
+            loggedAssemble = true;
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "PyroWave: dropped a %u-byte frame that is not length-prefixed",
-                         (unsigned) frame.size());
+                         "PyroWave: dropped a %d-byte frame with invalid framing",
+                         du->fullLength);
         }
         return DR_OK;
     }
+    PyroWaveFraming::Frame parsed;
+    std::string parseError;
+    const uint8_t* base = reinterpret_cast<const uint8_t*>(words.data());
+    if (!PyroWaveFraming::parse(base, words.size() * sizeof(uint32_t), segments,
+                                du->pyrowaveCriticalPackets,
+                                {m_Width, m_Height, m_YUV444},
+                                parsed, parseError)) {
+        static bool loggedParse = false;
+        if (!loggedParse) {
+            loggedParse = true;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "PyroWave: dropped a frame: %s",
+                         parseError.c_str());
+        }
+        return DR_OK;
+    }
+    if (parsed.partial && !parsed.coarseLevelIntact) {
+        static bool loggedCoarse = false;
+        if (!loggedCoarse) {
+            loggedCoarse = true;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave: dropped a partial frame missing the coarsest wavelet level");
+        }
+        return DR_OK;
+    }
+    std::vector<PyroWavePacketView> packets;
+    packets.reserve(parsed.spans.size());
+    for (const auto& span : parsed.spans) {
+        packets.push_back({base + span.offset, static_cast<uint32_t>(span.size)});
+    }
     PyroWaveSequenceHeader sequence{};
     const bool haveSequence = pyroWaveFindSequenceHeader(packets, sequence);
+    // Each decode unit is one independent frame. Clear the 3-bit sequence
+    // tracker so a network gap cannot look like an old packet.
+    pyrowave_decoder_clear(m_Decoder);
     for (const PyroWavePacketView& packet : packets) {
-        pyrowave_decoder_push_packet(m_Decoder, packet.data, packet.size);
+        if (pyrowave_decoder_push_packet(m_Decoder, packet.data, packet.size) != PYROWAVE_SUCCESS) {
+            static bool loggedPush = false;
+            if (!loggedPush) {
+                loggedPush = true;
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "PyroWave: codec rejected a record");
+            }
+            return DR_OK;
+        }
     }
-    if (!pyrowave_decoder_decode_is_ready(m_Decoder, true)) {
+    // Intact frames must be complete. A partial frame may decode when the
+    // coarsest level arrived; missing finer blocks are zero coefficients.
+    // The Vulkan C API has no sideband ready call, so allow_partial_frame
+    // is the same switch the Metal path passes as its partial flag.
+    if (!pyrowave_decoder_decode_is_ready(m_Decoder, parsed.partial)) {
+        static bool loggedReady = false;
+        if (!loggedReady) {
+            loggedReady = true;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "PyroWave: corrupt or incomplete bitstream");
+        }
         return DR_OK;
     }
 

@@ -69,11 +69,32 @@ def test_vulkan_bundle():
     expect("MoltenVK_icd.json" in bundle, "ICD manifest is written")
     expect('"../../../Frameworks/libMoltenVK.dylib"' in bundle, "ICD path is bundle-relative")
     expect("is_portability_driver" in bundle, "MoltenVK is a portability ICD")
-    expect("VK_DRIVER_FILES" in main and "SDL_Vulkan_LoadLibrary" in main, "process loads the bundled loader")
+    expect("VK_DRIVER_FILES" in main, "ICD path is set before any Vulkan library opens")
+    expect("SDL_Vulkan_LoadLibrary" not in main, "the loader is not opened before SDL video init")
+    utils = text("app/streaming/streamutils.cpp")
+    expect("#include <SDL_vulkan.h>" in utils and "SDL_Vulkan_LoadLibrary" in utils, "loader call has the SDL Vulkan header")
+    session = text("app/streaming/session.cpp")
+    video = session.find("SDL_InitSubSystem(SDL_INIT_VIDEO)")
+    load = session.find("loadBundledVulkanLoader", video)
+    window = session.find("m_Window = SDL_CreateWindow", load)
+    expect(0 < video < load < window, "session loads Vulkan after video init and before the window")
+    props = text("app/backend/systemproperties.cpp")
+    probe = props.find("createTestWindow")
+    probe_load = props.rfind("loadBundledVulkanLoader", 0, probe)
+    expect(0 < probe_load < probe, "the hardware probe loads Vulkan before its test window")
     minos = dmg.find("check-macos-minos.py")
     copy = dmg.find("bundle-macos-vulkan.sh")
     sign = dmg.find("codesign --force")
     expect(0 < copy < minos < sign, "loader is copied before the minos check and signing")
+
+
+def test_shared_framing():
+    vulkan = text("app/streaming/video/pyrowave_vulkan.cpp")
+    metal = text("app/streaming/video/pyrowave.mm")
+    expect("assemblePyroWaveDecodeUnit" in vulkan and "PyroWaveFraming::parse" in vulkan, "Vulkan uses the shared parser")
+    expect("pyroWaveUnpackLengthPrefixedFrame" not in vulkan, "Vulkan no longer accepts only length-prefixed frames")
+    expect("pyrowave_decoder_clear" in vulkan, "Vulkan clears the decoder per frame")
+    expect("assemblePyroWaveDecodeUnit" in metal and "PyroWaveFraming::parse" in metal, "Metal uses the same parser")
 
 
 def main():
@@ -81,6 +102,7 @@ def main():
     test_opus_and_stats_and_duplicates()
     test_host_list_and_cli_and_mic_patch()
     test_vulkan_bundle()
+    test_shared_framing()
     if FAILURES:
         print("%d failure(s)" % FAILURES)
         return 1

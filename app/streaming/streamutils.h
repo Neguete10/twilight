@@ -50,4 +50,10 @@ public:
 
     static
     void exitAsyncLoggingMode();
+
+    // After SDL_INIT_VIDEO and before any window. No-op when the bundle has
+    // no loader. Calling this before the video subsystem is initialized makes
+    // SDL reject the load.
+    static
+    void loadBundledVulkanLoader();
 };

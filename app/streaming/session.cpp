@@ -781,6 +781,9 @@ bool Session::initialize(QQuickWindow* qtWindow)
     // Video init can install SDL's quit handler. Put ours back before the
     // stream loop decides whether a signal is a graceful quit.
     installQuitSignals();
+    // Before SDL_CreateWindow. The video subsystem is up, so this can bind
+    // the bundled loader instead of letting SDL open MoltenVK by name.
+    StreamUtils::loadBundledVulkanLoader();
 
     // Stop text input. SDL enables it by default
     // when we initialize the video subsystem, but this

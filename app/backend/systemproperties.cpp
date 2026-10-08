@@ -199,6 +199,9 @@ void SystemProperties::startAsyncLoad()
         return;
     }
     installQuitSignals();
+    // Before the test window. SDL_Vulkan_LoadLibrary needs video init and
+    // must run before SDL opens a window of its own.
+    StreamUtils::loadBundledVulkanLoader();
 
     testWindow = StreamUtils::createTestWindow();
     if (!testWindow) {
@@ -237,6 +240,7 @@ void SystemProperties::refreshDisplays()
         return;
     }
     installQuitSignals();
+    StreamUtils::loadBundledVulkanLoader();
 
     monitorNativeResolutions.clear();
     monitorSafeAreaResolutions.clear();

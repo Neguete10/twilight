@@ -5,6 +5,9 @@
 
 #ifdef Q_OS_DARWIN
 #include <ApplicationServices/ApplicationServices.h>
+#include <QCoreApplication>
+#include <QFileInfo>
+#include <SDL_vulkan.h>
 #endif
 
 #ifdef Q_OS_WINDOWS
@@ -480,4 +483,35 @@ void StreamUtils::enterAsyncLoggingMode()
 void StreamUtils::exitAsyncLoggingMode()
 {
     g_AsyncLoggingEnabled.deref();
+}
+
+void StreamUtils::loadBundledVulkanLoader()
+{
+#ifdef Q_OS_DARWIN
+    // SDL_Vulkan_LoadLibrary requires the video subsystem. The bundled
+    // libvulkan is what opens MoltenVK through the ICD; opening MoltenVK
+    // itself leaves a decoder that never presents a frame.
+    const QString loader = QDir(QCoreApplication::applicationDirPath()).filePath("../Frameworks/libvulkan.1.dylib");
+    if (!QFileInfo::exists(loader)) {
+        return;
+    }
+    const QByteArray path = QFileInfo(loader).absoluteFilePath().toUtf8();
+    static bool logged = false;
+    if (SDL_Vulkan_LoadLibrary(path.constData()) != 0) {
+        if (!logged) {
+            logged = true;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "SDL_Vulkan_LoadLibrary(%s) failed: %s",
+                        path.constData(),
+                        SDL_GetError());
+        }
+        return;
+    }
+    if (!logged) {
+        logged = true;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Loaded bundled Vulkan loader: %s",
+                    path.constData());
+    }
+#endif
 }

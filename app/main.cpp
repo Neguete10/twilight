@@ -760,26 +760,15 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
 
 #ifdef Q_OS_DARWIN
-    // PyroWave Vulkan loads libvulkan, and that loader opens MoltenVK through
-    // the bundled ICD. SDL otherwise dlopens libMoltenVK directly, which comes
-    // up but does not decode. VK_DRIVER_FILES is read by the loader, not by
-    // MoltenVK itself, so the loader has to be the library SDL and Granite open.
+    // The ICD path has to be set before anything opens libvulkan. The library
+    // itself is loaded from StreamUtils after SDL video init. Doing it here
+    // makes SDL report that the video subsystem has not been initialized.
     {
-        const QString frameworks = QDir(QCoreApplication::applicationDirPath()).filePath("../Frameworks");
-        const QString loader = QDir(frameworks).filePath("libvulkan.1.dylib");
         const QString icd = QDir(QCoreApplication::applicationDirPath()).filePath("../Resources/vulkan/icd.d/MoltenVK_icd.json");
         if (QFileInfo::exists(icd)) {
             const QByteArray icdPath = QFileInfo(icd).absoluteFilePath().toUtf8();
             qputenv("VK_DRIVER_FILES", icdPath);
             qputenv("VK_ICD_FILENAMES", icdPath);
-        }
-        if (QFileInfo::exists(loader)) {
-            if (SDL_Vulkan_LoadLibrary(QFileInfo(loader).absoluteFilePath().toUtf8().constData()) != 0) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "SDL_Vulkan_LoadLibrary(%s) failed: %s",
-                            qPrintable(QFileInfo(loader).absoluteFilePath()),
-                            SDL_GetError());
-            }
         }
     }
 #endif
