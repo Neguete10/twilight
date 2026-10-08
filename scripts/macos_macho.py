@@ -153,7 +153,8 @@ def parse_macho(data: bytes) -> list[dict]:
     return [parsed]
 
 
-def read_macho(path: Path) -> list[dict]:
+def read_macho(path: Path | str) -> list[dict]:
+    path = Path(path)
     with path.open("rb") as handle:
         return parse_macho(handle.read())
 
@@ -238,17 +239,26 @@ def is_plugin(relative: str) -> bool:
     return "/PlugIns/" in f"/{text}" or "/Resources/qml/" in f"/{text}" or text.startswith("PlugIns/")
 
 
-def iter_macho_files(root: Path):
+def _is_static_archive(path: Path) -> bool:
+    # Official Qt ships fat .a files. Each slice is an ar archive, not a
+    # Mach-O, and dyld never loads them. Parsing them reports
+    # "fat slice is not a 64-bit Mach-O".
+    return path.suffix.lower() == ".a"
+
+
+def iter_macho_files(root: Path | str):
+    root = Path(root)
     if root.is_file():
-        yield root
+        if not _is_static_archive(root):
+            yield root
         return
     for path in root.rglob("*"):
-        if not path.is_file() or path.is_symlink():
+        if not path.is_file() or path.is_symlink() or _is_static_archive(path):
             continue
         yield path
 
 
-def non_system_deps(path: Path) -> list[str]:
+def non_system_deps(path: Path | str) -> list[str]:
     deps = []
     for image in read_macho(path):
         for dep in image["loads"]:
@@ -257,8 +267,9 @@ def non_system_deps(path: Path) -> list[str]:
     return deps
 
 
-def describe_problems(root: Path, max_minos: str, minos_only: bool = False) -> list[str]:
+def describe_problems(root: Path | str, max_minos: str, minos_only: bool = False) -> list[str]:
     """Human-readable failures. Empty means the tree may ship."""
+    root = Path(root)
     problems = []
     count = 0
     bundle = root if root.is_dir() else root.parent
@@ -296,13 +307,14 @@ def describe_problems(root: Path, max_minos: str, minos_only: bool = False) -> l
     return problems
 
 
-def orphan_plugins(root: Path) -> list[tuple[Path, list[str]]]:
+def orphan_plugins(root: Path | str) -> list[tuple[Path, list[str]]]:
     """Plug-ins whose strong dependencies are not inside the bundle.
 
     Qt PDF plug-ins are the case this is aimed at: macdeployqt copies them
     from a Qt that contains QtPdf, the app does not link QtPdf, and the
     plug-in's rpath then loads a second QtCore from Homebrew.
     """
+    root = Path(root)
     if not root.is_dir():
         return []
     found = []
@@ -325,7 +337,8 @@ def orphan_plugins(root: Path) -> list[tuple[Path, list[str]]]:
     return found
 
 
-def outside_rpaths(root: Path) -> list[tuple[Path, str]]:
+def outside_rpaths(root: Path | str) -> list[tuple[Path, str]]:
+    root = Path(root)
     found = []
     bundle = root if root.is_dir() else root.parent
     for path in iter_macho_files(root):

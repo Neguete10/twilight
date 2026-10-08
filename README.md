@@ -30,7 +30,7 @@ The notarized disk image is on the [v7.0.0 release](https://github.com/Neguete10
 
 ## Building
 
-Init the submodules, build the macOS dependencies, then make the disk image. The dependency script downloads official Qt 6.11.2 and [moonlight-qt-deps v19](https://github.com/moonlight-stream/moonlight-qt-deps/releases/tag/v19) (libplacebo and MoltenVK, minimum OS 13, MoltenVK 12) and compiles the Vulkan loader, which that zip does not contain. Do not point `qmake` at Homebrew Qt. Its libraries are stamped with the build Mac's OS and will not launch on macOS 13–15.
+Init the submodules, build the macOS dependencies, then make the disk image. The dependency script downloads official Qt 6.11.2 and [moonlight-qt-deps v19](https://github.com/moonlight-stream/moonlight-qt-deps/releases/tag/v19) (libplacebo and MoltenVK, minimum OS 13, MoltenVK 12). That zip has no Vulkan loader and no `VulkanHeadersConfig.cmake`, so the script installs Vulkan-Headers v1.4.363 and compiles the loader against it. Do not point `qmake` at Homebrew Qt. Its libraries are stamped with the build Mac's OS and will not launch on macOS 13–15.
 
 ```bash
 git submodule update --init --recursive

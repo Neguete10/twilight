@@ -167,6 +167,55 @@ def test_users_rpath_and_absolute_prefix(macho):
     expect(not macho.rpath_outside_bundle("@executable_path/../Frameworks", bundle), "bundle rpath is inside")
 
 
+def test_static_archives_and_string_paths(macho):
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        dylib = root / "libplacebo.dylib"
+        dylib.write_bytes(
+            thin_macho((13, 0, 0), loads=("/usr/lib/libSystem.B.dylib",), ident="@rpath/libplacebo.dylib")
+        )
+        # Universal static archive: fat header, one slice, payload is an ar.
+        archive = b"!<arch>\n"
+        offset = 8 + 20
+        fat = struct.pack(">II", 0xCAFEBABE, 1)
+        fat += struct.pack(">IIIII", CPU_ARM64, 0, offset, len(archive), 3)
+        (root / "libQt6Core.a").write_bytes(fat + archive)
+        try:
+            macho.parse_macho(fat + archive)
+            raised = False
+        except macho.MachOError as exc:
+            raised = "fat slice is not a 64-bit Mach-O" in str(exc)
+        expect(raised, "a fat .a is not a 64-bit Mach-O if parsed directly")
+        problems = macho.describe_problems(str(root), "13.0", minos_only=True)
+        expect(problems == [], "static archives are skipped: %s" % problems)
+        images = macho.read_macho(str(dylib))
+        expect(len(images) == 1 and images[0]["minos"] == ["13.0.0"], "read_macho accepts a string path")
+        expect(macho.non_system_deps(str(dylib)) == [], "non_system_deps accepts a string path")
+
+
+def test_sqldrivers_are_removed():
+    scripts = str(ROOT / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    path = ROOT / "scripts" / "prepare-macos-bundle.py"
+    spec = importlib.util.spec_from_file_location("prepare_macos_bundle", path)
+    prepare = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(prepare)
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle = Path(tmp) / "Twilight.app"
+        sql = bundle / "Contents" / "PlugIns" / "sqldrivers"
+        sql.mkdir(parents=True)
+        # Resolvable on its own, so the orphan pass would keep it.
+        (sql / "libqsqlmimer.dylib").write_bytes(
+            thin_macho((13, 0, 0), loads=("/usr/lib/libSystem.B.dylib",), ident="@rpath/libqsqlmimer.dylib")
+        )
+        (sql / "libqsqlite.dylib").write_bytes(
+            thin_macho((13, 0, 0), loads=("/usr/lib/libSystem.B.dylib",), ident="@rpath/libqsqlite.dylib")
+        )
+        expect(prepare.drop_unused_plugin_dirs(bundle) == 1, "sqldrivers is one unused directory")
+        expect(not sql.exists(), "the sqldrivers directory is removed")
+
+
 def test_v19_prebuilts_if_present(macho):
     archive = Path("/tmp/macOS-universal.zip")
     if not archive.is_file():
@@ -197,6 +246,9 @@ def test_scripts_and_floor():
     expect("-m qtshadertools qtimageformats" in deps and "qtpdf" not in deps.split("-m qtshadertools qtimageformats", 1)[1].split("\n", 1)[0], "the aqt module list does not install QtPdf")
     expect("moonlight-qt-deps" in deps and "v19" in deps, "libplacebo and MoltenVK come from deps v19")
     expect("Vulkan-Loader" in deps, "the Vulkan loader is still built from source")
+    expect("Vulkan-Headers" in deps and "v1.4.363" in deps, "Vulkan-Headers 1.4.363 is installed before the loader")
+    expect("VulkanHeadersConfig.cmake" in deps, "the headers step installs the CMake package the loader finds")
+    expect("steps=${*:-qt prebuilts headers vulkan}" in deps, "headers run before the loader")
     expect("shaderc.git" not in deps and "Little-CMS" not in deps and "libplacebo.git" not in deps, "shaderc, lcms, and libplacebo are not source-built")
     expect("MoltenVK.git" not in deps, "MoltenVK is not source-built")
     expect('cd "$DEPS"' in deps, "aqt runs inside the deps tree, not the repo root")
@@ -204,6 +256,10 @@ def test_scripts_and_floor():
     expect("QMAKE_MACOSX_DEPLOYMENT_TARGET = 13.0" in pri, "globaldefs floor is 13.0")
     expect("<string>13.0.0</string>" in plist, "Info.plist minimum is 13.0.0")
     expect("prepare-macos-bundle.py" in dmg, "generate-dmg strips rpaths and drops orphan plug-ins")
+    prepare = (ROOT / "scripts" / "prepare-macos-bundle.py").read_text(encoding="utf-8")
+    expect('UNUSED_PLUGIN_DIRS = ("sqldrivers",)' in prepare, "sqldrivers are excluded outright")
+    mic = (ROOT / "app" / "streaming" / "audio" / "microphone" / "mic_capture_mac.mm").read_text(encoding="utf-8")
+    expect("#include <opus.h>" in mic and "#include <opus/opus.h>" not in mic, "mic capture includes opus.h from libs/mac")
     expect("check-macos-minos.sh" in dmg, "generate-dmg runs the guard")
     expect('"$DMG_ROOT/Twilight.app"' in dmg, "the staged app is checked")
     expect(
@@ -248,6 +304,8 @@ def main():
     test_versions(macho)
     test_bundle_policy(macho)
     test_users_rpath_and_absolute_prefix(macho)
+    test_static_archives_and_string_paths(macho)
+    test_sqldrivers_are_removed()
     test_v19_prebuilts_if_present(macho)
     test_scripts_and_floor()
     if FAILURES:

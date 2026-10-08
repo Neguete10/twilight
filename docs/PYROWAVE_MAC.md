@@ -54,9 +54,10 @@ Metal/VideoToolbox. Video codec = PyroWave is unchanged.
 - The default Mac link (`-lssl.3 -lcrypto.3 -lavcodec.61 …`, no `-lplacebo`)
   is unchanged. `CONFIG+=pyrowave` adds `-lpyrowave-shared -lplacebo`.
   Release builds take libplacebo and MoltenVK from moonlight-qt-deps v19
-  and a Vulkan loader built by `scripts/build-macos-deps.sh`. SDL loads
-  that loader; the loader reads `Contents/Resources/vulkan/icd.d` and opens
-  the bundled MoltenVK. v19's libplacebo already contains shaderc.
+  and a Vulkan loader built by `scripts/build-macos-deps.sh` against
+  Vulkan-Headers v1.4.363. SDL loads that loader; the loader reads
+  `Contents/Resources/vulkan/icd.d` and opens the bundled MoltenVK. v19's
+  libplacebo already contains shaderc.
 - Record framing (see below). This client does not send the RTSP attributes
   that select it, so a current Vibeshine host should stay on length-prefixed
   frames. That was not tested live.
@@ -571,7 +572,8 @@ that layout against `scripts/testdata/`.
 5. Release Mac builds get libplacebo and MoltenVK from
    [moonlight-qt-deps v19](https://github.com/moonlight-stream/moonlight-qt-deps/releases/tag/v19)
    (`scripts/build-macos-deps.sh`), not from Homebrew. v19 has no Vulkan
-   loader, so that script builds `libvulkan` for macOS 13. shaderc is
+   loader and no `VulkanHeadersConfig.cmake`, so that script installs
+   Vulkan-Headers v1.4.363 and builds `libvulkan` for macOS 13. shaderc is
    already inside v19's libplacebo; PyroWave does not link it (Granite's
    runtime shader compiler is off). `SDL_WINDOW_VULKAN` has to be in the
    SDL this tree already vendors. The stream window requests it only for

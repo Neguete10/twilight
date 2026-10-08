@@ -175,7 +175,8 @@ if [ -n "${TWILIGHT_DEPS_PREFIX:-}" ] && [[ "$QMAKE_CONFIG_ARGS" == *pyrowave* ]
   cp "$TWILIGHT_DEPS_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" "$BUILD_FOLDER/app/Twilight.app/Contents/Resources/vulkan/icd.d/" || fail "MoltenVK ICD copy failed!"
 fi
 
-# Drop Qt PDF plug-ins (they need QtPdf, which this app does not ship) and
+# Drop PlugIns/sqldrivers (libqsqlmimer wants libmimerapi from /usr/local)
+# and Qt PDF plug-ins (they need QtPdf, which this app does not ship), and
 # strip LC_RPATH entries that point at Homebrew or another absolute prefix.
 # Do this before signing. Developer ID signing below is unchanged:
 # hardened runtime, no entitlements plist.

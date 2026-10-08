@@ -1,8 +1,8 @@
 #!/bin/bash
 # Third-party macOS libraries for the desktop DMG, into build/macos-deps.
 #
-#   scripts/build-macos-deps.sh                 # Qt, v19 prebuilts, Vulkan loader
-#   scripts/build-macos-deps.sh qt              # one step (qt prebuilts vulkan)
+#   scripts/build-macos-deps.sh                 # Qt, v19 prebuilts, Vulkan headers, loader
+#   scripts/build-macos-deps.sh qt              # one step (qt prebuilts headers vulkan)
 #
 # 7.0.1 bundled Homebrew Qt 6.11 and Homebrew libplacebo, libvulkan,
 # libshaderc, glib, icu, harfbuzz, ... stamped with the build Mac's OS as
@@ -19,8 +19,10 @@
 #   lcms (PL_HAVE_LCMS is unset). MoltenVK is minos 12.0, which still loads
 #   on macOS 13. PyroWave's shared library turns Granite's runtime shader
 #   compiler off, so it does not need a separate libshaderc either.
-#   The v19 zip has no Vulkan loader. That is the only library built here,
-#   against the Vulkan 1.4.363 headers shipped in the same zip.
+#   The v19 zip has no Vulkan loader and its headers have no
+#   VulkanHeadersConfig.cmake. Vulkan-Headers v1.4.363 (the same commit as
+#   vulkan-sdk-1.4.363.0) is installed for that CMake package, then the
+#   loader is the only library compiled here.
 # FFmpeg, SDL2, OpenSSL, and Opus stay on the existing libs/ submodule pin.
 # v19 also contains newer sonames of those; switching them is a separate
 # change from the macOS 13 packaging fix.
@@ -50,6 +52,10 @@ AQT_SPEC=${TWILIGHT_AQT_SPEC:-git+https://github.com/miurahr/aqtinstall.git@073e
 QT_DEPS_TAG=${TWILIGHT_QT_DEPS_TAG:-v19}
 QT_DEPS_SHA256=${TWILIGHT_QT_DEPS_SHA256:-39fab7c95f5d513a6eb3bb19c66f1ae66bbf41dfe4118f82fabe3b46cc502d17}
 VULKAN_TAG=${VULKAN_TAG:-vulkan-sdk-1.4.363.0}
+# Loader known_good.json pins Vulkan-Headers at v1.4.363. That tag and
+# vulkan-sdk-1.4.363.0 are the same commit. v19's include/vulkan tree has
+# the headers but not the CMake package the loader's find_package requires.
+VULKAN_HEADERS_TAG=${VULKAN_HEADERS_TAG:-v1.4.363}
 
 JOBS=$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)
 mkdir -p "$SRC" "$PREFIX"
@@ -156,11 +162,27 @@ print("v19 libplacebo and MoltenVK link only system libraries")
 PY
 }
 
+step_headers() {
+  # v19's vulkan/ headers are the 1.4.363 API, but Vulkan-Loader's
+  # find_package(VulkanHeaders CONFIG) needs VulkanHeadersConfig.cmake.
+  local config="$PREFIX/share/cmake/VulkanHeaders/VulkanHeadersConfig.cmake"
+  if [ -f "$config" ] && [ -f "$PREFIX/include/vulkan/vulkan.h" ]; then
+    echo "Vulkan-Headers already at $config"
+    return
+  fi
+  fetch https://github.com/KhronosGroup/Vulkan-Headers.git "$VULKAN_HEADERS_TAG" Vulkan-Headers
+  cmake -S "$SRC/Vulkan-Headers" -B "$SRC/Vulkan-Headers/build" "${CMAKE_COMMON[@]}" \
+    -DVULKAN_HEADERS_ENABLE_MODULE=OFF -DVULKAN_HEADERS_ENABLE_TESTS=OFF
+  cmake --build "$SRC/Vulkan-Headers/build" -j "$JOBS" --target install
+  [ -f "$config" ] || { echo "VulkanHeadersConfig.cmake was not installed" >&2; exit 1; }
+  [ -f "$PREFIX/include/vulkan/vulkan.h" ] || { echo "vulkan.h was not installed" >&2; exit 1; }
+}
+
 step_vulkan() {
   # PyroWave and SDL load libvulkan at runtime; v19 does not include it.
-  # Headers are the 1.4.363 copies staged by step_prebuilts.
+  step_headers
   [ -f "$PREFIX/include/vulkan/vulkan.h" ] || {
-    echo "Vulkan headers missing. Run: scripts/build-macos-deps.sh prebuilts" >&2
+    echo "Vulkan headers missing. Run: scripts/build-macos-deps.sh headers" >&2
     exit 1
   }
   local real="" candidate
@@ -176,6 +198,7 @@ step_vulkan() {
   fi
   fetch https://github.com/KhronosGroup/Vulkan-Loader.git "$VULKAN_TAG" Vulkan-Loader
   cmake -S "$SRC/Vulkan-Loader" -B "$SRC/Vulkan-Loader/build" "${CMAKE_COMMON[@]}" \
+    -DVulkanHeaders_DIR="$PREFIX/share/cmake/VulkanHeaders" \
     -DVULKAN_HEADERS_INSTALL_DIR="$PREFIX" -DBUILD_TESTS=OFF -DBUILD_WSI_XCB_SUPPORT=OFF \
     -DBUILD_WSI_XLIB_SUPPORT=OFF -DBUILD_WSI_WAYLAND_SUPPORT=OFF
   cmake --build "$SRC/Vulkan-Loader/build" -j "$JOBS" --target install
@@ -208,7 +231,7 @@ ENV
   echo "wrote $DEPS/env.sh (Qt $QT_DIR, minos $TARGET)"
 }
 
-steps=${*:-qt prebuilts vulkan}
+steps=${*:-qt prebuilts headers vulkan}
 for s in $steps; do
   echo "=== $s (minos $TARGET, $ARCH)"
   "step_$s"

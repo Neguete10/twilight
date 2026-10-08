@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""After macdeployqt: strip outside rpaths and drop plug-ins with missing deps.
+"""After macdeployqt: strip outside rpaths and drop plug-ins we do not ship.
 
 macdeployqt copies every Qt plug-in it finds, including Qt PDF, even when
 the app does not link QtPdf. Those plug-ins keep an LC_RPATH into Homebrew,
-so dyld loads a second QtCore. Delete the plug-in, and delete rpaths that
-point at /opt/homebrew, /usr/local, /Users, or any other absolute path
-outside the bundle. Developer ID signing happens after this script.
+so dyld loads a second QtCore. It also copies PlugIns/sqldrivers when QtSql
+is in the deploy set. libqsqlmimer.dylib wants /usr/local/lib/libmimerapi.dylib.
+Twilight does not use SQL, so the whole sqldrivers directory is removed
+before the orphan scan. Delete any remaining plug-in whose strong dependency
+is not in the bundle, and delete rpaths that point at /opt/homebrew,
+/usr/local, /Users, or any other absolute path outside the bundle.
+Developer ID signing happens after this script.
 """
 
 from __future__ import annotations
@@ -56,6 +60,24 @@ def strip_outside_rpaths(bundle: Path) -> int:
     return stripped
 
 
+# macdeployqt deploys these when a Qt module is present. Twilight does not
+# load them, and some of them link libraries that exist only on the build Mac.
+UNUSED_PLUGIN_DIRS = ("sqldrivers",)
+
+
+def drop_unused_plugin_dirs(bundle: Path) -> int:
+    plugins = bundle / "Contents" / "PlugIns"
+    dropped = 0
+    for name in UNUSED_PLUGIN_DIRS:
+        path = plugins / name
+        if not path.exists():
+            continue
+        print(f"drop unused plugin directory {path}")
+        shutil.rmtree(path)
+        dropped += 1
+    return dropped
+
+
 def drop_orphan_plugins(bundle: Path) -> int:
     dropped = 0
     for path, missing in orphan_plugins(bundle):
@@ -81,9 +103,13 @@ def main(argv: list[str]) -> int:
     if not bundle.is_dir():
         sys.stderr.write(f"prepare-macos-bundle: not a directory: {bundle}\n")
         return 2
+    unused = drop_unused_plugin_dirs(bundle)
     dropped = drop_orphan_plugins(bundle)
     stripped = strip_outside_rpaths(bundle)
-    print(f"prepare-macos-bundle: dropped {dropped} orphan plugin(s), stripped {stripped} rpath(s)")
+    print(
+        f"prepare-macos-bundle: removed {unused} unused plugin dir(s), "
+        f"dropped {dropped} orphan plugin(s), stripped {stripped} rpath(s)"
+    )
     return 0
 
 
