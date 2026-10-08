@@ -36,11 +36,12 @@ def plist_keys(path):
 def test_plist_rewrite():
     module = load_prepare()
     template = (ROOT / "app" / "Info.plist").read_text(encoding="utf-8")
+    bundle_id = "io.github.neguete10.twilight"
     desktop = module.prepare(
-        template, "6.1.1", "com.moonlight-stream.Moonlight", "Twilight", "desktop"
+        template, "6.1.1", bundle_id, "Twilight", "desktop"
     )
     mas = module.prepare(
-        template, "6.1.1", "com.henrique.twilight", "Twilight", "mas"
+        template, "6.1.1", bundle_id, "Twilight", "mas"
     )
     desktop_plist = plistlib.loads(desktop.encode("utf-8"))
     mas_plist = plistlib.loads(mas.encode("utf-8"))
@@ -60,13 +61,13 @@ def test_plist_rewrite():
         "NSAllowsArbitraryLoads" not in mas_plist["NSAppTransportSecurity"],
         "MAS ATS does not set NSAllowsArbitraryLoads",
     )
-    expect(desktop_plist["CFBundleIdentifier"] == "com.moonlight-stream.Moonlight", "desktop bundle id")
-    expect(mas_plist["CFBundleIdentifier"] == "com.henrique.twilight", "MAS bundle id")
+    expect(desktop_plist["CFBundleIdentifier"] == bundle_id, "desktop bundle id")
+    expect(mas_plist["CFBundleIdentifier"] == bundle_id, "MAS bundle id")
     expect(desktop_plist["CFBundleShortVersionString"] == "6.1.1", "plist writes the version qmake passes")
     expect(template.count("<string>VERSION</string>") == 2, "Info.plist keeps the qmake version token")
     tree_version = (ROOT / "app" / "version.txt").read_text(encoding="utf-8").strip()
     wired = module.prepare(
-        template, tree_version, "com.moonlight-stream.Moonlight", "Twilight", "desktop"
+        template, tree_version, bundle_id, "Twilight", "desktop"
     )
     wired_plist = plistlib.loads(wired.encode("utf-8"))
     expect(wired_plist["CFBundleShortVersionString"] == tree_version, "short version follows version.txt")
@@ -78,6 +79,27 @@ def test_plist_rewrite():
         "Twilight uses the microphone" in desktop_plist["NSMicrophoneUsageDescription"],
         "microphone usage string",
     )
+
+
+def test_bundle_id_is_shared_and_settings_stay():
+    bundle_id = "io.github.neguete10.twilight"
+    pro = (ROOT / "app" / "app.pro").read_text(encoding="utf-8")
+    plist = (ROOT / "app" / "Info.plist").read_text(encoding="utf-8")
+    dmg = (ROOT / "scripts" / "generate-dmg.sh").read_text(encoding="utf-8")
+    doc = (ROOT / "docs" / "TWILIGHT_MAS.md").read_text(encoding="utf-8")
+    main = (ROOT / "app" / "main.cpp").read_text(encoding="utf-8")
+    expect(pro.count("TWILIGHT_BUNDLE_ID = " + bundle_id) == 1, "one bundle id assignment")
+    mas = pro.split("twilight-mas {", 1)[1].split("!system(python3", 1)[0]
+    expect("TWILIGHT_BUNDLE_ID =" not in mas, "store builds do not swap the bundle id")
+    expect("com.henrique.twilight" not in pro + plist + dmg + doc, "the placeholder bundle id is gone")
+    expect(bundle_id in plist, "Info.plist template names the bundle id")
+    expect("<string>BUNDLE_ID</string>" in plist, "Info.plist still has the qmake token")
+    expect(bundle_id in dmg, "the store profile error names the bundle id")
+    expect(bundle_id in doc, "the store checklist names the bundle id")
+    expect('setOrganizationDomain("moonlight-stream.com")' in main, "organization domain is moonlight-stream.com")
+    expect('setApplicationName("Moonlight")' in main, "application name stays Moonlight")
+    expect('setOrganizationDomain("io.github.neguete10.twilight")' not in main, "organization domain is not the bundle id")
+    expect('setApplicationName("Twilight")' not in main, "application name is not Twilight")
 
 
 def test_entitlements():
@@ -272,6 +294,7 @@ def test_dmg_layout():
 
 def main():
     test_plist_rewrite()
+    test_bundle_id_is_shared_and_settings_stay()
     test_entitlements()
     test_privacy_manifest()
     test_notices()

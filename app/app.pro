@@ -703,8 +703,9 @@ macx {
     # On a live 387b7f64 build those were already Twilight and Dock hover
     # still said Moonlight, which is the .app folder name. The folder is
     # Twilight.app. CFBundleExecutable and the binary are Twilight (local-test).
-    # Bundle id stays com.moonlight-stream.Moonlight unless twilight-mas
-    # swaps it. See docs/TWILIGHT_MAS.md.
+    # Bundle id is io.github.neguete10.twilight for the Developer ID build
+    # and for twilight-mas. See docs/TWILIGHT_MAS.md. Preferences stay in
+    # com.moonlight-stream.Moonlight; QSettings does not read this id.
     # Makefile builds name the folder from this variable and the binary
     # from TARGET. The Xcode generator forces PRODUCT_NAME to TARGET, so
     # leave that path as Moonlight.app rather than pointing the product
@@ -739,13 +740,20 @@ macx {
     # Info.plist tokens and the ATS dictionary are rewritten by
     # scripts/prepare-macos-infoplist.py. Desktop keeps
     # NSAllowsArbitraryLoads. twilight-mas swaps in NSAllowsLocalNetworking.
-    TWILIGHT_BUNDLE_ID = com.moonlight-stream.Moonlight
+    # Own bundle id. Sharing com.moonlight-stream.Moonlight with an installed
+    # Moonlight makes macOS Local Network privacy resolve that id to
+    # Moonlight's executable UUIDs, so a Finder-launched Twilight is blocked
+    # on the LAN (the host list shows Asleep) even when Twilight's Local
+    # Network toggle is on. Desktop and App Store use the same id.
+    # QSettings uses organizationDomain "moonlight-stream.com" and
+    # applicationName "Moonlight" (main.cpp), which is the existing
+    # com.moonlight-stream.Moonlight preferences domain, not this id.
+    TWILIGHT_BUNDLE_ID = io.github.neguete10.twilight
     TWILIGHT_DISPLAY_NAME = Twilight
     TWILIGHT_PLIST_MODE = desktop
     TWILIGHT_ENTITLEMENTS = $$PWD/deploy/macos/Twilight-MAS.entitlements
     twilight-mas {
         DEFINES += TWILIGHT_MAS
-        TWILIGHT_BUNDLE_ID = com.henrique.twilight
         TWILIGHT_DISPLAY_NAME = Twilight
         TWILIGHT_PLIST_MODE = mas
         twilight-mas-multicast {

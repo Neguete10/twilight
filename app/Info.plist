@@ -16,6 +16,10 @@
 	<string>Stream games and other applications from another PC</string>
 	<key>CFBundleIconFile</key>
 	<string>twilight</string>
+	<!-- prepare-macos-infoplist.py replaces BUNDLE_ID. qmake passes
+	     io.github.neguete10.twilight for both the direct-download build
+	     and CONFIG+=twilight-mas. Preferences stay in
+	     com.moonlight-stream.Moonlight. -->
 	<key>CFBundleIdentifier</key>
 	<string>BUNDLE_ID</string>
 	<key>NSHighResolutionCapable</key>

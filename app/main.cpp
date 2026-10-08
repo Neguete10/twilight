@@ -358,6 +358,12 @@ int main(int argc, char *argv[])
     // Set these here to allow us to use the default QSettings constructor.
     // These also ensure that our cache directory is named correctly. As such,
     // it is critical that these be called before Path::initialize().
+    // On macOS the default QSettings constructor uses organizationDomain
+    // when it is non-empty, then applicationName. Qt comifies
+    // "moonlight-stream.com" + "Moonlight" into the preferences domain
+    // com.moonlight-stream.Moonlight. CFBundleIdentifier is consulted only
+    // when that domain is empty, so the io.github.neguete10.twilight bundle
+    // id does not move pairing or settings. Do not derive these from it.
     QCoreApplication::setOrganizationName("Moonlight Game Streaming Project");
     QCoreApplication::setOrganizationDomain("moonlight-stream.com");
     QCoreApplication::setApplicationName("Moonlight");
@@ -626,8 +632,9 @@ int main(int argc, char *argv[])
 
 #ifdef Q_OS_DARWIN
     // Apple menu and Qt window titles. Dock hover uses the Twilight.app
-    // folder name. applicationName stays "Moonlight" so QSettings and the
-    // cache directory do not move.
+    // folder name. applicationName stays "Moonlight" and organizationDomain
+    // stays "moonlight-stream.com", so QSettings and the cache directory
+    // stay on com.moonlight-stream.Moonlight. The bundle id does not.
     QGuiApplication::setApplicationDisplayName(QStringLiteral("Twilight"));
 #endif
 
