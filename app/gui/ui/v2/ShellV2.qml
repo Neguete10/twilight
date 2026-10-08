@@ -770,6 +770,13 @@ Item {
 
     onModalOpenChanged: if (!modalOpen) focusNav()
     onQueryChanged: rebuildSlots()
+    // A saved host is not paired until the first poll. That update is a
+    // dataChanged on the same row, which refreshes the card and leaves the
+    // app model unbuilt, so the grid stays empty.
+    onSelectedPairedChanged: {
+        if (selectedPaired && !appModel)
+            rebuildApps()
+    }
 
     // Component.onDestruction is Qt 5.10. Preferences are written when the
     // settings sheet closes and when the window closes.
@@ -793,16 +800,6 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: theme.bg
-    }
-    Rectangle {
-        width: parent.width * 0.55
-        height: parent.height * 0.7
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.rightMargin: -width * 0.2
-        anchors.topMargin: -height * 0.25
-        radius: width
-        color: theme.wash
     }
 
     Column {

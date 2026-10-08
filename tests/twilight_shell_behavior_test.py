@@ -73,6 +73,36 @@ def test_overlay_and_quick_menu():
     expect("m_QuickMenuOpen" in mouse, "a video click does not recapture while the menu is open")
 
 
+def test_cli_host_end_exits():
+    segue = read("app/gui/StreamSegue.qml")
+    quit_branch = segue.split("if (quitAfter)", 1)[1].split("} else {", 1)[0]
+    expect("Qt.exit(1)" in quit_branch, "a command-line stream error exits non-zero")
+    expect("console.error(streamSegueErrorDialog.text)" in quit_branch, "the command-line error is logged")
+    expect(".open()" not in quit_branch, "the command-line path does not wait on the hidden error dialog")
+    gui_branch = segue.split("} else {", 1)[1].split("function sessionReadyForDeletion", 1)[0]
+    expect("window.visible = true" in gui_branch, "a GUI stream error shows the window again")
+    expect("streamSegueErrorDialog.open()" in gui_branch, "a GUI stream error still opens the dialog")
+    main = read("app/main.cpp")
+    hint_at = main.find("SDL_HINT_NO_SIGNAL_HANDLERS")
+    init_at = main.find("SDL_InitSubSystem(SDL_INIT_TIMER)")
+    expect(hint_at != -1 and init_at != -1 and hint_at < init_at, "SDL signal handlers are disabled before the first init")
+    expect("restoreDefaultQuitSignals()" in main, "startup restores the default quit signals")
+    session = read("app/streaming/session.cpp")
+    expect(session.count("restoreDefaultQuitSignals()") >= 2, "the stream restores quit signals on start and teardown")
+    header = read("app/utils.h")
+    expect("SIGTERM" in header and "SIG_DFL" in header, "SIGTERM uses the default terminate action")
+    expect("SIGINT" in header and "SIG_DFL" in header, "SIGINT uses the default terminate action")
+
+
+def test_app_grid_follows_pair_state():
+    shell = read("app/gui/ui/v2/ShellV2.qml")
+    expect("onSelectedPairedChanged" in shell, "becoming paired rebuilds the app grid")
+    handler = shell.split("onSelectedPairedChanged", 1)[1].split("Rectangle {", 1)[0]
+    expect("selectedPaired && !appModel" in handler and "rebuildApps()" in handler, "the grid is built once the host is paired")
+    expect("theme.wash" not in shell, "the main pane has no wash circle")
+    expect("color wash" not in read("app/gui/ui/v2/ThemeV2.qml"), "the unused wash color is gone")
+
+
 def test_automatic_codec():
     session = read("app/streaming/session.cpp")
     expect("automaticOffersPyroWave()" in session, "Automatic consults the PyroWave policy")
@@ -86,6 +116,8 @@ def main():
     test_game_mode_plist()
     test_quit_refresh()
     test_overlay_and_quick_menu()
+    test_cli_host_end_exits()
+    test_app_grid_follows_pair_state()
     test_automatic_codec()
     if FAILURES:
         print("%d failure(s)" % FAILURES)

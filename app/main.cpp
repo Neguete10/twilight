@@ -519,6 +519,11 @@ int main(int argc, char *argv[])
     // The DXVA2 renderer uses Direct3D 9Ex itself directly.
     SDL_SetHint("SDL_WINDOWS_USE_D3D9EX", "1");
 
+    // Must be set before the first SDL_InitSubSystem that brings up events.
+    // Otherwise SIGTERM posts SDL_QUIT and, once that loop is gone, does nothing.
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+    restoreDefaultQuitSignals();
+
     if (SDL_InitSubSystem(SDL_INIT_TIMER) != 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_TIMER) failed: %s",
@@ -540,6 +545,7 @@ int main(int argc, char *argv[])
     // Use atexit() to ensure SDL_Quit() is called. This avoids
     // racing with object destruction where SDL may be used.
     atexit(SDL_Quit);
+    restoreDefaultQuitSignals();
 
     // Avoid the default behavior of changing the timer resolution to 1 ms.
     // We don't want this all the time that Moonlight is open. We will set

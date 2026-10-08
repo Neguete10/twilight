@@ -801,6 +801,7 @@ bool Session::initialize()
                      SDL_GetError());
         return false;
     }
+    restoreDefaultQuitSignals();
 
     LiInitializeStreamConfiguration(&m_StreamConfig);
     m_StreamConfig.width = m_Preferences->width;
@@ -3237,6 +3238,9 @@ DispatchDeferredCleanup:
     }
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    // Video teardown can leave SDL's quit handler installed while the GUI
+    // gamepad subsystem keeps the event loop alive. SIGTERM must still exit.
+    restoreDefaultQuitSignals();
 
     // Cleanup can take a while, so dispatch it to a worker thread.
     // When it is complete, it will release our s_ActiveSessionSemaphore

@@ -80,13 +80,14 @@ Item {
         SdlGamepadKeyNavigation.enable()
 
         if (quitAfter) {
+            // Command-line launches hide this window when the stream starts
+            // and do not show it again. A dialog here can never be dismissed,
+            // so the process stays in the event loop with nothing on screen.
             if (streamSegueErrorDialog.text) {
-                // Quit when the error dialog is acknowledged
-                streamSegueErrorDialog.quitAfter = quitAfter
-                streamSegueErrorDialog.open()
+                console.error(streamSegueErrorDialog.text)
+                Qt.exit(1)
             }
             else {
-                // Quit immediately
                 Qt.quit()
             }
         } else {
