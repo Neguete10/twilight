@@ -3,6 +3,8 @@ import QtQuick.Window 2.2
 
 import SdlGamepadKeyNavigation 1.0
 import StreamHudStats 1.0
+import StreamingPreferences 1.0
+import SystemProperties 1.0
 
 // Twilight stream launch. Mirrors StreamSegue.qml signal handling without
 // touching the stack the command-line windows still use.
@@ -134,6 +136,17 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: host && host.theme ? host.theme.bg : "#12141A"
+    }
+
+    // The segue covers the shell while a session starts. Rectangles do not take
+    // input, so without this the app grid underneath stays clickable and can
+    // start a second session.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        hoverEnabled: true
+        preventStealing: true
+        onWheel: function(wheel) { wheel.accepted = true }
     }
 
     Rectangle {
