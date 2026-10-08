@@ -11,7 +11,10 @@ Window {
     flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus | Qt.NoDropShadowWindowHint
     color: "transparent"
     title: ""
-    visible: StreamHudStats.streaming && StreamingPreferences.uiVersion === "v2" && StreamingPreferences.showTwilightHud
+    // Chips follow the Twilight overlay plus the runtime shortcut. The quick
+    // menu uses this same window when the chips are hidden, so End Stream
+    // stays reachable while the mouse is captured.
+    visible: StreamHudStats.streaming && StreamingPreferences.uiVersion === "v2" && ((StreamingPreferences.showTwilightHud && StreamHudStats.hudShown) || StreamHudStats.quickMenuOpen)
 
     width: column.implicitWidth
     height: column.implicitHeight
@@ -44,10 +47,87 @@ Window {
         id: column
         spacing: 6
 
-        HudChipsV2 { id: chips }
+        HudChipsV2 {
+            id: chips
+            visible: StreamingPreferences.showTwilightHud && StreamHudStats.hudShown
+        }
+
+        Rectangle {
+            id: quickMenu
+            visible: StreamHudStats.quickMenuOpen
+            width: 240
+            height: visible ? menuColumn.implicitHeight + 20 : 0
+            radius: 16
+            color: chips.glass
+            border.width: 1
+            border.color: chips.edge
+
+            Column {
+                id: menuColumn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: 10
+                spacing: 8
+
+                Text {
+                    width: parent.width
+                    text: qsTr("Stream")
+                    color: chips.mute
+                    font.pixelSize: 12
+                    font.family: chips.uiFont
+                }
+                Rectangle {
+                    width: parent.width
+                    height: 36
+                    radius: 10
+                    color: chips.danger
+                    Text {
+                        anchors.centerIn: parent
+                        text: qsTr("End Stream")
+                        color: "#FFFFFF"
+                        font.pixelSize: 14
+                        font.family: chips.uiFont
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: StreamHudStats.endStreamFromMenu()
+                    }
+                }
+                Rectangle {
+                    width: parent.width
+                    height: 36
+                    radius: 10
+                    color: "transparent"
+                    border.width: 1
+                    border.color: chips.edge
+                    Text {
+                        anchors.centerIn: parent
+                        text: qsTr("Close")
+                        color: chips.ink
+                        font.pixelSize: 14
+                        font.family: chips.uiFont
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: StreamHudStats.closeQuickMenu()
+                    }
+                }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: qsTr("Esc or Select+Start closes this. A ends the stream.")
+                    color: chips.mute
+                    font.pixelSize: 11
+                    font.family: chips.uiFont
+                }
+            }
+        }
 
         Text {
-            visible: StreamHudStats.hasSample && StreamHudStats.codecText !== ""
+            visible: chips.visible && StreamHudStats.hasSample && StreamHudStats.codecText !== ""
             anchors.horizontalCenter: parent.horizontalCenter
             text: StreamHudStats.codecText
             color: chips.mute

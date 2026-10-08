@@ -35,6 +35,10 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Ignore synthetic mouse events
         return;
     }
+    else if (m_QuickMenuOpen) {
+        // A click on the video must not recapture while the menu is open.
+        return;
+    }
     else if (!isCaptureActive()) {
         if (event->button == SDL_BUTTON_LEFT && event->state == SDL_RELEASED &&
                 isMouseInVideoRegion(event->x, event->y)) {

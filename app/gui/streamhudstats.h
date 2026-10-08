@@ -11,6 +11,8 @@ class StreamHudStats : public QObject
     Q_OBJECT
 
     Q_PROPERTY(bool streaming READ streaming NOTIFY streamingChanged)
+    Q_PROPERTY(bool hudShown READ hudShown NOTIFY hudShownChanged)
+    Q_PROPERTY(bool quickMenuOpen READ quickMenuOpen NOTIFY quickMenuOpenChanged)
     Q_PROPERTY(bool hasSample READ hasSample NOTIFY statsChanged)
     Q_PROPERTY(QString fpsText READ fpsText NOTIFY statsChanged)
     Q_PROPERTY(QString bitrateText READ bitrateText NOTIFY statsChanged)
@@ -22,6 +24,8 @@ public:
     static StreamHudStats* instance();
 
     bool streaming() const { return m_Streaming; }
+    bool hudShown() const { return m_HudShown; }
+    bool quickMenuOpen() const { return m_QuickMenuOpen; }
     bool hasSample() const { return m_HasSample; }
     QString fpsText() const { return m_FpsText; }
     QString bitrateText() const { return m_BitrateText; }
@@ -34,6 +38,11 @@ public:
     Q_INVOKABLE void noteSessionStarted();
     Q_INVOKABLE void noteSessionEnded();
     Q_INVOKABLE void requestDisconnect();
+    Q_INVOKABLE void closeQuickMenu();
+    Q_INVOKABLE void endStreamFromMenu();
+
+    void setHudShown(bool shown);
+    void setQuickMenuOpen(bool open);
 
     // macOS stream loop cannot run the QML Timer: that needs processEvents(),
     // which dequeues the key-up SDL is waiting for. flushStreamUi() expires
@@ -71,6 +80,8 @@ public:
 
 signals:
     void streamingChanged();
+    void hudShownChanged();
+    void quickMenuOpenChanged();
     void statsChanged();
     void hudConfirmExpired();
 
@@ -81,6 +92,8 @@ private:
     explicit StreamHudStats(QObject* parent = nullptr);
 
     bool m_Streaming;
+    bool m_HudShown;
+    bool m_QuickMenuOpen;
     bool m_HasSample;
     bool m_ConfirmArmed;
     quint32 m_ConfirmDeadline;

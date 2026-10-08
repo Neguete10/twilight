@@ -159,6 +159,17 @@ public:
 #endif
     void toggleMicrophoneMute();
 
+    // Ctrl+Alt+Shift+S and Select+L1+R1+X. Flips each performance overlay
+    // whose setting is on. An overlay that is off stays off.
+    void toggleEnabledPerformanceOverlays();
+
+    // Ctrl+Alt+Shift+E and Select+Start. Releases mouse capture only while
+    // the menu is open, then restores it. A and End Stream end the session.
+    void toggleQuickMenu();
+    void closeQuickMenu();
+    void endStreamFromQuickMenu();
+    bool quickMenuOpen() const;
+
 signals:
     void stageStarting(QString stage);
 
@@ -171,6 +182,8 @@ signals:
     void quitStarting();
 
     void sessionFinished(int portTestResult);
+
+    void runningGameChanged(int gameId);
 
     // Emitted after sessionFinished() when the session is ready to be destroyed
     void readyForDeletion();
@@ -307,6 +320,7 @@ private:
     int m_FlushingWindowEventsRef;
     QStringList m_LaunchWarnings;
     bool m_ShouldExit;
+    bool m_HostAppLaunched;
 
     bool m_AsyncConnectionSuccess;
     int m_PortTestResults;

@@ -198,7 +198,7 @@ void SystemProperties::startAsyncLoad()
                      SDL_GetError());
         return;
     }
-    reinstallUnixSignalHandlers();
+    installQuitSignals();
 
     testWindow = StreamUtils::createTestWindow();
     if (!testWindow) {
@@ -206,7 +206,7 @@ void SystemProperties::startAsyncLoad()
                      "Failed to create window for hardware decode test: %s",
                      SDL_GetError());
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        reinstallUnixSignalHandlers();
+        installQuitSignals();
         return;
     }
 
@@ -236,7 +236,7 @@ void SystemProperties::refreshDisplays()
                      SDL_GetError());
         return;
     }
-    reinstallUnixSignalHandlers();
+    installQuitSignals();
 
     monitorNativeResolutions.clear();
     monitorSafeAreaResolutions.clear();

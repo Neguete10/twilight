@@ -1,4 +1,5 @@
 #include "session.h"
+#include "gui/overlay_toggle.h"
 #include "gui/streamhudstats.h"
 
 #ifdef Q_OS_DARWIN
@@ -282,6 +283,70 @@ void Session::startMicrophone()
 void Session::stopMicrophone()
 {
     m_Microphone.stop();
+}
+
+void Session::toggleEnabledPerformanceOverlays()
+{
+    const int targets = performanceOverlayToggleTargets(m_Preferences->showPerformanceOverlay,
+                                                        m_Preferences->showTwilightHud());
+    if (targets & OverlayToggleClassic) {
+        const bool next = !m_OverlayManager.isOverlayEnabled(Overlay::OverlayDebug);
+        m_OverlayManager.setOverlayState(Overlay::OverlayDebug, next);
+    }
+    if ((targets & OverlayToggleTwilight) && StreamHudStats::instance() != nullptr) {
+        StreamHudStats* hud = StreamHudStats::instance();
+        hud->setHudShown(!hud->hudShown());
+    }
+    StreamHudStats::flushStreamUi();
+    StreamHudStats::followStream();
+}
+
+bool Session::quickMenuOpen() const
+{
+    return StreamHudStats::instance() != nullptr && StreamHudStats::instance()->quickMenuOpen();
+}
+
+void Session::toggleQuickMenu()
+{
+    if (StreamHudStats::instance() == nullptr || !StreamHudStats::instance()->streaming()) {
+        return;
+    }
+    if (quickMenuOpen()) {
+        closeQuickMenu();
+    }
+    else {
+        if (m_InputHandler != nullptr) {
+            m_InputHandler->releaseCaptureForQuickMenu();
+        }
+        StreamHudStats::instance()->setQuickMenuOpen(true);
+        StreamHudStats::flushStreamUi();
+        StreamHudStats::followStream();
+    }
+}
+
+void Session::closeQuickMenu()
+{
+    if (StreamHudStats::instance() != nullptr) {
+        StreamHudStats::instance()->setQuickMenuOpen(false);
+    }
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->restoreCaptureAfterQuickMenu();
+    }
+    StreamHudStats::flushStreamUi();
+    StreamHudStats::followStream();
+}
+
+void Session::endStreamFromQuickMenu()
+{
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->cancelQuickMenuRecapture();
+    }
+    if (StreamHudStats::instance() != nullptr) {
+        StreamHudStats::instance()->setQuickMenuOpen(false);
+    }
+    if (StreamHudStats::instance() != nullptr) {
+        StreamHudStats::instance()->requestDisconnect();
+    }
 }
 
 void Session::toggleMicrophoneMute()

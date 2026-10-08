@@ -223,6 +223,7 @@ SOURCES += \
     gui/sdlgamepadkeynavigation.cpp \
     streaming/video/overlaymanager.cpp \
     backend/systemproperties.cpp \
+    quit_signals.cpp \
     wm.cpp \
     imgui/devui.cpp \
     imgui/gamepadmenu.cpp \
@@ -268,6 +269,7 @@ HEADERS += \
     gui/streamhudparse.h \
     gui/streamhudplace.h \
     gui/streamhudstats.h \
+    gui/overlay_toggle.h \
     streaming/audio/microphone/mic_capture.h \
     streaming/audio/microphone/mic_permission.h \
     streaming/audio/microphone/mic_resample.h \
@@ -300,6 +302,7 @@ HEADERS += \
     cli/quitstream.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
+    settings/bitrate_choice.h \
     streaming/input/input.h \
     streaming/session.h \
     streaming/audio/renderers/renderer.h \

@@ -7,10 +7,12 @@
 // Manual reference counting, same as the other macOS renderer sources.
 
 static void (*s_Toggle)() = nullptr;
+static void (*s_EndStream)() = nullptr;
 static bool s_CreatedWindowMenu = false;
 
 @interface TwilightPipMenuTarget : NSObject
 - (void)togglePictureInPicture:(id)sender;
+- (void)endStream:(id)sender;
 @end
 
 @implementation TwilightPipMenuTarget
@@ -23,10 +25,19 @@ static bool s_CreatedWindowMenu = false;
     }
 }
 
+- (void)endStream:(id)sender
+{
+    (void)sender;
+    if (s_EndStream != nullptr) {
+        s_EndStream();
+    }
+}
+
 @end
 
 static TwilightPipMenuTarget* s_Target = nil;
 static NSMenuItem* s_PipItem = nil;
+static NSMenuItem* s_EndItem = nil;
 static NSMenuItem* s_Separator = nil;
 static NSMenuItem* s_WindowMenuItem = nil;
 
@@ -54,9 +65,10 @@ static NSWindow* windowFromSdl(SDL_Window* window)
     return info.info.cocoa.window;
 }
 
-void MacPipInstallMenu(void (*toggle)())
+void MacPipInstallMenu(void (*toggle)(), void (*endStream)())
 {
     s_Toggle = toggle;
+    s_EndStream = endStream;
     if (s_PipItem != nil) {
         return;
     }
@@ -99,6 +111,12 @@ void MacPipInstallMenu(void (*toggle)())
         }
         [windowMenu addItem:s_PipItem];
 
+        s_EndItem = [[NSMenuItem alloc] initWithTitle:@"End Stream"
+                                               action:@selector(endStream:)
+                                        keyEquivalent:@""];
+        [s_EndItem setTarget:s_Target];
+        [windowMenu addItem:s_EndItem];
+
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Picture-in-picture: Window menu, or Ctrl+Alt+Shift+P while streaming");
     }
@@ -107,7 +125,16 @@ void MacPipInstallMenu(void (*toggle)())
 void MacPipRemoveMenu()
 {
     s_Toggle = nullptr;
+    s_EndStream = nullptr;
 
+    if (s_EndItem != nil) {
+        NSMenu* menu = [s_EndItem menu];
+        if (menu != nil) {
+            [menu removeItem:s_EndItem];
+        }
+        [s_EndItem release];
+        s_EndItem = nil;
+    }
     if (s_PipItem != nil) {
         NSMenu* menu = [s_PipItem menu];
         if (menu != nil) {

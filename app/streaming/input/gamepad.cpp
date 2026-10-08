@@ -296,6 +296,12 @@ void SdlInputHandler::handleControllerAxisEvent(SDL_ControllerAxisEvent* event)
         SDL_PeepEvents(&nextEvent, 1, SDL_GETEVENT, SDL_CONTROLLERAXISMOTION, SDL_CONTROLLERAXISMOTION);
     }
 
+    // Sticks keep their latest values for when the menu closes, but the
+    // host already received zeros when the menu opened.
+    if (m_QuickMenuOpen) {
+        return;
+    }
+
     // Only send the gamepad state to the host if it's not in mouse emulation mode
     if (state->mouseEmulationTimer == 0 && dirty) {
         sendGamepadState(state);
@@ -318,6 +324,27 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
 
     // Help the ImGui code know the last used SDL JoystickID
     GamepadMenu::instance().SetActiveJoystickID(event->which);
+
+    // While the quick menu is up, the pad drives the menu. Physical A ends
+    // the stream, B or Select+Start closes it, and nothing is sent to the host.
+    if (m_QuickMenuOpen) {
+        if (event->state == SDL_PRESSED) {
+            state->buttons |= k_ButtonMap[event->button];
+        }
+        else {
+            state->buttons &= ~k_ButtonMap[event->button];
+        }
+        if (event->state == SDL_PRESSED && Session::get() != nullptr) {
+            if (event->button == SDL_CONTROLLER_BUTTON_A) {
+                Session::get()->endStreamFromQuickMenu();
+            }
+            else if (event->button == SDL_CONTROLLER_BUTTON_B ||
+                     state->buttons == (PLAY_FLAG | BACK_FLAG)) {
+                Session::get()->closeQuickMenu();
+            }
+        }
+        return;
+    }
 
     if (m_SwapFaceButtons) {
         switch (event->button) {
@@ -433,14 +460,28 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
         return;
     }
 
+    // Select+Start opens the quick menu. Exact match so it does not collide
+    // with Start+Select+L1+R1, which quits.
+    if (state->buttons == (PLAY_FLAG | BACK_FLAG)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected quick menu gamepad combo");
+        if (Session::get() != nullptr) {
+            Session::get()->toggleQuickMenu();
+        }
+        LiSendMultiControllerEvent(state->index, m_GamepadMask,
+                                   0, 0, 0, 0, 0, 0, 0);
+        state->buttons = 0;
+        return;
+    }
+
     // Handle Select+L1+R1+X as a gamepad overlay combo
     if (state->buttons == (BACK_FLAG | LB_FLAG | RB_FLAG | X_FLAG)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected stats toggle gamepad combo");
 
-        // Toggle the stats overlay
-        Session::get()->getOverlayManager().setOverlayState(Overlay::OverlayDebug,
-                                                            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug));
+        if (Session::get() != nullptr) {
+            Session::get()->toggleEnabledPerformanceOverlays();
+        }
 
         // Clear buttons down on this gamepad
         LiSendMultiControllerEvent(state->index, m_GamepadMask,

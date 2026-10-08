@@ -79,22 +79,21 @@ Item {
             else {
                 Qt.quit()
             }
-            return
-        }
+        } else {
+            // Pop the StreamSegue off the stack for a GUI launch
+            stackView.pop()
 
-        // Pop the StreamSegue off the stack for a GUI launch
-        stackView.pop()
+            // Show the Qt window again after streaming
+            window.visible = true
 
-        // Show the Qt window again after streaming
-        window.visible = true
-
-        // Display any launch errors. We do this after
-        // the Qt UI is visible again to prevent losing
-        // focus on the dialog which would impact gamepad
-        // users.
-        if (streamSegueErrorDialog.text) {
-            streamSegueErrorDialog.quitAfter = quitAfter
-            streamSegueErrorDialog.open()
+            // Display any launch errors. We do this after
+            // the Qt UI is visible again to prevent losing
+            // focus on the dialog which would impact gamepad
+            // users.
+            if (streamSegueErrorDialog.text) {
+                streamSegueErrorDialog.quitAfter = quitAfter
+                streamSegueErrorDialog.open()
+            }
         }
     }
 

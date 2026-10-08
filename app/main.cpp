@@ -19,11 +19,6 @@
 #include <unistd.h>
 #endif
 
-#ifdef Q_OS_UNIX
-#include <sys/socket.h>
-#include <signal.h>
-#endif
-
 // Don't let SDL hook our main function, since Qt is already
 // doing the same thing. This needs to be before any headers
 // that might include SDL.h themselves.
@@ -368,112 +363,6 @@ LONG WINAPI UnhandledExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
 
 #endif
 
-#ifdef Q_OS_UNIX
-
-static int signalFds[2];
-
-static void fatalSigterm(int)
-{
-    _Exit(0);
-}
-
-void handleSignal(int sig)
-{
-    send(signalFds[0], &sig, sizeof(sig), 0);
-}
-
-int SDLCALL signalHandlerThread(void* data)
-{
-    Q_UNUSED(data);
-
-    Session* lastSession = nullptr;
-    bool requestedQuit = false;
-
-    int sig;
-    while (recv(signalFds[1], &sig, sizeof(sig), MSG_WAITALL) == sizeof(sig)) {
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Received signal: %d", sig);
-
-        Session* session;
-        switch (sig) {
-        case SIGTERM:
-            // First SIGTERM always terminates. A hidden CLI error dialog, or
-            // SDL's own handler posting SDL_QUIT into a finished stream loop,
-            // used to swallow this signal.
-            _Exit(0);
-            break;
-
-        case SIGINT:
-            // Check if we have an active streaming session
-            session = Session::get();
-            if (session != nullptr) {
-                // Exit immediately if we haven't changed state since last attempt
-                if (session == lastSession || requestedQuit) {
-                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Exiting immediately on second signal");
-                    _Exit(1);
-                }
-
-                // Stop the streaming session
-                session->interrupt();
-                lastSession = session;
-            }
-            else {
-                // Exit immediately if we haven't changed state since last attempt
-                if (requestedQuit) {
-                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Exiting immediately on second signal");
-                    _Exit(1);
-                }
-
-                // If we're not streaming, we'll close the whole app
-                QCoreApplication::instance()->quit();
-                requestedQuit = true;
-            }
-            break;
-
-        default:
-            Q_UNREACHABLE();
-        }
-    }
-
-    return 0;
-}
-
-void configureSignalHandlers()
-{
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, signalFds) == -1) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "socketpair() failed: %d",
-                     errno);
-        // SIGTERM still has to terminate even if SIGINT cannot be forwarded.
-        struct sigaction terminateAction = {};
-        terminateAction.sa_handler = fatalSigterm;
-        sigemptyset(&terminateAction.sa_mask);
-        sigaction(SIGTERM, &terminateAction, nullptr);
-        return;
-    }
-
-    // Create a thread to handle our signals safely outside of signal context
-    SDL_Thread* thread = SDL_CreateThread(signalHandlerThread, "Signal Handler", nullptr);
-    SDL_DetachThread(thread);
-
-    reinstallUnixSignalHandlers();
-}
-
-void reinstallUnixSignalHandlers()
-{
-    struct sigaction interruptAction = {};
-    interruptAction.sa_handler = handleSignal;
-    interruptAction.sa_flags = SA_RESTART;
-    sigemptyset(&interruptAction.sa_mask);
-    sigaction(SIGINT, &interruptAction, nullptr);
-
-    struct sigaction terminateAction = {};
-    terminateAction.sa_handler = fatalSigterm;
-    sigemptyset(&terminateAction.sa_mask);
-    sigaction(SIGTERM, &terminateAction, nullptr);
-}
-
-#endif
-
 static void sdlLogAfterShutdown(void*, int, SDL_LogPriority, const char*)
 {
 }
@@ -765,11 +654,12 @@ int main(int argc, char *argv[])
     // initializing the SDL video subsystem to have any effect.
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
 
-    // SDL's default SIGTERM handler only posts SDL_QUIT. Once the stream
-    // loop is gone that event is never read, so the process ignores the
-    // signal. Set this before the first SDL_InitSubSystem. The real
-    // handlers are installed after QGuiApplication exists.
-    SDL_SetHint("SDL_NO_SIGNAL_HANDLERS", "1");
+    // Must be set before the first SDL_InitSubSystem that brings up events.
+    // SDL's own handler only posts SDL_QUIT, which nothing reads once the
+    // stream loop has returned to Qt. Our handler posts that quit only while
+    // the stream loop is running, and terminates the rest of the time.
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+    installQuitSignals();
 
     // We use MMAL to render on Raspberry Pi, so we do not require DRM master.
     SDL_SetHint(SDL_HINT_KMSDRM_REQUIRE_DRM_MASTER, "0");
@@ -799,12 +689,13 @@ int main(int argc, char *argv[])
                      SDL_GetError());
         return finishMain(-1);
     }
-    reinstallUnixSignalHandlers();
+    installQuitSignals();
 #endif
 
     // Use atexit() to ensure SDL_Quit() is called. This avoids
     // racing with object destruction where SDL may be used.
     atexit(SDL_Quit);
+    installQuitSignals();
 
     // Avoid the default behavior of changing the timer resolution to 1 ms.
     // We don't want this all the time that Moonlight is open. We will set
@@ -874,14 +765,6 @@ int main(int argc, char *argv[])
     // the user to enable a system accessibility setting. Other platforms already
     // default to this behavior.
     app.styleHints()->setTabFocusBehavior(Qt::TabFocusAllControls);
-#endif
-
-#ifdef Q_OS_UNIX
-    // Register signal handlers to arbitrate between SDL and Qt.
-    // NB: This has to be done after the QGuiApplication is constructed to
-    // ensure Qt has already installed its VT signals before we override
-    // some of them with our own.
-    configureSignalHandlers();
 #endif
 
 #ifdef Q_OS_WIN32

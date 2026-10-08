@@ -157,6 +157,12 @@ Item {
         appRevision = appRevision + 1
         refreshDesktop()
         rebuildSlots()
+        if (appMenuOpen) {
+            if (!appModel || menuAppIndex < 0 || menuAppIndex >= appModel.appCount())
+                appMenuOpen = false
+            else
+                openAppMenu(menuAppIndex)
+        }
     }
 
     function rebuildSlots() {
@@ -789,16 +795,6 @@ Item {
         anchors.fill: parent
         color: theme.bg
     }
-    Rectangle {
-        width: parent.width * 0.55
-        height: parent.height * 0.7
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.rightMargin: -width * 0.2
-        anchors.topMargin: -height * 0.25
-        radius: width
-        color: theme.wash
-    }
 
     Column {
         anchors.fill: parent
@@ -1320,7 +1316,7 @@ Item {
                                     anchors.top: parent.top
                                     anchors.bottom: parent.bottom
                                     width: 220
-                                    fillMode: Image.PreserveAspectCrop
+                                    fillMode: Image.PreserveAspectFit
                                     horizontalAlignment: Image.AlignHCenter
                                     verticalAlignment: Image.AlignVCenter
                                     asynchronous: true
@@ -1672,6 +1668,7 @@ Item {
         }
         onDeleteRequested: shell.deleteOpen = true
         onShowHiddenToggled: shell.setShowHidden(next)
+        onQuitRequested: shell.requestQuitOnly()
     }
 
     SettingsSheetV2 {

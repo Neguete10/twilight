@@ -27,6 +27,7 @@ Item {
     signal renameRequested()
     signal deleteRequested()
     signal showHiddenToggled(bool next)
+    signal quitRequested()
 
     anchors.fill: parent
     visible: open || hideTimer.running
@@ -53,6 +54,8 @@ Item {
             ids.push("wake")
         if (pairAction.visible)
             ids.push("pair")
+        if (quitAction.visible)
+            ids.push("quit")
         ids.push("test")
         ids.push("rename")
         ids.push("hidden")
@@ -70,6 +73,7 @@ Item {
         var id = ids.length > 0 ? ids[focusPos] : ""
         wakeAction.keyed = id === "wake"
         pairAction.keyed = id === "pair"
+        quitAction.keyed = id === "quit"
         testAction.keyed = id === "test"
         renameAction.keyed = id === "rename"
         hiddenSwitch.keyed = id === "hidden"
@@ -99,6 +103,8 @@ Item {
             wakeAction.triggered()
         else if (id === "pair")
             pairAction.triggered()
+        else if (id === "quit")
+            quitAction.triggered()
         else if (id === "test")
             testAction.triggered()
         else if (id === "rename")
@@ -250,6 +256,15 @@ Item {
                 title: qsTr("Pair")
                 visible: !sheet.paired && sheet.online
                 onTriggered: sheet.pairRequested()
+            }
+            HostActionV2 {
+                id: quitAction
+                theme: sheet.theme
+                symbol: "stop.fill"
+                title: qsTr("Quit running app")
+                danger: true
+                visible: sheet.online && sheet.paired && sheet.busy
+                onTriggered: sheet.quitRequested()
             }
             HostActionV2 {
                 id: testAction

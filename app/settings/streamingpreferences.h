@@ -14,6 +14,15 @@ public:
     Q_INVOKABLE static int
     getDefaultBitrate(int width, int height, int fps, bool yuv444);
 
+    // Slider and typed field. 500 kbps through 500 Mbps. Unlimited is the top.
+    Q_INVOKABLE int minimumBitrateKbps() const;
+    Q_INVOKABLE int maximumBitrateKbps() const;
+    Q_INVOKABLE int gfeBitrateCapKbps() const;
+    // -1 when the text is empty, not a number, or outside the range above.
+    // The previous saved value is left alone; callers must not substitute a clamp.
+    Q_INVOKABLE int bitrateKbpsFromMbpsText(const QString& text) const;
+    Q_INVOKABLE QString bitrateMbpsText(int kbps) const;
+
     Q_INVOKABLE void save();
 
     void reload();

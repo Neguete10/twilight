@@ -561,7 +561,11 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED(externalPort);
     ASSIGN_IF_CHANGED(pairState);
     ASSIGN_IF_CHANGED(serverCodecModeSupport);
-    ASSIGN_IF_CHANGED(currentGameId);
+    // A quit clears the id and leaves pendingQuit set. A stale serverinfo
+    // sample must not put that id back until a sample itself says idle.
+    if (!(this->pendingQuit && that.currentGameId != 0)) {
+        ASSIGN_IF_CHANGED(currentGameId);
+    }
     ASSIGN_IF_CHANGED(activeAddress);
     ASSIGN_IF_CHANGED(state);
     ASSIGN_IF_CHANGED(gfeVersion);

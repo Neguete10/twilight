@@ -12,6 +12,9 @@
 #include "SDL_compat.h"
 #include "path.h"
 #include "utils.h"
+#ifdef Q_OS_DARWIN
+#include "streaming/mac/pip_window.h"
+#endif
 
 #ifdef HAVE_FFMPEG
 #include "video/ffmpeg.h"
@@ -681,6 +684,7 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_MouseEmulationRefCount(0),
       m_FlushingWindowEventsRef(0),
       m_ShouldExit(false),
+      m_HostAppLaunched(false),
       m_AsyncConnectionSuccess(false),
       m_PortTestResults(0),
       m_OpusDecoder(nullptr),
@@ -767,8 +771,9 @@ bool Session::initialize(QQuickWindow* qtWindow)
                      SDL_GetError());
         return false;
     }
-    // Video init can replace SIGTERM with SDL's SDL_QUIT handler.
-    reinstallUnixSignalHandlers();
+    // Video init can install SDL's quit handler. Put ours back before the
+    // stream loop decides whether a signal is a graceful quit.
+    installQuitSignals();
 
     // Stop text input. SDL enables it by default
     // when we initialize the video subsystem, but this
@@ -1493,12 +1498,21 @@ private:
         // Perform a best-effort app quit
         if (shouldQuit) {
             NvHTTP http(m_Session->m_Computer);
+            bool quitOk = false;
 
             // Logging is already done inside NvHTTP
             try {
                 http.quitApp();
+                quitOk = true;
             } catch (const GfeHttpResponseException&) {
             } catch (const QtNetworkReplyException&) {
+            }
+
+            // Clear the shell's running app only when the host actually quit.
+            // A failed quit leaves the id in place so Quit stays available.
+            if (m_Session->m_HostAppLaunched) {
+                const int gameId = quitOk ? 0 : m_Session->m_App.id;
+                emit m_Session->runningGameChanged(gameId);
             }
 
             // Session is finished now
@@ -1854,6 +1868,11 @@ bool Session::startConnectionAsync()
         return false;
     }
 
+    // The host accepted the launch. Publish the app id before the RTSP
+    // handshake so Quit is available even if the stream itself fails.
+    m_HostAppLaunched = true;
+    emit runningGameChanged(m_App.id);
+
     QByteArray hostnameStr = m_Computer->activeAddress.address().toUtf8();
     QByteArray siAppVersion = m_Computer->appVersion.toUtf8();
 
@@ -2005,6 +2024,22 @@ void Session::interrupt()
     SDL_PushEvent(&event);
 }
 
+#ifdef Q_OS_DARWIN
+static void macPipMenuToggle()
+{
+    if (Session::get() != nullptr) {
+        Session::get()->togglePictureInPicture();
+    }
+}
+
+static void macEndStreamMenu()
+{
+    if (Session::get() != nullptr) {
+        Session::get()->endStreamFromQuickMenu();
+    }
+}
+#endif
+
 void Session::exec()
 {
     // If the connection failed, clean up and abort the connection.
@@ -2012,6 +2047,7 @@ void Session::exec()
         delete m_InputHandler;
         m_InputHandler = nullptr;
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        installQuitSignals();
         QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
         return;
     }
@@ -2193,9 +2229,16 @@ void Session::exec()
     // Switch to async logging mode when we enter the SDL loop
     StreamUtils::enterAsyncLoggingMode();
 
+#ifdef Q_OS_DARWIN
+    MacPipInstallMenu(macPipMenuToggle, macEndStreamMenu);
+#endif
+
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
     SDL_Event event;
+    // SIGTERM/SIGINT post SDL_QUIT only for this loop. Cleanup clears the
+    // flag so a signal during teardown or back in Qt terminates the process.
+    setStreamLoopAcceptsQuit(true);
     for (;;) {
 #ifdef Q_OS_DARWIN
         StreamHudStats::flushStreamUi();
@@ -2570,6 +2613,11 @@ void Session::exec()
     }
 
 DispatchDeferredCleanup:
+    setStreamLoopAcceptsQuit(false);
+    SDL_FlushEvent(SDL_QUIT);
+#ifdef Q_OS_DARWIN
+    MacPipRemoveMenu();
+#endif
     // Switch back to synchronous logging mode
     StreamUtils::exitAsyncLoggingMode();
 
@@ -2636,9 +2684,9 @@ DispatchDeferredCleanup:
     }
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
-    // Video teardown can leave SDL's quit handler installed. SIGTERM must
-    // still terminate, including while a dialog is on screen.
-    reinstallUnixSignalHandlers();
+    // QuitSubsystem can restore SIG_DFL or SDL's handler. Reinstall ours so
+    // the Qt loop still terminates, and the next stream can quit gracefully.
+    installQuitSignals();
 
     // Cleanup can take a while, so dispatch it to a worker thread.
     // When it is complete, it will release our s_ActiveSessionSemaphore

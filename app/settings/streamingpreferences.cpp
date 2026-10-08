@@ -1,4 +1,5 @@
 #include "streamingpreferences.h"
+#include "bitrate_choice.h"
 #include "streaming/audio/microphone/mic_permission.h"
 #include "utils.h"
 
@@ -185,6 +186,15 @@ void StreamingPreferences::reload()
                                                         // Try to load from the old preference value too
                                                         static_cast<int>(settings.value(SER_FULLSCREEN, true).toBool() ?
                                                                              recommendedFullScreenMode : WindowMode::WM_WINDOWED)).toInt());
+#ifdef Q_OS_DARWIN
+    // Game Mode engages when Twilight is frontmost in a native fullscreen
+    // space. A fresh install (no saved UI mode and no legacy startwindowed
+    // key) opens that way. A saved window or maximized choice is left alone.
+    if (!settings.contains(SER_UIDISPLAYMODE) && !settings.contains(SER_STARTWINDOWED)) {
+        uiDisplayMode = UIDisplayMode::UI_FULLSCREEN;
+    }
+    else
+#endif
     uiDisplayMode = static_cast<UIDisplayMode>(settings.value(SER_UIDISPLAYMODE,
                                                static_cast<int>(settings.value(SER_STARTWINDOWED, true).toBool() ? UIDisplayMode::UI_WINDOWED
                                                                                                                  : UIDisplayMode::UI_MAXIMIZED)).toInt());
@@ -597,6 +607,32 @@ void StreamingPreferences::completeMicrophoneRequest(int serial, bool granted)
     save();
     emit enableMicrophoneChanged();
     emit microphoneAccessFinished(granted);
+}
+
+int StreamingPreferences::minimumBitrateKbps() const
+{
+    return BitrateChoice::kMinKbps;
+}
+
+int StreamingPreferences::maximumBitrateKbps() const
+{
+    return BitrateChoice::kMaxKbps;
+}
+
+int StreamingPreferences::gfeBitrateCapKbps() const
+{
+    return BitrateChoice::kGfeCapKbps;
+}
+
+int StreamingPreferences::bitrateKbpsFromMbpsText(const QString& text) const
+{
+    const BitrateChoice::ParseResult parsed = BitrateChoice::parseMbps(text.toStdString());
+    return parsed.accepted ? parsed.kbps : -1;
+}
+
+QString StreamingPreferences::bitrateMbpsText(int kbps) const
+{
+    return QString::fromStdString(BitrateChoice::formatMbps(kbps));
 }
 
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)

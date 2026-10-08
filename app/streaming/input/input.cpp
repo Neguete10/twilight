@@ -19,6 +19,8 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_PendingMouseButtonsAllUpOnVideoRegionLeave(false),
       m_PointerRegionLockActive(false),
       m_PointerRegionLockToggledByUser(false),
+      m_QuickMenuOpen(false),
+      m_RestoreCaptureAfterMenu(false),
       m_FakeMouseCaptureActive(false),
       m_KeyboardCaptureActive(false),
       m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
@@ -154,9 +156,14 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].enabled = true;
 
     m_SpecialKeyCombos[KeyComboQuitAndExit].keyCombo = KeyComboQuitAndExit;
-    m_SpecialKeyCombos[KeyComboQuitAndExit].keyCode = SDLK_e;
-    m_SpecialKeyCombos[KeyComboQuitAndExit].scanCode = SDL_SCANCODE_E;
-    m_SpecialKeyCombos[KeyComboQuitAndExit].enabled = true;
+    m_SpecialKeyCombos[KeyComboQuitAndExit].keyCode = 0;
+    m_SpecialKeyCombos[KeyComboQuitAndExit].scanCode = SDL_SCANCODE_UNKNOWN;
+    m_SpecialKeyCombos[KeyComboQuitAndExit].enabled = false;
+
+    m_SpecialKeyCombos[KeyComboQuickMenu].keyCombo = KeyComboQuickMenu;
+    m_SpecialKeyCombos[KeyComboQuickMenu].keyCode = SDLK_e;
+    m_SpecialKeyCombos[KeyComboQuickMenu].scanCode = SDL_SCANCODE_E;
+    m_SpecialKeyCombos[KeyComboQuickMenu].enabled = true;
 
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCombo = KeyComboToggleKeyboardGrab;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCode = SDLK_k;
@@ -472,6 +479,67 @@ void SdlInputHandler::setCaptureActive(bool active)
 
     // Now update the keyboard grab
     updateKeyboardGrabState();
+}
+
+void SdlInputHandler::publishQuickMenuGamepad(bool keepAxes)
+{
+    for (int i = 0; i < MAX_GAMEPADS; i++) {
+        GamepadState* state = &m_GamepadState[i];
+        if (state->controller == nullptr) {
+            continue;
+        }
+        state->buttons = 0;
+        if (!keepAxes) {
+            state->lsX = 0;
+            state->lsY = 0;
+            state->rsX = 0;
+            state->rsY = 0;
+            state->lt = 0;
+            state->rt = 0;
+        }
+    }
+    // Zero every pad before sending. Single-controller mode merges pads,
+    // so sending midway would republish a pad that has not been cleared yet.
+    for (int i = 0; i < MAX_GAMEPADS; i++) {
+        GamepadState* state = &m_GamepadState[i];
+        if (state->controller == nullptr || state->mouseEmulationTimer != 0) {
+            continue;
+        }
+        sendGamepadState(state);
+    }
+}
+
+void SdlInputHandler::releaseCaptureForQuickMenu()
+{
+    m_QuickMenuOpen = true;
+    m_RestoreCaptureAfterMenu = isCaptureActive();
+    if (m_RestoreCaptureAfterMenu) {
+        setCaptureActive(false);
+    }
+    raiseAllKeys();
+    publishQuickMenuGamepad(false);
+}
+
+void SdlInputHandler::restoreCaptureAfterQuickMenu()
+{
+    m_QuickMenuOpen = false;
+    publishQuickMenuGamepad(true);
+    const bool restore = m_RestoreCaptureAfterMenu;
+    m_RestoreCaptureAfterMenu = false;
+#ifdef Q_OS_DARWIN
+    if (Session::s_ActiveSession != nullptr && Session::s_ActiveSession->m_PipActive) {
+        return;
+    }
+#endif
+    if (restore) {
+        setCaptureActive(true);
+    }
+}
+
+void SdlInputHandler::cancelQuickMenuRecapture()
+{
+    m_QuickMenuOpen = false;
+    m_RestoreCaptureAfterMenu = false;
 }
 
 void SdlInputHandler::handleTouchFingerEvent(SDL_TouchFingerEvent* event)

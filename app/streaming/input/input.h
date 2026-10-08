@@ -128,6 +128,12 @@ public:
 
     void setCaptureActive(bool active);
 
+    // Quick menu: drop capture and zero the pads so the game does not keep
+    // seeing the chord that opened the menu. Restore puts capture back.
+    void releaseCaptureForQuickMenu();
+    void restoreCaptureAfterQuickMenu();
+    void cancelQuickMenuRecapture();
+
     void toggleMouseEmulation(SDL_JoystickID jsid);
 
     bool isMouseInVideoRegion(int mouseX, int mouseY, int windowWidth = -1, int windowHeight = -1);
@@ -151,6 +157,7 @@ private:
         KeyComboPasteText,
         KeyComboTogglePointerRegionLock,
         KeyComboQuitAndExit,
+        KeyComboQuickMenu,
         KeyComboToggleKeyboardGrab,
         KeyComboTogglePictureInPicture,
         KeyComboToggleGamepadOverlay,
@@ -177,6 +184,8 @@ private:
     findStateForGamepad(SDL_JoystickID id);
 
     void sendGamepadState(GamepadState* state);
+
+    void publishQuickMenuGamepad(bool keepAxes);
 
     void sendGamepadBatteryState(GamepadState* state, SDL_JoystickPowerLevel level);
 
@@ -217,6 +226,8 @@ private:
     bool m_PendingMouseButtonsAllUpOnVideoRegionLeave;
     bool m_PointerRegionLockActive;
     bool m_PointerRegionLockToggledByUser;
+    bool m_QuickMenuOpen;
+    bool m_RestoreCaptureAfterMenu;
 
     int m_GamepadMask;
     GamepadState m_GamepadState[MAX_GAMEPADS];

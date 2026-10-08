@@ -48,7 +48,15 @@ private:
             return false;
         }
 
+        const int reportedGameId = newState.currentGameId;
         changed = m_Computer->update(newState);
+        // A quit clears the id immediately and leaves pendingQuit set so a
+        // stale non-zero sample cannot put the tile back on Live. pendingQuit
+        // clears only when a sample itself says nothing is running. Forcing
+        // a notification is what lets that clear run when the id was already 0.
+        if (m_Computer->pendingQuit && m_Computer->currentGameId == 0 && reportedGameId == 0) {
+            changed = true;
+        }
         return true;
     }
 
@@ -655,6 +663,7 @@ public:
 
 signals:
     void quitAppFailed(QString error);
+    void quitAppSucceeded();
 
 private:
     void run()
@@ -665,6 +674,7 @@ private:
             if (m_Computer->currentGameId != 0) {
                 http.quitApp();
             }
+            emit quitAppSucceeded();
         } catch (const GfeHttpResponseException& e) {
             {
                 QWriteLocker lock(&m_Computer->lock);
@@ -692,11 +702,63 @@ private:
 
 void ComputerManager::quitRunningApp(NvComputer* computer)
 {
-    QWriteLocker lock(&computer->lock);
-    computer->pendingQuit = true;
+    {
+        QWriteLocker lock(&computer->lock);
+        computer->pendingQuit = true;
+    }
 
     PendingQuitTask* quit = new PendingQuitTask(this, computer);
+    // Keep the task alive until the main thread has seen the result.
+    // QThreadPool would otherwise delete it before a queued completion runs.
+    quit->setAutoDelete(false);
+    connect(quit, &PendingQuitTask::quitAppSucceeded, this, [this, computer, quit]() {
+        {
+            QWriteLocker lock(&computer->lock);
+            if (!computer->pendingQuit) {
+                quit->deleteLater();
+                return;
+            }
+            computer->currentGameId = 0;
+            // Stay set until a serverinfo sample reports 0. Clearing it here
+            // lets the next stale poll adopt the app id again.
+            computer->pendingQuit = true;
+        }
+        // Same notifications as a poll that sees the app stop, without
+        // waiting for the next serverinfo pass (that pass used to be the
+        // only completion, and a stale poll kept the tile on Live).
+        emit computerStateChanged(computer);
+        emit quitAppCompleted(QVariant());
+        saveHost(computer);
+        quit->deleteLater();
+    }, Qt::QueuedConnection);
+    connect(quit, &PendingQuitTask::quitAppFailed, this, [quit](QString) {
+        quit->deleteLater();
+    }, Qt::QueuedConnection);
     QThreadPool::globalInstance()->start(quit);
+}
+
+void ComputerManager::applyReportedRunningGame(NvComputer* computer, int gameId)
+{
+    if (computer == nullptr) {
+        return;
+    }
+
+    {
+        QWriteLocker lock(&computer->lock);
+        if (gameId == 0) {
+            computer->currentGameId = 0;
+            // Do not call handleComputerStateChanged(): that clears
+            // pendingQuit as soon as the id is 0, before a poll confirms it.
+            computer->pendingQuit = true;
+        }
+        else {
+            computer->pendingQuit = false;
+            computer->currentGameId = gameId;
+        }
+    }
+
+    emit computerStateChanged(computer);
+    saveHost(computer);
 }
 
 void ComputerManager::stopPollingAsync()

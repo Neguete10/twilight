@@ -18,9 +18,10 @@
 // the window to NSFloatingWindowLevel, and joins every Space (including
 // another app's fullscreen space) without hiding when Twilight is inactive.
 
-// `toggle` is invoked on the main thread from the Window menu. It may be
-// null. Pass the same function again to refresh it; the item is not duplicated.
-void MacPipInstallMenu(void (*toggle)());
+// `toggle` and `endStream` are invoked on the main thread from the Window
+// menu. Either may be null. Pass the same functions again to refresh them;
+// the items are not duplicated.
+void MacPipInstallMenu(void (*toggle)(), void (*endStream)());
 void MacPipRemoveMenu();
 void MacPipUpdateMenu(bool active);
 
