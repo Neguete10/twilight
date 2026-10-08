@@ -12,6 +12,7 @@
 	<string>Stream games and other applications from another PC</string>
 	<key>CFBundleIconFile</key>
 	<string>twilight</string>
+	<!-- prepare-macos-infoplist.py writes TWILIGHT_BUNDLE_ID here. -->
 	<key>CFBundleIdentifier</key>
 	<string>BUNDLE_ID</string>
 	<key>NSHighResolutionCapable</key>

@@ -724,10 +724,17 @@ macx {
     }
     message("Twilight macOS deployment target: $$QMAKE_MACOSX_DEPLOYMENT_TARGET")
 
-    TWILIGHT_BUNDLE_ID = com.moonlight-stream.Moonlight
+    # Own bundle id for the Developer ID app and the store app. Sharing
+    # com.moonlight-stream.Moonlight with an installed Moonlight makes Local
+    # Network privacy bind that id to Moonlight's executable UUIDs, so
+    # Twilight's LAN connections stay blocked with its toggle on. QSettings
+    # stay in that domain: Qt uses the organization domain and application
+    # name, not this identifier. qmake would append ".Twilight" (the bundle
+    # name) to the prefix; the plist token is the lowercase id.
+    TWILIGHT_BUNDLE_ID = io.github.neguete10.twilight
+    QMAKE_TARGET_BUNDLE_PREFIX = io.github.neguete10
     TWILIGHT_PLIST_MODE = desktop
     twilight-mas {
-        TWILIGHT_BUNDLE_ID = com.henrique.twilight
         TWILIGHT_PLIST_MODE = mas
     }
 

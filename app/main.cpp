@@ -405,6 +405,10 @@ int main(int argc, char *argv[])
     // Set these here to allow us to use the default QSettings constructor.
     // These also ensure that our cache directory is named correctly. As such,
     // it is critical that these be called before Path::initialize().
+    // Qt 6 on macOS builds the preferences domain from the organization domain
+    // and the application name (comify("moonlight-stream.com") + ".Moonlight"),
+    // which is ~/Library/Preferences/com.moonlight-stream.Moonlight.plist.
+    // CFBundleIdentifier is used only when the organization domain is empty.
     QCoreApplication::setOrganizationName("Moonlight Game Streaming Project");
     QCoreApplication::setOrganizationDomain("moonlight-stream.com");
     QCoreApplication::setApplicationName("Moonlight");

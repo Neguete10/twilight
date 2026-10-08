@@ -36,11 +36,12 @@ def plist_keys(path):
 def test_plist_rewrite():
     module = load_prepare()
     template = (ROOT / "app" / "Info.plist").read_text(encoding="utf-8")
+    bundle_id = "io.github.neguete10.twilight"
     desktop = module.prepare(
-        template, "6.1.1", "com.moonlight-stream.Moonlight", "Twilight", "desktop"
+        template, "6.1.1", bundle_id, "Twilight", "desktop"
     )
     mas = module.prepare(
-        template, "6.1.1", "com.henrique.twilight", "Twilight", "mas"
+        template, "6.1.1", bundle_id, "Twilight", "mas"
     )
     desktop_plist = plistlib.loads(desktop.encode("utf-8"))
     mas_plist = plistlib.loads(mas.encode("utf-8"))
@@ -60,13 +61,13 @@ def test_plist_rewrite():
         "NSAllowsArbitraryLoads" not in mas_plist["NSAppTransportSecurity"],
         "MAS ATS does not set NSAllowsArbitraryLoads",
     )
-    expect(desktop_plist["CFBundleIdentifier"] == "com.moonlight-stream.Moonlight", "desktop bundle id")
-    expect(mas_plist["CFBundleIdentifier"] == "com.henrique.twilight", "MAS bundle id")
+    expect(desktop_plist["CFBundleIdentifier"] == bundle_id, "desktop bundle id")
+    expect(mas_plist["CFBundleIdentifier"] == bundle_id, "MAS bundle id")
     expect(desktop_plist["CFBundleShortVersionString"] == "6.1.1", "plist writes the version qmake passes")
     expect(template.count("<string>VERSION</string>") == 2, "Info.plist keeps the qmake version token")
     tree_version = (ROOT / "app" / "version.txt").read_text(encoding="utf-8").strip()
     wired = module.prepare(
-        template, tree_version, "com.moonlight-stream.Moonlight", "Twilight", "desktop"
+        template, tree_version, bundle_id, "Twilight", "desktop"
     )
     wired_plist = plistlib.loads(wired.encode("utf-8"))
     expect(wired_plist["CFBundleShortVersionString"] == tree_version, "short version follows version.txt")
@@ -74,6 +75,18 @@ def test_plist_rewrite():
     expect("6.1.1" not in template, "Info.plist does not hardcode 6.1.1")
     pro = (ROOT / "app" / "app.pro").read_text(encoding="utf-8")
     expect("$$cat(version.txt)" in pro, "qmake passes version.txt into Info.plist")
+    expect(pro.count("TWILIGHT_BUNDLE_ID = io.github.neguete10.twilight") == 1, "one macOS bundle id")
+    expect("QMAKE_TARGET_BUNDLE_PREFIX = io.github.neguete10" in pro, "qmake bundle prefix")
+    expect("com.henrique.twilight" not in pro, "app.pro has no previous store bundle id")
+    expect("TWILIGHT_BUNDLE_ID = com.moonlight-stream.Moonlight" not in pro, "macOS bundle id is not Moonlight's")
+    main = (ROOT / "app" / "main.cpp").read_text(encoding="utf-8")
+    expect('setOrganizationDomain("moonlight-stream.com")' in main, "QSettings organization domain")
+    expect('setApplicationName("Moonlight")' in main, "QSettings application name")
+    expect("CFBundleGetIdentifier" not in main, "app does not read the bundle id for QSettings")
+    mas_doc = (ROOT / "docs" / "TWILIGHT_MAS.md").read_text(encoding="utf-8")
+    expect(mas_doc.count("io.github.neguete10.twilight") >= 3, "store doc names the bundle id")
+    expect("Desktop stays `com.moonlight-stream.Moonlight`" not in mas_doc, "store doc gives desktop its own bundle id")
+    expect("com.henrique.twilight" not in mas_doc, "store doc has no previous bundle id")
     expect(
         "Twilight uses the microphone" in desktop_plist["NSMicrophoneUsageDescription"],
         "microphone usage string",
@@ -143,6 +156,8 @@ def test_package_script():
     expect("Twilight-DeveloperID.entitlements" in text, "Developer ID signing passes the empty entitlements file")
     expect("spatial-audio.entitlements" not in text, "Developer ID signing does not use the sandbox entitlements")
     expect("twilight-notary" in text and "TAV97BM6HV" in text, "notarization hook keeps the team profile")
+    expect("io.github.neguete10.twilight" in text, "store profile message names the bundle id")
+    expect("com.henrique.twilight" not in text, "packaging script has no previous bundle id")
     expect("TWILIGHT_NOTARIZE" in text and "TWILIGHT_SIGN" in text, "signing and notarization stay opt-in")
 
     def run(env, config):
