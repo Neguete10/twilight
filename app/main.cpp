@@ -83,8 +83,23 @@ static QTextStream s_LoggerStream(stderr);
 static QThreadPool s_LoggerThread;
 static QMutex s_SyncLoggerMutex;
 static bool s_SuppressVerboseOutput;
-static QRegularExpression k_RikeyRegex("&rikey=\\w+");
-static QRegularExpression k_RikeyIdRegex("&rikeyid=[\\d-]+");
+
+// Heap-allocated and never freed. A file-scope QRegularExpression is
+// destroyed after Qt shuts down, and a log line from a static destructor
+// then crashes inside the redaction replace.
+static const QRegularExpression& rikeyRegex()
+{
+    static const QRegularExpression* const pattern =
+        new QRegularExpression(QStringLiteral("&rikey=\\w+"));
+    return *pattern;
+}
+
+static const QRegularExpression& rikeyIdRegex()
+{
+    static const QRegularExpression* const pattern =
+        new QRegularExpression(QStringLiteral("&rikeyid=[\\d-]+"));
+    return *pattern;
+}
 #ifdef LOG_TO_FILE
 // Max log file size of 10 MB
 static const uint64_t k_MaxLogSizeBytes = 10 * 1024 * 1024;
@@ -149,8 +164,8 @@ void logToLoggerStream(QString& message)
 #endif
 
     // Strip session encryption keys and IVs from the logs
-    message.replace(k_RikeyRegex, "&rikey=REDACTED");
-    message.replace(k_RikeyIdRegex, "&rikeyid=REDACTED");
+    message.replace(rikeyRegex(), "&rikey=REDACTED");
+    message.replace(rikeyIdRegex(), "&rikeyid=REDACTED");
 
 #ifdef LOG_TO_FILE
     if (s_LoggerFile != nullptr) {
@@ -357,6 +372,11 @@ LONG WINAPI UnhandledExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
 
 static int signalFds[2];
 
+static void fatalSigterm(int)
+{
+    _Exit(0);
+}
+
 void handleSignal(int sig)
 {
     send(signalFds[0], &sig, sizeof(sig), 0);
@@ -375,8 +395,14 @@ int SDLCALL signalHandlerThread(void* data)
 
         Session* session;
         switch (sig) {
-        case SIGINT:
         case SIGTERM:
+            // First SIGTERM always terminates. A hidden CLI error dialog, or
+            // SDL's own handler posting SDL_QUIT into a finished stream loop,
+            // used to swallow this signal.
+            _Exit(0);
+            break;
+
+        case SIGINT:
             // Check if we have an active streaming session
             session = Session::get();
             if (session != nullptr) {
@@ -384,12 +410,6 @@ int SDLCALL signalHandlerThread(void* data)
                 if (session == lastSession || requestedQuit) {
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Exiting immediately on second signal");
                     _Exit(1);
-                }
-
-                if (sig == SIGTERM) {
-                    // If this is a SIGTERM, set the flag to quit
-                    session->setShouldExit();
-                    requestedQuit = true;
                 }
 
                 // Stop the streaming session
@@ -423,6 +443,11 @@ void configureSignalHandlers()
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "socketpair() failed: %d",
                      errno);
+        // SIGTERM still has to terminate even if SIGINT cannot be forwarded.
+        struct sigaction terminateAction = {};
+        terminateAction.sa_handler = fatalSigterm;
+        sigemptyset(&terminateAction.sa_mask);
+        sigaction(SIGTERM, &terminateAction, nullptr);
         return;
     }
 
@@ -430,15 +455,54 @@ void configureSignalHandlers()
     SDL_Thread* thread = SDL_CreateThread(signalHandlerThread, "Signal Handler", nullptr);
     SDL_DetachThread(thread);
 
-    struct sigaction sa = {};
-    sa.sa_handler = handleSignal;
-    sa.sa_flags = SA_RESTART;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGINT, &sa, nullptr);
-    sigaction(SIGTERM, &sa, nullptr);
+    reinstallUnixSignalHandlers();
+}
+
+void reinstallUnixSignalHandlers()
+{
+    struct sigaction interruptAction = {};
+    interruptAction.sa_handler = handleSignal;
+    interruptAction.sa_flags = SA_RESTART;
+    sigemptyset(&interruptAction.sa_mask);
+    sigaction(SIGINT, &interruptAction, nullptr);
+
+    struct sigaction terminateAction = {};
+    terminateAction.sa_handler = fatalSigterm;
+    sigemptyset(&terminateAction.sa_mask);
+    sigaction(SIGTERM, &terminateAction, nullptr);
 }
 
 #endif
+
+static void sdlLogAfterShutdown(void*, int, SDL_LogPriority, const char*)
+{
+}
+
+// Drop Qt, SDL, and FFmpeg log handlers before main returns. Static
+// destruction can still log, and those handlers must not run after Qt
+// has shut down.
+static int finishMain(int code)
+{
+    Q_ASSERT(g_AsyncLoggingEnabled == 0);
+    s_LoggerThread.waitForDone();
+
+    qInstallMessageHandler(nullptr);
+#if SDL_VERSION_ATLEAST(3, 0, 0)
+    SDL_SetLogOutputFunction(sdlLogAfterShutdown, nullptr);
+#else
+    SDL_LogSetOutputFunction(sdlLogAfterShutdown, nullptr);
+#endif
+#ifdef HAVE_FFMPEG
+    av_log_set_callback(av_log_default_callback);
+#endif
+
+#ifdef Q_OS_WIN32
+    fflush(stderr);
+    fflush(stdout);
+#endif
+
+    return code;
+}
 
 int main(int argc, char *argv[])
 {
@@ -519,9 +583,6 @@ int main(int argc, char *argv[])
 #if SDL_VERSION_ATLEAST(3, 0, 0)
     SDL_SetLogOutputFunction(sdlLogToDiskHandler, nullptr);
 #else
-    SDL_LogOutputFunction oldSdlLogFn;
-    void* oldSdlLogUserdata;
-    SDL_LogGetOutputFunction(&oldSdlLogFn, &oldSdlLogUserdata);
     SDL_LogSetOutputFunction(sdlLogToDiskHandler, nullptr);
 #endif
     qInstallMessageHandler(qtLogToDiskHandler);
@@ -704,6 +765,12 @@ int main(int argc, char *argv[])
     // initializing the SDL video subsystem to have any effect.
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
 
+    // SDL's default SIGTERM handler only posts SDL_QUIT. Once the stream
+    // loop is gone that event is never read, so the process ignores the
+    // signal. Set this before the first SDL_InitSubSystem. The real
+    // handlers are installed after QGuiApplication exists.
+    SDL_SetHint("SDL_NO_SIGNAL_HANDLERS", "1");
+
     // We use MMAL to render on Raspberry Pi, so we do not require DRM master.
     SDL_SetHint(SDL_HINT_KMSDRM_REQUIRE_DRM_MASTER, "0");
 
@@ -716,7 +783,7 @@ int main(int argc, char *argv[])
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_TIMER) failed: %s",
                      SDL_GetError());
-        return -1;
+        return finishMain(-1);
     }
 
 #if defined(STEAM_LINK) || defined(Q_OS_WIN32)
@@ -730,8 +797,9 @@ int main(int argc, char *argv[])
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_VIDEO) failed: %s",
                      SDL_GetError());
-        return -1;
+        return finishMain(-1);
     }
+    reinstallUnixSignalHandlers();
 #endif
 
     // Use atexit() to ensure SDL_Quit() is called. This avoids
@@ -1093,7 +1161,7 @@ int main(int argc, char *argv[])
         // Load the main.qml file
         engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
         if (engine.rootObjects().isEmpty())
-            return -1;
+            return finishMain(-1);
     }
 
     int err = app.exec();
@@ -1102,29 +1170,5 @@ int main(int argc, char *argv[])
     // sometimes freezing and blocking process exit.
     QThreadPool::globalInstance()->waitForDone(30000);
 
-    // Restore the default logger for all libraries before shutting down ours
-#if SDL_VERSION_ATLEAST(3, 0, 0)
-    SDL_SetLogOutputFunction(SDL_GetDefaultLogOutputFunction(), nullptr);
-#else
-    SDL_LogSetOutputFunction(oldSdlLogFn, oldSdlLogUserdata);
-#endif
-    qInstallMessageHandler(nullptr);
-#ifdef HAVE_FFMPEG
-    av_log_set_callback(av_log_default_callback);
-#endif
-
-    // We should not be in async logging mode anymore
-    Q_ASSERT(g_AsyncLoggingEnabled == 0);
-
-    // Wait for pending log messages to be printed
-    s_LoggerThread.waitForDone();
-
-#ifdef Q_OS_WIN32
-    // Without an explicit flush, console redirection for the list command
-    // doesn't work reliably (sometimes the target file contains no text).
-    fflush(stderr);
-    fflush(stdout);
-#endif
-
-    return err;
+    return finishMain(err);
 }

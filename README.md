@@ -8,7 +8,7 @@ This tree is rebuilt on [Andy Grundman's](https://github.com/andygrundman/moonli
 
 **Twilight's shell.** Hosts along the side, games in a library, and an About page that can check GitHub for a newer release. Nothing is installed for you.
 
-**PyroWave on Metal, opt-in.** Built when `CONFIG+=pyrowave` is set. Settings can force the PyroWave codec. Automatic codec selection stays on HEVC or AV1 and does not advertise PyroWave. The older Vulkan decoder is not in this tree.
+**PyroWave on Metal and Vulkan, opt-in.** Built when `CONFIG+=pyrowave` is set. Settings can force the PyroWave codec. Automatic codec selection stays on HEVC or AV1 and does not advertise PyroWave. The Vulkan backend is MoltenVK and is used only when the PyroWave GPU backend is set to Vulkan. Automatic and Metal use the Metal decoder.
 
 **Spatial audio through Core Audio.** Surround streams can use Apple's spatial mixer. Stereo is passed through. Head tracking stays off until you ask for it.
 

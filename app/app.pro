@@ -635,9 +635,36 @@ macx:pyrowave-metal {
 
     QMAKE_CFLAGS += -Xarch_arm64 -DHAVE_PYROWAVE
     QMAKE_CXXFLAGS += -Xarch_arm64 -DHAVE_PYROWAVE
+    QMAKE_CFLAGS += -Xarch_arm64 -DHAVE_PYROWAVE_VULKAN
+    QMAKE_CXXFLAGS += -Xarch_arm64 -DHAVE_PYROWAVE_VULKAN
 
     INCLUDEPATH += $$PWD/../pyrowave/pyrowave/metal
     DEPENDPATH += $$PWD/../pyrowave/pyrowave/metal
+
+    # Vulkan PyroWave (MoltenVK) next to the statically linked Metal decoder.
+    # The C libraries export the same names with different ABIs, so the Vulkan
+    # calls go through libtwilight-pyrowave-vkshim, which is linked only to
+    # libpyrowave-shared.
+    SOURCES += streaming/video/pyrowave_vulkan.cpp
+    HEADERS += streaming/video/pyrowave_vulkan.h \
+        streaming/video/pyrowave_vulkan_rename.h \
+        streaming/video/pyrowave_backend.h \
+        streaming/video/pyrowave_color.h \
+        streaming/video/pyrowave_packets.h \
+        streaming/video/pyrowave_stats.h
+    INCLUDEPATH += $$PWD/../pyrowave-vulkan
+    INCLUDEPATH += $$PWD/../pyrowave-vulkan/Granite/third_party/khronos/vulkan-headers/include
+    PYROWAVE_VULKAN_SHIM = $$PWD/../pyrowave-vulkan/build/libtwilight-pyrowave-vkshim.dylib
+    LIBS += -L$$PWD/../pyrowave-vulkan/build -ltwilight-pyrowave-vkshim
+    QMAKE_RPATHDIR += $$PWD/../pyrowave-vulkan/build
+    QMAKE_RPATHDIR += @executable_path/../Frameworks
+    PRE_TARGETDEPS += $$PYROWAVE_VULKAN_SHIM
+    pyrowave_vulkan_shim.target = $$PYROWAVE_VULKAN_SHIM
+    pyrowave_vulkan_shim.commands = sh $$PWD/../scripts/build-pyrowave-vulkan.sh
+    QMAKE_EXTRA_TARGETS += pyrowave_vulkan_shim
+    # Headers from Granite and libpyrowave-shared have to exist before the
+    # decoder translation unit compiles. qmake runs the script once up front.
+    !build_pass:!system(sh $$PWD/../scripts/build-pyrowave-vulkan.sh): error("Vulkan PyroWave build failed")
 }
 
 !winrt {

@@ -324,6 +324,9 @@ private:
     Uint32 m_DropAudioEndTime;
 
     Overlay::OverlayManager m_OverlayManager;
+    // PyroWaveGpuBackend, stored as int so this header does not include the selector.
+    // 0 is None. Set by the first successful PyroWave probe and kept for the stream window.
+    int m_PyroWaveBackend = 0;
     MicrophoneCapture m_Microphone;
 
 #ifdef Q_OS_DARWIN

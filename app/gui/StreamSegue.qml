@@ -68,27 +68,33 @@ Item {
         // Re-enable GUI gamepad usage now
         SdlGamepadKeyNavigation.enable()
 
-        // Pop the StreamSegue off the stack if this is a GUI-based app launch
-        if (!quitAfter) {
-            stackView.pop()
-        }
-
-        if (quitAfter && !streamSegueErrorDialog.text) {
-            // If this was a CLI launch without errors, exit now
-            Qt.quit()
-        }
-        else {
-            // Show the Qt window again after streaming
-            window.visible = true
-
-            // Display any launch errors. We do this after
-            // the Qt UI is visible again to prevent losing
-            // focus on the dialog which would impact gamepad
-            // users.
+        if (quitAfter) {
+            // CLI launches hide the window when the stream starts and never
+            // show it again. Opening the error dialog here leaves a modal
+            // nobody can dismiss, so the process stays up.
             if (streamSegueErrorDialog.text) {
-                streamSegueErrorDialog.quitAfter = quitAfter
-                streamSegueErrorDialog.open()
+                console.error(streamSegueErrorDialog.text)
+                Qt.exit(1)
             }
+            else {
+                Qt.quit()
+            }
+            return
+        }
+
+        // Pop the StreamSegue off the stack for a GUI launch
+        stackView.pop()
+
+        // Show the Qt window again after streaming
+        window.visible = true
+
+        // Display any launch errors. We do this after
+        // the Qt UI is visible again to prevent losing
+        // focus on the dialog which would impact gamepad
+        // users.
+        if (streamSegueErrorDialog.text) {
+            streamSegueErrorDialog.quitAfter = quitAfter
+            streamSegueErrorDialog.open()
         }
     }
 

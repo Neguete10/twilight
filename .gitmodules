@@ -17,3 +17,6 @@
 [submodule "pyrowave/pyrowave"]
 	path = pyrowave/pyrowave
 	url = https://github.com/andygrundman/pyrowave.git
+[submodule "pyrowave-vulkan"]
+	path = pyrowave-vulkan
+	url = https://github.com/andygrundman/pyrowave.git

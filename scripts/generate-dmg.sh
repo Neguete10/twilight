@@ -78,13 +78,14 @@ mkdir $INSTALLER_FOLDER
 # Apple Silicon only. Official Qt 6.11.2 and moonlight-qt-deps v19 (via
 # setup-deps.py) are the intended toolchain. Homebrew libraries are not
 # copied into the bundle.
-# PyroWave is Metal and opt-in. CONFIG+=pyrowave is on unless
+# PyroWave is opt-in on Metal and Vulkan. CONFIG+=pyrowave is on unless
 # TWILIGHT_PYROWAVE=0. Automatic codec selection never advertises it.
+# Vulkan is used only when the PyroWave GPU backend is set to Vulkan.
 QMAKE_CONFIG_ARGS=
 DEVICE_ARCHS="arm64"
 if [ "${TWILIGHT_PYROWAVE:-1}" != "0" ]; then
   QMAKE_CONFIG_ARGS="CONFIG+=pyrowave"
-  echo "PyroWave Metal: CONFIG+=pyrowave, arch $DEVICE_ARCHS"
+  echo "PyroWave Metal and Vulkan: CONFIG+=pyrowave, arch $DEVICE_ARCHS"
 fi
 DEVELOPER_ID_ENTITLEMENTS="$SOURCE_ROOT/app/deploy/macos/Twilight-DeveloperID.entitlements"
 MAS_ENTITLEMENTS="$SOURCE_ROOT/app/deploy/macos/Twilight-MAS.entitlements"

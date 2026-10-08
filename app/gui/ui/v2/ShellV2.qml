@@ -758,6 +758,13 @@ Item {
 
     onModalOpenChanged: if (!modalOpen) focusNav()
     onQueryChanged: rebuildSlots()
+    // A saved host is not paired until the first poll. That update is a
+    // dataChanged on the same row, which refreshes the "Ready" label and
+    // leaves the app model unbuilt, so the grid stays empty.
+    onSelectedPairedChanged: {
+        if (selectedPaired && !appModel)
+            rebuildApps()
+    }
 
     // Component.onDestruction is Qt 5.10. Preferences are written when the
     // settings sheet closes and when the window closes.

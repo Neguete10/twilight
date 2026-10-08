@@ -1203,7 +1203,7 @@ Item {
                             color: sheet.theme.tertiary
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
-                            text: qsTr("Used only when the codec is PyroWave. Automatic prefers Metal on Apple7 GPUs and otherwise uses Vulkan. H.264, HEVC, and AV1 stay on VideoToolbox.")
+                            text: qsTr("Used only when the codec is PyroWave. Automatic uses Metal, and falls back to Vulkan only if Metal does not initialize. An explicit Metal or Vulkan choice stays on that decoder. H.264, HEVC, and AV1 stay on VideoToolbox.")
                         }
                         TwTextV2 { theme: sheet.theme; text: qsTr("Decoder"); color: sheet.theme.secondary; font.pixelSize: 12; font.weight: Font.DemiBold }
                         ChoiceV2 {

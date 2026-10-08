@@ -48,14 +48,16 @@ SystemProperties::SystemProperties()
 {
     versionString = QString(VERSION_STR);
 #ifdef HAVE_PYROWAVE
-    hasPyroWave = true;
+    hasPyroWaveMetal = true;
 #else
-    hasPyroWave = false;
+    hasPyroWaveMetal = false;
 #endif
-    // Metal is the only PyroWave decoder on this tree. Vulkan stays off so
-    // the settings page does not offer a backend that is not linked.
-    hasPyroWaveMetal = hasPyroWave;
+#ifdef HAVE_PYROWAVE_VULKAN
+    hasPyroWaveVulkan = true;
+#else
     hasPyroWaveVulkan = false;
+#endif
+    hasPyroWave = hasPyroWaveMetal || hasPyroWaveVulkan;
     hasDesktopEnvironment = WMUtils::isRunningDesktopEnvironment();
     isRunningWayland = WMUtils::isRunningWayland();
     isRunningXWayland = isRunningWayland && QGuiApplication::platformName() == "xcb";
@@ -196,6 +198,7 @@ void SystemProperties::startAsyncLoad()
                      SDL_GetError());
         return;
     }
+    reinstallUnixSignalHandlers();
 
     testWindow = StreamUtils::createTestWindow();
     if (!testWindow) {
@@ -203,6 +206,7 @@ void SystemProperties::startAsyncLoad()
                      "Failed to create window for hardware decode test: %s",
                      SDL_GetError());
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        reinstallUnixSignalHandlers();
         return;
     }
 
@@ -232,6 +236,7 @@ void SystemProperties::refreshDisplays()
                      SDL_GetError());
         return;
     }
+    reinstallUnixSignalHandlers();
 
     monitorNativeResolutions.clear();
     monitorSafeAreaResolutions.clear();

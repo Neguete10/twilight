@@ -20,6 +20,12 @@
 #ifdef HAVE_PYROWAVE
 #include "video/pyrowave.h"
 #endif
+#ifdef HAVE_PYROWAVE_VULKAN
+#include "video/pyrowave_vulkan.h"
+#endif
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_VULKAN)
+#include "video/pyrowave_backend.h"
+#endif
 
 #ifdef HAVE_SLVIDEO
 #include "video/slvid.h"
@@ -308,14 +314,92 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
     // PyroWave has no FFmpeg decoder, and must never reach codec-ID fallback.
     if (videoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
         chosenDecoder = nullptr;
+#if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_VULKAN)
+        static_assert(static_cast<int>(StreamingPreferences::PWBC_AUTO) == static_cast<int>(PyroWaveBackendRequest::Auto),
+                      "PyroWave backend enums diverged");
+        static_assert(static_cast<int>(StreamingPreferences::PWBC_METAL) == static_cast<int>(PyroWaveBackendRequest::Metal),
+                      "PyroWave backend enums diverged");
+        static_assert(static_cast<int>(StreamingPreferences::PWBC_VULKAN) == static_cast<int>(PyroWaveBackendRequest::Vulkan),
+                      "PyroWave backend enums diverged");
+
+        if (m_Preferences == nullptr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "PyroWave: no preferences for backend selection");
+            return false;
+        }
+
+        PyroWaveBackendAvailability availability{};
 #ifdef HAVE_PYROWAVE
-        chosenDecoder = new PyroWaveVideoDecoder(testOnly);
-        if (chosenDecoder->initialize(&params)) {
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PyroWave Metal decoder chosen");
+        availability.metal = true;
+#endif
+#ifdef HAVE_PYROWAVE_VULKAN
+        availability.vulkan = true;
+#endif
+        const auto request = static_cast<PyroWaveBackendRequest>(m_Preferences->pyroWaveBackend);
+        const bool alreadyProbed = m_PyroWaveBackend != static_cast<int>(PyroWaveGpuBackend::None);
+        const PyroWaveGpuBackend primary = alreadyProbed
+                ? static_cast<PyroWaveGpuBackend>(m_PyroWaveBackend)
+                : selectPyroWaveBackend(request, availability);
+        if (!alreadyProbed) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PyroWave backend request: %s (metal %s, vulkan %s), candidate %s",
+                        pyroWaveBackendRequestName(request),
+                        availability.metal ? "available" : "unavailable",
+                        availability.vulkan ? "available" : "unavailable",
+                        pyroWaveBackendName(primary));
+        }
+
+        auto tryBackend = [&](PyroWaveGpuBackend which) -> bool {
+            if (which == PyroWaveGpuBackend::None) {
+                return false;
+            }
+            IVideoDecoder* decoder = nullptr;
+            if (which == PyroWaveGpuBackend::Metal) {
+#ifdef HAVE_PYROWAVE
+                decoder = new PyroWaveVideoDecoder(testOnly);
+#else
+                return false;
+#endif
+            }
+            else if (which == PyroWaveGpuBackend::Vulkan) {
+#ifdef HAVE_PYROWAVE_VULKAN
+                decoder = new PyroWaveVulkanVideoDecoder(testOnly);
+#else
+                return false;
+#endif
+            }
+            if (decoder != nullptr && decoder->initialize(&params)) {
+                chosenDecoder = decoder;
+                m_PyroWaveBackend = static_cast<int>(which);
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "PyroWave backend selected: %s (%s)",
+                            pyroWaveBackendName(which),
+                            testOnly ? "probe" : "stream");
+                return true;
+            }
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Unable to load PyroWave %s decoder",
+                         pyroWaveBackendName(which));
+            delete decoder;
+            return false;
+        };
+
+        if (tryBackend(primary)) {
             return true;
         }
-        delete chosenDecoder;
-        chosenDecoder = nullptr;
+        // Automatic may fall back. An explicit Metal or Vulkan choice does not.
+        if (!alreadyProbed && request == PyroWaveBackendRequest::Auto) {
+            PyroWaveGpuBackend fallback = PyroWaveGpuBackend::None;
+            if (primary == PyroWaveGpuBackend::Metal && availability.vulkan) {
+                fallback = PyroWaveGpuBackend::Vulkan;
+            }
+            else if (primary == PyroWaveGpuBackend::Vulkan && availability.metal) {
+                fallback = PyroWaveGpuBackend::Metal;
+            }
+            if (fallback != PyroWaveGpuBackend::None && tryBackend(fallback)) {
+                return true;
+            }
+        }
 #endif
         return false;
     }
@@ -683,6 +767,8 @@ bool Session::initialize(QQuickWindow* qtWindow)
                      SDL_GetError());
         return false;
     }
+    // Video init can replace SIGTERM with SDL's SDL_QUIT handler.
+    reinstallUnixSignalHandlers();
 
     // Stop text input. SDL enables it by default
     // when we initialize the video subsystem, but this
@@ -1076,7 +1162,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
             }
         }
         if (m_SupportedVideoFormats.isEmpty()) {
-            emit displayLaunchError(tr("Unable to initialize the PyroWave Metal decoder. Use the Metal renderer and a supported Apple Silicon GPU and resolution."));
+            emit displayLaunchError(tr("Unable to initialize the PyroWave decoder. Automatic and Metal use the Metal decoder. Vulkan uses MoltenVK and must be selected explicitly. Check the GPU and resolution."));
             return false;
         }
 #endif
@@ -2550,6 +2636,9 @@ DispatchDeferredCleanup:
     }
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    // Video teardown can leave SDL's quit handler installed. SIGTERM must
+    // still terminate, including while a dialog is on screen.
+    reinstallUnixSignalHandlers();
 
     // Cleanup can take a while, so dispatch it to a worker thread.
     // When it is complete, it will release our s_ActiveSessionSemaphore
