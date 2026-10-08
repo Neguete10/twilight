@@ -801,7 +801,9 @@ bool Session::initialize()
                      SDL_GetError());
         return false;
     }
-    restoreDefaultQuitSignals();
+    // Video init can install SDL's quit handler. Put ours back before the
+    // stream loop decides whether a signal is a graceful quit.
+    installQuitSignals();
 
     LiInitializeStreamConfiguration(&m_StreamConfig);
     m_StreamConfig.width = m_Preferences->width;
@@ -2773,6 +2775,9 @@ void Session::execInternal()
     // dequeues that same queue, so a WASD release taken by Qt never becomes
     // a key-up on the host. Flush posted Qt events only.
     SDL_Event event;
+    // SIGTERM/SIGINT post SDL_QUIT only for this loop. Cleanup clears the
+    // flag so a signal during teardown or back in Qt terminates the process.
+    setStreamLoopAcceptsQuit(true);
 #ifdef Q_OS_DARWIN
     int twilightHudPump = 0;
     int twilightHudRaise = 0;
@@ -3159,6 +3164,8 @@ void Session::execInternal()
     }
 
 DispatchDeferredCleanup:
+    setStreamLoopAcceptsQuit(false);
+    SDL_FlushEvent(SDL_QUIT);
 #ifdef Q_OS_DARWIN
     // Drop the menu before the window goes away so a click cannot call
     // back into this session. Skipping the geometry restore avoids a
@@ -3238,9 +3245,9 @@ DispatchDeferredCleanup:
     }
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
-    // Video teardown can leave SDL's quit handler installed while the GUI
-    // gamepad subsystem keeps the event loop alive. SIGTERM must still exit.
-    restoreDefaultQuitSignals();
+    // QuitSubsystem can restore SIG_DFL or SDL's handler. Reinstall ours so
+    // the Qt loop still terminates, and the next stream can quit gracefully.
+    installQuitSignals();
 
     // Cleanup can take a while, so dispatch it to a worker thread.
     // When it is complete, it will release our s_ActiveSessionSemaphore

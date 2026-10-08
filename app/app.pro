@@ -267,6 +267,7 @@ SOURCES += \
     gui/sdlgamepadkeynavigation.cpp \
     streaming/video/overlaymanager.cpp \
     backend/systemproperties.cpp \
+    quit_signals.cpp \
     wm.cpp
 
 HEADERS += \
