@@ -32,3 +32,7 @@ CONFIG(release, debug|release) {
 QMAKE_CFLAGS   += $$(CFLAGS)
 QMAKE_CXXFLAGS += $$(CXXFLAGS)
 QMAKE_LFLAGS   += $$(LDFLAGS)
+
+# Refuse to inherit the SDK minos. An empty QMAKE_MACOSX_DEPLOYMENT_TARGET
+# lets clang stamp the build Mac's SDK version onto every Mach-O.
+QMAKE_MACOSX_DEPLOYMENT_TARGET = 13.0

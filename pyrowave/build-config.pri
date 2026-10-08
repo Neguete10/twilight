@@ -6,5 +6,8 @@ macx {
         else: PYROWAVE_TARGET_ARCHS = $$QT_ARCHS
     }
 
-    contains(PYROWAVE_TARGET_ARCHS, arm64): CONFIG += pyrowave-metal
+    # Opt-in only. CONFIG+=pyrowave (or pyrowave-metal) on an arm64 Mac
+    # slice builds the Metal decoder. Automatic codec selection never
+    # advertises PyroWave; that stays a forced codec choice.
+    contains(PYROWAVE_TARGET_ARCHS, arm64):contains(CONFIG, pyrowave): CONFIG += pyrowave-metal
 }

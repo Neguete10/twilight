@@ -10,6 +10,7 @@ namespace Overlay {
 enum OverlayType {
     OverlayDebug,
     OverlayStatusUpdate,
+    OverlayGamepad,
     OverlayMax
 };
 

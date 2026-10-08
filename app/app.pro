@@ -3,8 +3,11 @@ CONFIG += c++17
 
 unix:!macx {
     TARGET = moonlight
+} else:macx {
+    # Binary name inside Twilight.app. applicationName stays Moonlight
+    # so QSettings and crash dumps keep their existing paths.
+    TARGET = Twilight
 } else {
-    # On macOS, this is the name displayed in the global menu bar
     TARGET = Moonlight
 }
 
@@ -172,6 +175,7 @@ macx {
         -framework CoreMedia \
         -framework CoreVideo \
         -framework GameController \
+        -framework IOKit \
         -framework Metal \
         -framework MetalKit \
         -framework QuartzCore \
@@ -223,7 +227,57 @@ SOURCES += \
     imgui/devui.cpp \
     imgui/gamepadmenu.cpp \
     imgui/imgui_plots.cpp \
-    streaming/stats.cpp
+    streaming/stats.cpp \
+    backend/updateversion.cpp \
+    gui/sfsymbolprovider.cpp \
+    gui/streamhudparse.cpp \
+    gui/streamhudstats.cpp \
+    streaming/session_twilight.cpp \
+    streaming/audio/microphone/mic_wire.cpp \
+    streaming/audio/microphone/mic_permission.cpp \
+    streaming/input/corehid_mouse_decoder.cpp \
+    streaming/input/dualsense_effects.cpp \
+    streaming/input/dualsense_hid.cpp \
+    streaming/input/gamepad_overlay.cpp
+
+!macx {
+    SOURCES += streaming/audio/microphone/mic_capture.cpp
+}
+
+macx {
+    SOURCES += \
+        gui/sfsymbol_mac.mm \
+        gui/streamhud_mac.mm \
+        streaming/audio/microphone/mic_capture_mac.mm \
+        streaming/audio/microphone/mic_permission_mac.mm \
+        streaming/input/corehid_mouse.mm \
+        streaming/input/dualsense_hid_mac.mm \
+        streaming/mac/pip_window.mm
+
+    # moonlight-common-c 7feb0a6 has no microphone sender. The patch adds
+    # LiSendRawControlStreamPacket. It is not the PyroWave or adaptive-trigger
+    # protocol scripts; those packets are already in this pin.
+    !system(python3 $$PWD/../scripts/apply_mic_control_packet.py) {
+        error("Failed to apply the microphone control-stream patch")
+    }
+}
+
+HEADERS += \
+    backend/updateversion.h \
+    gui/sfsymbolprovider.h \
+    gui/streamhudparse.h \
+    gui/streamhudplace.h \
+    gui/streamhudstats.h \
+    streaming/audio/microphone/mic_capture.h \
+    streaming/audio/microphone/mic_permission.h \
+    streaming/audio/microphone/mic_resample.h \
+    streaming/audio/microphone/mic_wire.h \
+    streaming/input/corehid_mouse.h \
+    streaming/input/dualsense_effects.h \
+    streaming/input/dualsense_hid.h \
+    streaming/input/gamepad_overlay.h \
+    streaming/mac/pip_frame.h \
+    streaming/mac/pip_window.h
 
 HEADERS += \
     SDL_compat.h \
@@ -628,20 +682,40 @@ win32 {
     QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/Moonlight.exe.manifest
 }
 macx {
-    # Create Info.plist in object dir with the correct version string
-    system(cp $$PWD/Info.plist $$OUT_PWD/Info.plist)
-    system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$OUT_PWD/Info.plist)
+    isEmpty(QMAKE_MACOSX_DEPLOYMENT_TARGET) {
+        error("QMAKE_MACOSX_DEPLOYMENT_TARGET is unset")
+    }
+    message("Twilight macOS deployment target: $$QMAKE_MACOSX_DEPLOYMENT_TARGET")
 
-    QMAKE_APPLICATION_BUNDLE_NAME = "Moonlight-Metal"
+    TWILIGHT_BUNDLE_ID = com.moonlight-stream.Moonlight
+    TWILIGHT_PLIST_MODE = desktop
+    twilight-mas {
+        TWILIGHT_BUNDLE_ID = com.henrique.twilight
+        TWILIGHT_PLIST_MODE = mas
+    }
+
+    # VERSION, BUNDLE_ID, and DISPLAY_NAME tokens are filled from version.txt.
+    TWILIGHT_VERSION = $$cat(version.txt)
+    !system(python3 $$PWD/../scripts/prepare-macos-infoplist.py $$PWD/Info.plist $$OUT_PWD/Info.plist $$TWILIGHT_VERSION $$TWILIGHT_BUNDLE_ID Twilight $$TWILIGHT_PLIST_MODE) {
+        error("prepare-macos-infoplist.py failed")
+    }
+
+    !macx-xcode: QMAKE_APPLICATION_BUNDLE_NAME = Twilight
     QMAKE_INFO_PLIST = $$OUT_PWD/Info.plist
 
-    APP_BUNDLE_RESOURCES.files = moonlight.icns
+    APP_BUNDLE_RESOURCES.files = twilight.icns
     APP_BUNDLE_RESOURCES.path = Contents/Resources
+
+    APP_BUNDLE_PRIVACY.files = deploy/macos/PrivacyInfo.xcprivacy
+    APP_BUNDLE_PRIVACY.path = Contents/Resources
+
+    APP_BUNDLE_LPROJ.files = deploy/macos/en.lproj/InfoPlist.strings
+    APP_BUNDLE_LPROJ.path = Contents/Resources/en.lproj
 
     APP_BUNDLE_PLIST.files = $$OUT_PWD/Info.plist
     APP_BUNDLE_PLIST.path = Contents
 
-    QMAKE_BUNDLE_DATA += APP_BUNDLE_RESOURCES APP_BUNDLE_PLIST
+    QMAKE_BUNDLE_DATA += APP_BUNDLE_RESOURCES APP_BUNDLE_PRIVACY APP_BUNDLE_LPROJ APP_BUNDLE_PLIST
 
     !disable-prebuilts {
         APP_BUNDLE_FRAMEWORKS.files = $$files(../libs/mac/Frameworks/*.framework, true) $$files(../libs/mac/lib/*.dylib, true)

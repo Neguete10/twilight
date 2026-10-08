@@ -52,6 +52,14 @@ public:
     };
     Q_ENUM(VideoCodecConfig)
 
+    enum PyroWaveBackendConfig
+    {
+        PWBC_AUTO,
+        PWBC_METAL,
+        PWBC_VULKAN
+    };
+    Q_ENUM(PyroWaveBackendConfig)
+
     enum VideoDecoderSelection
     {
         VDS_AUTO,
@@ -175,7 +183,15 @@ public:
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
     Q_PROPERTY(SpatialAudioConfig spatialAudioConfig MEMBER spatialAudioConfig NOTIFY spatialAudioConfigChanged)
+    Q_PROPERTY(bool spatialHeadTracking READ spatialHeadTracking WRITE setSpatialHeadTracking NOTIFY spatialHeadTrackingChanged)
     Q_PROPERTY(VideoCodecConfig videoCodecConfig MEMBER videoCodecConfig NOTIFY videoCodecConfigChanged)
+    Q_PROPERTY(PyroWaveBackendConfig pyroWaveBackend MEMBER pyroWaveBackend NOTIFY pyroWaveBackendChanged)
+    Q_PROPERTY(bool enableMicrophone MEMBER enableMicrophone NOTIFY enableMicrophoneChanged)
+    Q_PROPERTY(QString microphoneStatusText READ microphoneStatusText NOTIFY microphoneStatusTextChanged)
+    Q_PROPERTY(bool coreHidMouse MEMBER coreHidMouse NOTIFY coreHidMouseChanged)
+    Q_PROPERTY(bool showTwilightHud READ showTwilightHud WRITE setShowTwilightHud NOTIFY showTwilightHudChanged)
+    Q_PROPERTY(QString uiVersion READ uiVersion WRITE setUiVersion NOTIFY uiVersionChanged)
+    Q_PROPERTY(QString lastSelectedHostUuid READ lastSelectedHostUuid WRITE setLastSelectedHostUuid NOTIFY lastSelectedHostUuidChanged)
     Q_PROPERTY(bool enableHdr MEMBER enableHdr NOTIFY enableHdrChanged)
     Q_PROPERTY(bool enableYUV444 MEMBER enableYUV444 NOTIFY enableYUV444Changed)
     Q_PROPERTY(VideoDecoderSelection videoDecoderSelection MEMBER videoDecoderSelection NOTIFY videoDecoderSelectionChanged)
@@ -198,6 +214,20 @@ public:
     Q_PROPERTY(int vtMetalFramesInFlight MEMBER vtMetalFramesInFlight NOTIFY vtMetalFramesInFlightChanged)
 
     Q_INVOKABLE bool retranslate();
+    Q_INVOKABLE void setMicrophoneEnabled(bool enabled);
+    Q_INVOKABLE void refreshMicrophoneStatus();
+
+    static bool hudWantsSamples();
+
+    bool spatialHeadTracking() const;
+    void setSpatialHeadTracking(bool enabled);
+    bool showTwilightHud() const { return m_ShowTwilightHud; }
+    void setShowTwilightHud(bool show);
+    QString uiVersion() const { return m_UiVersion; }
+    void setUiVersion(const QString& version);
+    QString lastSelectedHostUuid() const { return m_LastSelectedHostUuid; }
+    void setLastSelectedHostUuid(const QString& uuid);
+    QString microphoneStatusText() const { return m_MicrophoneStatusText; }
 
     // Directly accessible members for preferences
     int width;
@@ -230,6 +260,9 @@ public:
     int packetSize;
     AudioConfig audioConfig;
     SpatialAudioConfig spatialAudioConfig;
+    PyroWaveBackendConfig pyroWaveBackend;
+    bool enableMicrophone;
+    bool coreHidMouse;
     VideoCodecConfig videoCodecConfig;
     bool enableHdr;
     bool enableYUV444;
@@ -262,7 +295,13 @@ signals:
     void absoluteTouchModeChanged();
     void audioConfigChanged();
     void spatialAudioConfigChanged();
+    void spatialHeadTrackingChanged();
     void videoCodecConfigChanged();
+    void pyroWaveBackendChanged();
+    void enableMicrophoneChanged();
+    void microphoneStatusTextChanged();
+    void microphoneAccessFinished(bool granted);
+    void coreHidMouseChanged();
     void enableHdrChanged();
     void enableYUV444Changed();
     void videoDecoderSelectionChanged();
@@ -289,12 +328,24 @@ signals:
     void presentModeChanged();
     void showPerformanceGraphsChanged();
     void vtMetalFramesInFlightChanged();
+    void showTwilightHudChanged();
+    void uiVersionChanged();
+    void lastSelectedHostUuidChanged();
+
+private slots:
+    void completeMicrophoneRequest(int serial, bool granted);
 
 private:
     explicit StreamingPreferences(QQmlEngine *qmlEngine);
 
     QString getSuffixFromLanguage(Language lang);
+    void publishHudSamplingFlag();
 
     QQmlEngine* m_QmlEngine;
+    bool m_ShowTwilightHud;
+    QString m_UiVersion;
+    QString m_LastSelectedHostUuid;
+    QString m_MicrophoneStatusText;
+    int m_MicRequestSerial;
 };
 

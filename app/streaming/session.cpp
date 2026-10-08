@@ -1,4 +1,5 @@
 #include "session.h"
+#include "gui/streamhudstats.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
 #include "backend/richpresencemanager.h"
@@ -602,6 +603,20 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_AudioRenderer(nullptr),
       m_AudioSampleCount(0),
       m_DropAudioEndTime(0)
+#ifdef Q_OS_DARWIN
+      , m_PipActive(false),
+      m_PipRestoreFullscreen(false),
+      m_PipReapplying(false),
+      m_PipRestoreX(0),
+      m_PipRestoreY(0),
+      m_PipRestoreW(0),
+      m_PipRestoreH(0),
+      m_PipFrameX(0),
+      m_PipFrameY(0),
+      m_PipFrameW(0),
+      m_PipFrameH(0),
+      m_PipSnapBackUntil(0)
+#endif
 {
 }
 
@@ -1383,6 +1398,9 @@ private:
         // LiStartConnection() and LiStopConnection().
         SDL_assert(m_Session->m_VideoDecoder == nullptr);
 
+        // Stop the microphone before the control stream goes away.
+        m_Session->stopMicrophone();
+
         // Finish cleanup of the connection state
         LiStopConnection();
 
@@ -1835,6 +1853,7 @@ bool Session::startConnectionAsync()
         return false;
     }
 
+    startMicrophone();
     emit connectionStarted();
     return true;
 }
@@ -1999,6 +2018,11 @@ void Session::exec()
         }
     }
 
+    StreamHudStats::noteStreamWindow(m_Window);
+#ifdef Q_OS_DARWIN
+    StreamHudStats::followStream();
+#endif
+
     m_InputHandler->setWindow(m_Window);
 
     QSvgRenderer svgIconRenderer(QString(":/res/moonlight.svg"));
@@ -2087,6 +2111,9 @@ void Session::exec()
     // because we want to suspend all Qt processing until the stream is over.
     SDL_Event event;
     for (;;) {
+#ifdef Q_OS_DARWIN
+        StreamHudStats::flushStreamUi();
+#endif
 #if SDL_VERSION_ATLEAST(2, 0, 18) && !defined(STEAM_LINK)
         // SDL 2.0.18 has a proper wait event implementation that uses platform
         // support to block on events rather than polling on Windows, macOS, X11,
@@ -2097,7 +2124,13 @@ void Session::exec()
         // NB: This behavior was introduced in SDL 2.0.16, but had a few critical
         // issues that could cause indefinite timeouts, delayed joystick detection,
         // and other problems.
-        if (!SDL_WaitEventTimeout(&event, 1000)) {
+        int waitMs = 1000;
+#ifdef Q_OS_DARWIN
+        if (StreamingPreferences::hudWantsSamples()) {
+            waitMs = 100;
+        }
+#endif
+        if (!SDL_WaitEventTimeout(&event, waitMs)) {
             presence.runCallbacks();
             continue;
         }
@@ -2180,6 +2213,11 @@ void Session::exec()
             break;
 
         case SDL_WINDOWEVENT:
+#ifdef Q_OS_DARWIN
+            if (m_PipActive) {
+                reapplyPictureInPictureChrome(false);
+            }
+#endif
             // Early handling of some events
             switch (event.window.event) {
             case SDL_WINDOWEVENT_FOCUS_LOST:
@@ -2499,6 +2537,9 @@ DispatchDeferredCleanup:
         }
 #endif
     }
+
+    // Detach the HUD before SDL destroys the parent window.
+    StreamHudStats::noteStreamWindow(nullptr);
 
     // This must be called after the decoder is deleted, because
     // the renderer may want to interact with the window

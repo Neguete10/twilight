@@ -2,6 +2,7 @@
 
 #include "nvhttp.h"
 #include "nvaddress.h"
+#include "wake_notice.h"
 
 #include <QThread>
 #include <QReadWriteLock>
@@ -50,7 +51,7 @@ public:
     bool
     update(const NvComputer& that);
 
-    bool
+    WakePacketOutcome
     wake() const;
 
     enum ReachabilityType

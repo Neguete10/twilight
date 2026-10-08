@@ -53,6 +53,9 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Ignore button presses outside the video region, but allow button releases
         return;
     }
+    else if (coreHidSuppressesRelativeMotion()) {
+        return;
+    }
 
     switch (event->button)
     {
@@ -174,6 +177,9 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
 
         m_MouseWasInVideoRegion = mouseInVideoRegion;
     }
+    else if (coreHidSuppressesRelativeMotion()) {
+        return;
+    }
     else {
         LiSendMouseMoveEvent(xrel, yrel);
     }
@@ -187,6 +193,10 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
     }
     else if (event->which == SDL_TOUCH_MOUSEID) {
         // Ignore synthetic mouse events
+        return;
+    }
+    else if (coreHidSuppressesScroll()) {
+        // CoreHID already forwarded this wheel.
         return;
     }
 

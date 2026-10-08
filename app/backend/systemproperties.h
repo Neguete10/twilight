@@ -25,6 +25,8 @@ public:
     Q_PROPERTY(bool hasBrowser MEMBER hasBrowser CONSTANT)
     Q_PROPERTY(bool hasDiscordIntegration MEMBER hasDiscordIntegration CONSTANT)
     Q_PROPERTY(bool hasPyroWave MEMBER hasPyroWave CONSTANT)
+    Q_PROPERTY(bool hasPyroWaveMetal MEMBER hasPyroWaveMetal CONSTANT)
+    Q_PROPERTY(bool hasPyroWaveVulkan MEMBER hasPyroWaveVulkan CONSTANT)
     Q_PROPERTY(bool usesMaterial3Theme MEMBER usesMaterial3Theme CONSTANT)
     Q_PROPERTY(QString versionString MEMBER versionString CONSTANT)
 
@@ -67,6 +69,8 @@ private:
     bool hasBrowser;
     bool hasDiscordIntegration;
     bool hasPyroWave;
+    bool hasPyroWaveMetal;
+    bool hasPyroWaveVulkan;
     QString versionString;
     bool usesMaterial3Theme;
     bool isDarwin;

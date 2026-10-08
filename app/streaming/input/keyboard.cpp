@@ -178,6 +178,37 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
         updateKeyboardGrabState();
         break;
 
+    case KeyComboTogglePictureInPicture:
+#ifdef Q_OS_DARWIN
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected picture-in-picture key combo");
+        Session::get()->togglePictureInPicture();
+#endif
+        break;
+
+    case KeyComboToggleGamepadOverlay:
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected gamepad overlay key combo");
+        Session::get()->getOverlayManager().setOverlayState(
+            Overlay::OverlayGamepad,
+            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayGamepad));
+        refreshGamepadOverlay(true);
+        break;
+
+    case KeyComboCycleTriggerPreview:
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected adaptive trigger preview key combo");
+        cycleAdaptiveTriggerPreview();
+        break;
+
+    case KeyComboToggleMicrophoneMute:
+#ifdef Q_OS_DARWIN
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected microphone mute key combo");
+        Session::get()->toggleMicrophoneMute();
+#endif
+        break;
+
     default:
         Q_UNREACHABLE();
     }

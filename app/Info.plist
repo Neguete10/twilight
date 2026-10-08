@@ -5,15 +5,15 @@
 	<key>GCSupportsGameMode</key>
 	<true/>
 	<key>CFBundleExecutable</key>
-	<string>Moonlight</string>
+	<string>Twilight</string>
 	<key>LSSupportsGameMode</key>
 	<true/>
 	<key>CFBundleGetInfoString</key>
 	<string>Stream games and other applications from another PC</string>
 	<key>CFBundleIconFile</key>
-	<string>moonlight</string>
+	<string>twilight</string>
 	<key>CFBundleIdentifier</key>
-	<string>org.hybridized.Moonlight</string>
+	<string>BUNDLE_ID</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>CFBundlePackageType</key>
@@ -42,8 +42,10 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Twilight uses the microphone to send voice to the host PC while streaming.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Moonlight uses the local network to connect to your gaming PC for streaming.</string>
+	<string>Twilight uses the local network to connect to your gaming PC for streaming.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_nvstream._tcp</string>
@@ -53,8 +55,8 @@
 	<key>CFBundleShortVersionString</key>
 	<string>VERSION</string>
 	<key>CFBundleDisplayName</key>
-	<string>Moonlight Metal</string>
+	<string>DISPLAY_NAME</string>
 	<key>CFBundleName</key>
-	<string>Moonlight Metal</string>
+	<string>Twilight</string>
 </dict>
 </plist>

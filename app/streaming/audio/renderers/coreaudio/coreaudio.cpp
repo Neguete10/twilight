@@ -14,7 +14,10 @@
 #define kRingBufferMaxSeconds 0.030
 
 CoreAudioRenderer::CoreAudioRenderer()
-    : m_SpatialBuffer(2, 4096),
+    : m_OutputAU(nullptr),
+    m_OutputInitialized(false),
+    m_OutputStarted(false),
+    m_SpatialBuffer(2, 4096),
     m_DropCount(0),
     m_DropCountUnderrun(0),
     m_QueuedAudioSize{0}
@@ -60,12 +63,21 @@ void CoreAudioRenderer::cleanup()
     }
 
     if (m_OutputAU != nullptr) {
-        AudioOutputUnitStop(m_OutputAU);
+        // Stop and uninitialize only after those calls succeeded. Stopping a
+        // unit that never started, or uninitializing one that never
+        // initialized, trips Core Audio during teardown.
+        if (m_OutputStarted) {
+            AudioOutputUnitStop(m_OutputAU);
+            m_OutputStarted = false;
+        }
         clearCallback();
 
         m_SpatialAU.cleanup();
 
-        AudioUnitUninitialize(m_OutputAU);
+        if (m_OutputInitialized) {
+            AudioUnitUninitialize(m_OutputAU);
+            m_OutputInitialized = false;
+        }
         AudioComponentInstanceDispose(m_OutputAU);
         m_OutputAU = nullptr;
     }
@@ -313,6 +325,7 @@ bool CoreAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION*
         CA_LogError(status, "Failed to start output audio unit");
         return false;
     }
+    m_OutputStarted = true;
 
     DevUISettings::instance().UpdateMetrics([&](DevUIMetrics& metrics) {
         metrics.opusChannelCount = m_opusConfig->channelCount;
@@ -354,6 +367,7 @@ bool CoreAudioRenderer::initAudioUnit()
         CA_LogError(status, "Failed to initialize the output audio unit");
         return false;
     }
+    m_OutputInitialized = true;
 
     /* macOS:
      * disable OutputAU input IO

@@ -2,6 +2,12 @@
 
 #include "settings/streamingpreferences.h"
 #include "backend/computermanager.h"
+#include "dualsense_effects.h"
+#include "dualsense_hid.h"
+
+#ifdef Q_OS_DARWIN
+#include "corehid_mouse.h"
+#endif
 
 #include "SDL_compat.h"
 
@@ -38,36 +44,6 @@ struct GamepadState {
     unsigned char lt, rt;
 };
 
-
-struct DualSenseOutputReport{
-    uint8_t validFlag0;
-    uint8_t validFlag1;
-
-    /* For DualShock 4 compatibility mode. */
-    uint8_t motorRight;
-    uint8_t motorLeft;
-
-    /* Audio controls */
-    uint8_t reserved[4];
-    uint8_t muteButtonLed;
-
-    uint8_t powerSaveControl;
-    uint8_t rightTriggerEffectType;
-    uint8_t rightTriggerEffect[DS_EFFECT_PAYLOAD_SIZE];
-    uint8_t leftTriggerEffectType;
-    uint8_t leftTriggerEffect[DS_EFFECT_PAYLOAD_SIZE];
-    uint8_t reserved2[6];
-
-    /* LEDs and lightbar */
-    uint8_t validFlag2;
-    uint8_t reserved3[2];
-    uint8_t lightbarSetup;
-    uint8_t ledBrightness;
-    uint8_t playerLeds;
-    uint8_t lightbarRed;
-    uint8_t lightbarGreen;
-    uint8_t lightbarBlue;
-};
 
 // activeGamepadMask is a short, so we're bounded by the number of mask bits
 #define MAX_GAMEPADS 16
@@ -128,6 +104,10 @@ public:
 
     void setAdaptiveTriggers(uint16_t controllerNumber, DualSenseOutputReport *report);
 
+    void cycleAdaptiveTriggerPreview();
+
+    void refreshGamepadOverlay(bool force);
+
     void handleTouchFingerEvent(SDL_TouchFingerEvent* event);
 
     int getAttachedGamepadMask();
@@ -172,8 +152,26 @@ private:
         KeyComboTogglePointerRegionLock,
         KeyComboQuitAndExit,
         KeyComboToggleKeyboardGrab,
+        KeyComboTogglePictureInPicture,
+        KeyComboToggleGamepadOverlay,
+        KeyComboCycleTriggerPreview,
+        KeyComboToggleMicrophoneMute,
         KeyComboMax
     };
+
+    bool tryStartCoreHidCapture();
+    bool stopCoreHidCapture();
+    bool coreHidSuppressesRelativeMotion() const;
+    bool coreHidSuppressesScroll() const;
+    bool sendDualSenseReport(SDL_GameController* controller, const DualSenseOutputReport& report);
+    void clearAdaptiveTriggers();
+
+#ifdef Q_OS_DARWIN
+    static void coreHidMotionThunk(const CoreHidMouseDelta& delta, void* context);
+    static void coreHidButtonThunk(const CoreHidButtonUpdate& update, void* context);
+    void sendCoreHidMotion(const CoreHidMouseDelta& delta);
+    void sendCoreHidButtons(const CoreHidButtonUpdate& update);
+#endif
 
     GamepadState*
     findStateForGamepad(SDL_JoystickID id);
@@ -255,4 +253,20 @@ private:
     int m_NumFingersDown;
 
     static const int k_ButtonMap[];
+
+    DualSenseHidOutput m_DualSenseHid;
+    int m_TriggerPreview;
+    bool m_SawHostAdaptiveTriggers;
+    bool m_LoggedAdaptiveSendFailure;
+    uint8_t m_LastHostTypeLeft;
+    uint8_t m_LastHostTypeRight;
+    uint32_t m_LastGamepadOverlayTicks;
+
+#ifdef Q_OS_DARWIN
+    bool m_CoreHidRequested;
+    bool m_CoreHidActive;
+    float m_CoreHidScale;
+    CoreHidBackendRequest m_CoreHidBackend;
+    CoreHidMouseCapture* m_CoreHid;
+#endif
 };

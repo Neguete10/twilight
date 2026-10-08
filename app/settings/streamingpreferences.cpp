@@ -1,6 +1,8 @@
 #include "streamingpreferences.h"
+#include "streaming/audio/microphone/mic_permission.h"
 #include "utils.h"
 
+#include <QAtomicInt>
 #include <QSettings>
 #include <QTranslator>
 #include <QCoreApplication>
@@ -59,15 +61,25 @@
 #define SER_FRAMEPRESENTMODE "presentMode"
 #define SER_SHOWPERFORMANCEGRAPHS "showPerformanceGraphs"
 #define SER_VTMETALFRAMESINFLIGHT "vtMetalFramesInFlight"
+#define SER_MICROPHONE "microphone"
+#define SER_PYROWAVE_BACKEND "pyrowavebackend"
+#define SER_COREHIDMOUSE "corehidmouse"
+#define SER_TWILIGHTHUD "showTwilightHud"
+#define SER_UIVERSION "uiVersion"
+#define SER_LASTHOSTUUID "lastSelectedHostUuid"
 
 #define CURRENT_DEFAULT_VER 2
+
+static QAtomicInt s_HudWantsSamples(0);
 
 static StreamingPreferences* s_GlobalPrefs;
 
 Q_GLOBAL_STATIC(QReadWriteLock, s_GlobalPrefsLock)
 
 StreamingPreferences::StreamingPreferences(QQmlEngine *qmlEngine)
-    : m_QmlEngine(qmlEngine)
+    : m_QmlEngine(qmlEngine),
+      m_ShowTwilightHud(false),
+      m_MicRequestSerial(0)
 {
     reload();
 }
@@ -184,8 +196,6 @@ void StreamingPreferences::reload()
     vtMetalFramesInFlight = settings.value(SER_VTMETALFRAMESINFLIGHT, 3).toInt();
     audioRenderer = static_cast<AudioRenderer>(settings.value(SER_AUDIO_RENDERER,
                                                     static_cast<int>(AudioRenderer::AUDIO_RENDERER_COREAUDIO)).toInt());
-    spatialAudioConfig = static_cast<SpatialAudioConfig>(settings.value(SER_SPATIALAUDIOCFG,
-                                                    static_cast<int>(SpatialAudioConfig::SAC_DISABLED)).toInt());
 #endif
 #ifdef Q_OS_WIN32
     rendererSelection = static_cast<RendererSelection>(settings.value(SER_RENDERER,
@@ -196,6 +206,51 @@ void StreamingPreferences::reload()
     presentMode = static_cast<PresentMode>(settings.value(SER_FRAMEPRESENTMODE,
                                                     static_cast<int>(PresentMode::PRESENT_AUTO)).toInt());
     showPerformanceGraphs = settings.value(SER_SHOWPERFORMANCEGRAPHS, false).toBool();
+    enableMicrophone = settings.value(SER_MICROPHONE, false).toBool();
+    coreHidMouse = settings.value(SER_COREHIDMOUSE, false).toBool();
+    {
+        int storedSpatial = settings.value(SER_SPATIALAUDIOCFG,
+                                           static_cast<int>(SpatialAudioConfig::SAC_DISABLED)).toInt();
+        // Twilight 7.0.1 stored SAC_AUTO=0 / SAC_DISABLED=1 plus a separate
+        // "headtracking" bool. This tree uses SAC_FIXED=0, SAC_HEAD_TRACKED=1,
+        // SAC_DISABLED=2. The headtracking key marks an unmigrated 7.0.1 file.
+        if (settings.contains(SER_HEADTRACKING) && storedSpatial <= 1) {
+            const bool head = settings.value(SER_HEADTRACKING, false).toBool();
+            if (storedSpatial == 1) {
+                spatialAudioConfig = SpatialAudioConfig::SAC_DISABLED;
+            }
+            else {
+                spatialAudioConfig = head ? SpatialAudioConfig::SAC_HEAD_TRACKED
+                                          : SpatialAudioConfig::SAC_FIXED;
+            }
+            settings.setValue(SER_SPATIALAUDIOCFG, static_cast<int>(spatialAudioConfig));
+            settings.remove(SER_HEADTRACKING);
+        }
+        else if (storedSpatial < static_cast<int>(SpatialAudioConfig::SAC_FIXED) ||
+                 storedSpatial > static_cast<int>(SpatialAudioConfig::SAC_DISABLED)) {
+            spatialAudioConfig = SpatialAudioConfig::SAC_DISABLED;
+        }
+        else {
+            spatialAudioConfig = static_cast<SpatialAudioConfig>(storedSpatial);
+        }
+    }
+    {
+        int backend = settings.value(SER_PYROWAVE_BACKEND,
+                                     static_cast<int>(PyroWaveBackendConfig::PWBC_AUTO)).toInt();
+        if (backend < static_cast<int>(PyroWaveBackendConfig::PWBC_AUTO) ||
+                backend > static_cast<int>(PyroWaveBackendConfig::PWBC_VULKAN)) {
+            backend = static_cast<int>(PyroWaveBackendConfig::PWBC_AUTO);
+        }
+        pyroWaveBackend = static_cast<PyroWaveBackendConfig>(backend);
+    }
+    m_UiVersion = QStringLiteral("v2");
+    if (settings.value(SER_UIVERSION).toString() != QLatin1String("v2")) {
+        settings.setValue(SER_UIVERSION, m_UiVersion);
+    }
+    m_LastSelectedHostUuid = settings.value(SER_LASTHOSTUUID).toString();
+    m_ShowTwilightHud = settings.value(SER_TWILIGHTHUD, false).toBool();
+    publishHudSamplingFlag();
+    refreshMicrophoneStatus();
 
     // old enableVsync is now based on presentMode
     if (presentMode == PresentMode::PRESENT_NO_VSYNC) {
@@ -401,6 +456,147 @@ void StreamingPreferences::save()
     settings.setValue(SER_FRAMEPRESENTMODE, static_cast<int>(presentMode));
     settings.setValue(SER_SHOWPERFORMANCEGRAPHS, showPerformanceGraphs);
     settings.setValue(SER_VTMETALFRAMESINFLIGHT, vtMetalFramesInFlight);
+    settings.setValue(SER_MICROPHONE, enableMicrophone);
+    settings.setValue(SER_PYROWAVE_BACKEND, static_cast<int>(pyroWaveBackend));
+    settings.setValue(SER_COREHIDMOUSE, coreHidMouse);
+    settings.setValue(SER_UIVERSION, m_UiVersion);
+    settings.setValue(SER_TWILIGHTHUD, m_ShowTwilightHud);
+    settings.setValue(SER_LASTHOSTUUID, m_LastSelectedHostUuid);
+}
+
+bool StreamingPreferences::spatialHeadTracking() const
+{
+    return spatialAudioConfig == SpatialAudioConfig::SAC_HEAD_TRACKED;
+}
+
+void StreamingPreferences::setSpatialHeadTracking(bool enabled)
+{
+    if (spatialAudioConfig == SpatialAudioConfig::SAC_DISABLED) {
+        return;
+    }
+
+    const SpatialAudioConfig next = enabled ? SpatialAudioConfig::SAC_HEAD_TRACKED
+                                            : SpatialAudioConfig::SAC_FIXED;
+    if (next == spatialAudioConfig) {
+        return;
+    }
+
+    spatialAudioConfig = next;
+    emit spatialHeadTrackingChanged();
+    emit spatialAudioConfigChanged();
+}
+
+bool StreamingPreferences::hudWantsSamples()
+{
+    return s_HudWantsSamples.loadAcquire() != 0;
+}
+
+void StreamingPreferences::publishHudSamplingFlag()
+{
+    const bool sample = m_UiVersion == QLatin1String("v2") && m_ShowTwilightHud;
+    s_HudWantsSamples.storeRelease(sample ? 1 : 0);
+}
+
+void StreamingPreferences::setShowTwilightHud(bool show)
+{
+    if (m_ShowTwilightHud == show) {
+        return;
+    }
+
+    m_ShowTwilightHud = show;
+    publishHudSamplingFlag();
+
+    QSettings settings;
+    settings.setValue(SER_TWILIGHTHUD, m_ShowTwilightHud);
+    emit showTwilightHudChanged();
+}
+
+void StreamingPreferences::setLastSelectedHostUuid(const QString& uuid)
+{
+    if (m_LastSelectedHostUuid == uuid) {
+        return;
+    }
+
+    m_LastSelectedHostUuid = uuid;
+
+    QSettings settings;
+    settings.setValue(SER_LASTHOSTUUID, m_LastSelectedHostUuid);
+    emit lastSelectedHostUuidChanged();
+}
+
+void StreamingPreferences::setUiVersion(const QString& version)
+{
+    Q_UNUSED(version);
+    if (m_UiVersion == QLatin1String("v2")) {
+        return;
+    }
+
+    m_UiVersion = QStringLiteral("v2");
+    publishHudSamplingFlag();
+
+    QSettings settings;
+    settings.setValue(SER_UIVERSION, m_UiVersion);
+    emit uiVersionChanged();
+}
+
+void StreamingPreferences::refreshMicrophoneStatus()
+{
+    QString text;
+    switch (MacMicrophonePermission::status()) {
+    case MacMicrophonePermission::Status::Granted:
+        text = tr("Microphone access granted. Ctrl+Alt+Shift+N mutes it during a stream.");
+        break;
+    case MacMicrophonePermission::Status::Denied:
+        text = tr("Microphone access is off for this app. Turn it on in System Settings > Privacy & Security > Microphone.");
+        break;
+    case MacMicrophonePermission::Status::Restricted:
+        text = tr("Microphone access is restricted on this Mac.");
+        break;
+    case MacMicrophonePermission::Status::NotDetermined:
+    default:
+        text = tr("Checking this box asks macOS for microphone access.");
+        break;
+    }
+
+    if (text == m_MicrophoneStatusText) {
+        return;
+    }
+    m_MicrophoneStatusText = text;
+    emit microphoneStatusTextChanged();
+}
+
+void StreamingPreferences::setMicrophoneEnabled(bool enabled)
+{
+    if (!enabled) {
+        ++m_MicRequestSerial;
+        enableMicrophone = false;
+        refreshMicrophoneStatus();
+        save();
+        emit enableMicrophoneChanged();
+        return;
+    }
+
+    const int serial = ++m_MicRequestSerial;
+    MacMicrophonePermission::request([this, serial](bool granted) {
+        QMetaObject::invokeMethod(this,
+                                  "completeMicrophoneRequest",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(int, serial),
+                                  Q_ARG(bool, granted));
+    });
+}
+
+void StreamingPreferences::completeMicrophoneRequest(int serial, bool granted)
+{
+    if (serial != m_MicRequestSerial) {
+        return;
+    }
+
+    enableMicrophone = granted;
+    refreshMicrophoneStatus();
+    save();
+    emit enableMicrophoneChanged();
+    emit microphoneAccessFinished(granted);
 }
 
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)

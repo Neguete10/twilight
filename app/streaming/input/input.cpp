@@ -33,8 +33,36 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_RightButtonReleaseTimer(0),
       m_DragTimer(0),
       m_DragButton(0),
-      m_NumFingersDown(0)
+      m_NumFingersDown(0),
+      m_TriggerPreview(DualSensePreviewFollowHost),
+      m_SawHostAdaptiveTriggers(false),
+      m_LoggedAdaptiveSendFailure(false),
+      m_LastHostTypeLeft(0),
+      m_LastHostTypeRight(0),
+      m_LastGamepadOverlayTicks(0)
+#ifdef Q_OS_DARWIN
+      , m_CoreHidRequested(false),
+      m_CoreHidActive(false),
+      m_CoreHidScale(1.0f),
+      m_CoreHidBackend(CoreHidBackendRequest::Auto),
+      m_CoreHid(nullptr)
+#endif
 {
+#ifdef Q_OS_DARWIN
+    const QByteArray coreHidEnv = qgetenv("TWILIGHT_COREHID");
+    const QByteArray coreHidScaleEnv = qgetenv("TWILIGHT_COREHID_SCALE");
+    const QByteArray coreHidBackendEnv = qgetenv("TWILIGHT_COREHID_BACKEND");
+    m_CoreHidRequested = coreHidResolveEnabled(prefs.coreHidMouse, coreHidEnv.constData());
+    m_CoreHidScale = coreHidResolveScale(coreHidScaleEnv.constData());
+    m_CoreHidBackend = coreHidResolveBackend(coreHidBackendEnv.constData());
+    if (m_CoreHidRequested && !m_AbsoluteMouseMode) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "CoreHID mouse requested (backend %s, scale %.2f)",
+                    coreHidBackendName(m_CoreHidBackend),
+                    m_CoreHidScale);
+    }
+#endif
+
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
         m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
@@ -135,6 +163,31 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].scanCode = SDL_SCANCODE_K;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled = WMUtils::isRunningDesktopEnvironment();
 
+#ifdef Q_OS_DARWIN
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].keyCombo = KeyComboTogglePictureInPicture;
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].keyCode = SDLK_p;
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].scanCode = SDL_SCANCODE_P;
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].enabled = true;
+
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].keyCombo = KeyComboToggleMicrophoneMute;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].keyCode = SDLK_n;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].scanCode = SDL_SCANCODE_N;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].enabled = true;
+#else
+    m_SpecialKeyCombos[KeyComboTogglePictureInPicture].enabled = false;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].enabled = false;
+#endif
+
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].keyCombo = KeyComboToggleGamepadOverlay;
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].keyCode = SDLK_g;
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].scanCode = SDL_SCANCODE_G;
+    m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].enabled = true;
+
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].keyCombo = KeyComboCycleTriggerPreview;
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].keyCode = SDLK_t;
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].scanCode = SDL_SCANCODE_T;
+    m_SpecialKeyCombos[KeyComboCycleTriggerPreview].enabled = true;
+
     m_OldIgnoreDevices = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES);
     m_OldIgnoreDevicesExcept = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT);
 
@@ -218,6 +271,8 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
 
 SdlInputHandler::~SdlInputHandler()
 {
+    clearAdaptiveTriggers();
+
     for (int i = 0; i < MAX_GAMEPADS; i++) {
         if (m_GamepadState[i].mouseEmulationTimer != 0) {
             Session::get()->notifyMouseEmulationMode(false);
@@ -262,6 +317,14 @@ SdlInputHandler::~SdlInputHandler()
     // and Qt will draw their own mouse cursors like KMSDRM or RPi
     // video backends.
     SDL_ShowCursor(SDL_DISABLE);
+#endif
+
+#ifdef Q_OS_DARWIN
+    if (m_CoreHidActive) {
+        stopCoreHidCapture();
+    }
+    coreHidMouseCaptureDestroy(m_CoreHid);
+    m_CoreHid = nullptr;
 #endif
 }
 
@@ -353,8 +416,13 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
 void SdlInputHandler::setCaptureActive(bool active)
 {
     if (active) {
+        // CoreHID replaces SDL relative mouse when the user opted in.
+        if (tryStartCoreHidCapture()) {
+            // Relative motion and, when the capture owns the wheel, scroll
+            // are delivered from the HID callback.
+        }
         // If we're in relative mode, try to activate SDL's relative mouse mode
-        if (m_AbsoluteMouseMode || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
+        else if (m_AbsoluteMouseMode || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
             // Relative mouse mode didn't work or was disabled, so we'll just hide the cursor
             SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
             m_FakeMouseCaptureActive = true;
@@ -387,13 +455,15 @@ void SdlInputHandler::setCaptureActive(bool active)
         }
     }
     else {
-        if (m_FakeMouseCaptureActive) {
-            // Display the cursor again
-            SDL_ShowCursor(SDL_ENABLE);
-            m_FakeMouseCaptureActive = false;
-        }
-        else {
-            SDL_SetRelativeMouseMode(SDL_FALSE);
+        if (!stopCoreHidCapture()) {
+            if (m_FakeMouseCaptureActive) {
+                // Display the cursor again
+                SDL_ShowCursor(SDL_ENABLE);
+                m_FakeMouseCaptureActive = false;
+            }
+            else {
+                SDL_SetRelativeMouseMode(SDL_FALSE);
+            }
         }
     }
 
@@ -428,3 +498,130 @@ void SdlInputHandler::handleTouchFingerEvent(SDL_TouchFingerEvent* event)
         handleRelativeFingerEvent(event);
     }
 }
+
+bool SdlInputHandler::tryStartCoreHidCapture()
+{
+#ifdef Q_OS_DARWIN
+    if (m_CoreHidActive) {
+        return true;
+    }
+    if (!m_CoreHidRequested || m_AbsoluteMouseMode) {
+        return false;
+    }
+
+    if (m_CoreHid == nullptr) {
+        m_CoreHid = coreHidMouseCaptureCreate(&SdlInputHandler::coreHidMotionThunk,
+                                              &SdlInputHandler::coreHidButtonThunk,
+                                              this,
+                                              m_CoreHidScale,
+                                              m_CoreHidBackend);
+    }
+    if (m_CoreHid == nullptr || !coreHidMouseCaptureStart(m_CoreHid)) {
+        return false;
+    }
+
+    m_CoreHidActive = true;
+    SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
+    m_FakeMouseCaptureActive = true;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool SdlInputHandler::stopCoreHidCapture()
+{
+#ifdef Q_OS_DARWIN
+    if (!m_CoreHidActive) {
+        return false;
+    }
+
+    coreHidMouseCaptureStop(m_CoreHid);
+    m_CoreHidActive = false;
+    SDL_ShowCursor(SDL_ENABLE);
+    m_FakeMouseCaptureActive = false;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool SdlInputHandler::coreHidSuppressesRelativeMotion() const
+{
+#ifdef Q_OS_DARWIN
+    return m_CoreHidActive;
+#else
+    return false;
+#endif
+}
+
+bool SdlInputHandler::coreHidSuppressesScroll() const
+{
+#ifdef Q_OS_DARWIN
+    return m_CoreHidActive && m_CoreHid != nullptr && coreHidMouseCaptureOwnsWheel(m_CoreHid);
+#else
+    return false;
+#endif
+}
+
+#ifdef Q_OS_DARWIN
+
+void SdlInputHandler::coreHidMotionThunk(const CoreHidMouseDelta& delta, void* context)
+{
+    static_cast<SdlInputHandler*>(context)->sendCoreHidMotion(delta);
+}
+
+void SdlInputHandler::coreHidButtonThunk(const CoreHidButtonUpdate& update, void* context)
+{
+    static_cast<SdlInputHandler*>(context)->sendCoreHidButtons(update);
+}
+
+void SdlInputHandler::sendCoreHidMotion(const CoreHidMouseDelta& delta)
+{
+    if (delta.motion) {
+        LiSendMouseMoveEvent(static_cast<short>(delta.dx), static_cast<short>(delta.dy));
+    }
+
+    if (delta.wheelChanged && delta.wheel != 0) {
+        const int16_t amount = coreHidScrollToHighRes(delta.wheel, m_ReverseScrollDirection);
+        if (amount != 0) {
+            LiSendHighResScrollEvent(amount);
+        }
+    }
+
+    if (delta.hWheelChanged && delta.hWheel != 0) {
+        const int16_t amount = coreHidScrollToHighRes(delta.hWheel, m_ReverseScrollDirection);
+        if (amount != 0) {
+            LiSendHighResHScrollEvent(amount);
+        }
+    }
+}
+
+void SdlInputHandler::sendCoreHidButtons(const CoreHidButtonUpdate& update)
+{
+    const auto sendMask = [this](uint32_t mask, char action) {
+        for (uint32_t usage = 1; usage <= 8; usage++) {
+            if ((mask & (1u << (usage - 1))) == 0) {
+                continue;
+            }
+            int button = coreHidHostButtonForUsage(usage);
+            if (button == 0) {
+                continue;
+            }
+            if (m_SwapMouseButtons) {
+                if (button == BUTTON_RIGHT) {
+                    button = BUTTON_LEFT;
+                }
+                else if (button == BUTTON_LEFT) {
+                    button = BUTTON_RIGHT;
+                }
+            }
+            LiSendMouseButtonEvent(action, button);
+        }
+    };
+
+    sendMask(update.pressed, BUTTON_ACTION_PRESS);
+    sendMask(update.released, BUTTON_ACTION_RELEASE);
+}
+
+#endif

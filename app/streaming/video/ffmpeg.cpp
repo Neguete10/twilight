@@ -2,6 +2,8 @@
 #include "ffmpeg.h"
 #include "utils.h"
 #include "streaming/session.h"
+#include "gui/streamhudstats.h"
+#include "settings/streamingpreferences.h"
 
 #include <h264_stream.h>
 
@@ -1882,13 +1884,22 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
     // track stats for a variety of things we can track at the same time
 	Stats::instance().SubmitVideoBytesAndReassemblyTime(du, droppedFramesNetwork);
 
-    // Flip stats windows roughly every second
-    if (Stats::instance().ShouldUpdateDisplay(
-        Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug),
-        Session::get()->getOverlayManager().getOverlayText(Overlay::OverlayDebug),
-        Session::get()->getOverlayManager().getOverlayMaxTextLength()))
+    // Flip stats windows roughly every second. The Twilight HUD reads the
+    // same text without turning the yellow SDL overlay on.
     {
-        Session::get()->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
+        auto& overlay = Session::get()->getOverlayManager();
+        const bool overlayOn = overlay.isOverlayEnabled(Overlay::OverlayDebug);
+        const bool hudOn = StreamingPreferences::hudWantsSamples();
+        if (Stats::instance().ShouldUpdateDisplay(overlayOn || hudOn,
+                                                  overlay.getOverlayText(Overlay::OverlayDebug),
+                                                  overlay.getOverlayMaxTextLength())) {
+            if (overlayOn) {
+                overlay.setOverlayTextUpdated(Overlay::OverlayDebug);
+            }
+            if (hudOn) {
+                StreamHudStats::submitOverlayText(overlay.getOverlayText(Overlay::OverlayDebug));
+            }
+        }
     }
 
     int requiredBufferSize = du->fullLength;

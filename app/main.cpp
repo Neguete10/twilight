@@ -54,6 +54,8 @@
 #include "gui/computermodel.h"
 #include "gui/appmodel.h"
 #include "backend/autoupdatechecker.h"
+#include "gui/streamhudstats.h"
+#include "gui/sfsymbolprovider.h"
 #include "backend/computermanager.h"
 #include "backend/systemproperties.h"
 #include "streaming/session.h"
@@ -451,7 +453,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("Moonlight Game Streaming Project");
     QCoreApplication::setOrganizationDomain("moonlight-stream.com");
     QCoreApplication::setApplicationName("Moonlight");
-    QGuiApplication::setApplicationDisplayName("Moonlight Metal");
+    QGuiApplication::setApplicationDisplayName("Twilight");
 
     if (QFile(QDir::currentPath() + "/portable.dat").exists()) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -967,9 +969,9 @@ int main(int argc, char *argv[])
 #endif
 
     // This is necessary to show our icon correctly on Wayland
-    app.setDesktopFileName("org.hybridized.Moonlight");
-    qputenv("SDL_VIDEO_WAYLAND_WMCLASS", "org.hybridized.Moonlight");
-    qputenv("SDL_VIDEO_X11_WMCLASS", "org.hybridized.Moonlight");
+    app.setDesktopFileName("com.moonlight-stream.Moonlight");
+    qputenv("SDL_VIDEO_WAYLAND_WMCLASS", "com.moonlight-stream.Moonlight");
+    qputenv("SDL_VIDEO_X11_WMCLASS", "com.moonlight-stream.Moonlight");
 
     // Register our C++ types for QML
     qmlRegisterType<ComputerModel>("ComputerModel", 1, 0, "ComputerModel");
@@ -1000,6 +1002,14 @@ int main(int argc, char *argv[])
                                                    [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
                                                        return StreamingPreferences::get(qmlEngine);
                                                    });
+    StreamHudStats::create(&app);
+    qmlRegisterSingletonType<StreamHudStats>("StreamHudStats", 1, 0,
+                                             "StreamHudStats",
+                                             [](QQmlEngine*, QJSEngine*) -> QObject* {
+                                                 QObject* stats = StreamHudStats::instance();
+                                                 QQmlEngine::setObjectOwnership(stats, QQmlEngine::CppOwnership);
+                                                 return stats;
+                                             });
 
     // Create the identity manager on the main thread
     IdentityManager::get();
@@ -1025,12 +1035,15 @@ int main(int argc, char *argv[])
     }
 
     QQmlApplicationEngine engine;
+    engine.addImageProvider(QLatin1String("sfsymbol"), new SfSymbolImageProvider());
     QString initialView;
     bool hasGUI = true;
 
     switch (commandLineParserResult) {
     case GlobalCommandLineParser::NormalStartRequested:
-        initialView = "qrc:/gui/PcView.qml";
+        // Empty initialView loads the Twilight shell. Classic stays available
+        // to the CLI segues only.
+        initialView = "";
         break;
     case GlobalCommandLineParser::StreamRequested:
         {

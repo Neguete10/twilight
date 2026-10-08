@@ -1,9 +1,11 @@
 #include "computermodel.h"
+#include "backend/wake_notice.h"
 
 #include <QThreadPool>
 
 ComputerModel::ComputerModel(QObject* object)
-    : QAbstractListModel(object) {}
+    : QAbstractListModel(object),
+      m_WakeGeneration(0) {}
 
 void ComputerModel::initialize(ComputerManager* computerManager)
 {
@@ -114,6 +116,70 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     return names;
 }
 
+QVariant ComputerModel::roleAt(int row, int role) const
+{
+    if (row < 0 || row >= m_Computers.count()) {
+        return QVariant();
+    }
+    return data(index(row, 0), role);
+}
+
+int ComputerModel::computerCount() const
+{
+    return m_Computers.count();
+}
+
+QString ComputerModel::computerNameAt(int row) const
+{
+    return roleAt(row, NameRole).toString();
+}
+
+QString ComputerModel::computerUuidAt(int row) const
+{
+    if (row < 0 || row >= m_Computers.count()) {
+        return QString();
+    }
+
+    NvComputer* computer = m_Computers[row];
+    QReadLocker lock(&computer->lock);
+    return computer->uuid;
+}
+
+bool ComputerModel::computerOnlineAt(int row) const
+{
+    return roleAt(row, OnlineRole).toBool();
+}
+
+bool ComputerModel::computerPairedAt(int row) const
+{
+    return roleAt(row, PairedRole).toBool();
+}
+
+bool ComputerModel::computerWakeableAt(int row) const
+{
+    return roleAt(row, WakeableRole).toBool();
+}
+
+bool ComputerModel::computerBusyAt(int row) const
+{
+    return roleAt(row, BusyRole).toBool();
+}
+
+bool ComputerModel::computerStatusUnknownAt(int row) const
+{
+    return roleAt(row, StatusUnknownRole).toBool();
+}
+
+bool ComputerModel::computerSupportedAt(int row) const
+{
+    return roleAt(row, ServerSupportedRole).toBool();
+}
+
+QString ComputerModel::computerDetailsAt(int row) const
+{
+    return roleAt(row, DetailsRole).toString();
+}
+
 Session* ComputerModel::createSessionForCurrentGame(int computerIndex)
 {
     Q_ASSERT(computerIndex < m_Computers.count());
@@ -152,24 +218,58 @@ void ComputerModel::deleteComputer(int computerIndex)
 class DeferredWakeHostTask : public QRunnable
 {
 public:
-    DeferredWakeHostTask(NvComputer* computer)
-        : m_Computer(computer) {}
+    DeferredWakeHostTask(ComputerModel* model, NvComputer* computer, int computerIndex, int generation)
+        : m_Model(model),
+          m_Computer(computer),
+          m_Index(computerIndex),
+          m_Generation(generation) {}
 
-    void run()
+    void run() override
     {
-        m_Computer->wake();
+        int outcome = static_cast<int>(m_Computer->wake());
+        QMetaObject::invokeMethod(m_Model, "deliverWakeResult",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(int, m_Index),
+                                  Q_ARG(int, outcome),
+                                  Q_ARG(int, m_Generation));
     }
 
 private:
+    ComputerModel* m_Model;
     NvComputer* m_Computer;
+    int m_Index;
+    int m_Generation;
 };
 
 void ComputerModel::wakeComputer(int computerIndex)
 {
     Q_ASSERT(computerIndex < m_Computers.count());
 
-    DeferredWakeHostTask* wakeTask = new DeferredWakeHostTask(m_Computers[computerIndex]);
+    int generation = ++m_WakeGeneration;
+    DeferredWakeHostTask* wakeTask = new DeferredWakeHostTask(this,
+                                                              m_Computers[computerIndex],
+                                                              computerIndex,
+                                                              generation);
     QThreadPool::globalInstance()->start(wakeTask);
+}
+
+void ComputerModel::deliverWakeResult(int computerIndex, int outcome, int generation)
+{
+    if (generation != m_WakeGeneration) {
+        return;
+    }
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
+        return;
+    }
+
+    const char* notice = wakePacketNotice(outcome);
+    if (notice == nullptr || notice[0] == '\0') {
+        return;
+    }
+
+    emit wakeCompleted(computerIndex,
+                       QString::fromUtf8(notice),
+                       outcome == WakePacketSent);
 }
 
 void ComputerModel::renameComputer(int computerIndex, QString name)

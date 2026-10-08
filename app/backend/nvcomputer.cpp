@@ -1,4 +1,5 @@
 #include "nvcomputer.h"
+#include "wake_notice.h"
 #include "nvapp.h"
 #include "settings/compatfetcher.h"
 
@@ -213,7 +214,7 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     this->isSupportedServerVersion = CompatFetcher::isGfeVersionSupported(this->gfeVersion);
 }
 
-bool NvComputer::wake() const
+WakePacketOutcome NvComputer::wake() const
 {
     QByteArray wolPayload;
 
@@ -222,12 +223,12 @@ bool NvComputer::wake() const
 
         if (state == NvComputer::CS_ONLINE) {
             qWarning() << name << "is already online";
-            return true;
+            return WakePacketSkipped;
         }
 
         if (macAddress.isEmpty()) {
             qWarning() << name << "has no MAC address stored";
-            return false;
+            return WakePacketFailed;
         }
 
         // Create the WoL payload
@@ -352,7 +353,7 @@ bool NvComputer::wake() const
         }
     }
 
-    return success;
+    return success ? WakePacketSent : WakePacketFailed;
 }
 
 NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const

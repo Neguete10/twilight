@@ -10,6 +10,7 @@
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
 #include "video/overlaymanager.h"
+#include "audio/microphone/mic_capture.h"
 
 #define SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER 100
 #define SDL_CODE_GAMECONTROLLER_RUMBLE 101
@@ -153,6 +154,11 @@ public:
 
     void toggleFullscreen();
 
+#ifdef Q_OS_DARWIN
+    void togglePictureInPicture();
+#endif
+    void toggleMicrophoneMute();
+
 signals:
     void stageStarting(QString stage);
 
@@ -194,6 +200,17 @@ private:
                              int& width, int& height);
 
     void notifyMouseEmulationMode(bool enabled);
+
+    void startMicrophone();
+    void stopMicrophone();
+
+#ifdef Q_OS_DARWIN
+    void enterPictureInPicture();
+    void exitPictureInPicture();
+    void reapplyPictureInPictureChrome(bool orderFront);
+    void releaseVideoDecoder();
+    bool displayCoversWindow(int width, int height) const;
+#endif
 
     void updateOptimalWindowDisplayMode();
 
@@ -307,6 +324,23 @@ private:
     Uint32 m_DropAudioEndTime;
 
     Overlay::OverlayManager m_OverlayManager;
+    MicrophoneCapture m_Microphone;
+
+#ifdef Q_OS_DARWIN
+    bool m_PipActive;
+    bool m_PipRestoreFullscreen;
+    bool m_PipReapplying;
+    int m_PipRestoreX;
+    int m_PipRestoreY;
+    int m_PipRestoreW;
+    int m_PipRestoreH;
+    int m_PipFrameX;
+    int m_PipFrameY;
+    int m_PipFrameW;
+    int m_PipFrameH;
+    Uint32 m_PipSnapBackUntil;
+    QString m_PipRestoreTitle;
+#endif
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;

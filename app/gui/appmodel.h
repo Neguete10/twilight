@@ -41,6 +41,14 @@ public:
 
     Q_INVOKABLE void setAppDirectLaunch(int appIndex, bool directLaunch);
 
+    Q_INVOKABLE int appCount() const;
+    Q_INVOKABLE QString appNameAt(int row) const;
+    Q_INVOKABLE int appIdAt(int row) const;
+    Q_INVOKABLE bool appRunningAt(int row) const;
+    Q_INVOKABLE bool appHiddenAt(int row) const;
+    Q_INVOKABLE bool appDirectLaunchAt(int row) const;
+    Q_INVOKABLE QString appBoxArtAt(int row) const;
+
     QVariant data(const QModelIndex &index, int role) const override;
 
     int rowCount(const QModelIndex &parent) const override;

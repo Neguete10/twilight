@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Twilight Mac App Store entitlements.
+  Applied only for qmake CONFIG+=twilight-mas
+  (scripts/generate-dmg.sh with TWILIGHT_MAS=1).
+  Desktop / Developer ID DMG builds leave this file unused.
+  Hardened Runtime flag: codesign -o runtime
+  (pass this file with the entitlements flag on the MAS path only).
+  Do not submit the result to App Store review.
+  The key com.apple.developer.audio.spatial-audio is intentionally absent.
+  com.apple.security.device.audio-input is the sandbox microphone entitlement.
+  com.apple.developer.networking.multicast is not in this file. A profile
+  without Apple's grant still matches. TWILIGHT_MAS_MULTICAST=1 selects
+  Twilight-MAS-multicast.entitlements instead.
+  com.apple.security.cs.allow-jit,
+  com.apple.security.cs.allow-unsigned-executable-memory, and
+  com.apple.security.cs.disable-library-validation are intentionally absent.
+-->
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.developer.spatial-audio.profile-access</key>
+	<true/>
+	<key>com.apple.developer.coremotion.head-pose</key>
+	<true/>
+</dict>
+</plist>

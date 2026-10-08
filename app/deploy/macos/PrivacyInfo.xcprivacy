@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Required-reason API manifest for the app binary.
+  NSPrivacyCollectedDataTypes is omitted on purpose. This file does not
+  invent a privacy nutrition label. Microphone audio and the Wi-Fi name
+  are described by the usage strings in Info.plist.
+  Disk space and active-keyboard categories are omitted because this tree
+  does not call those APIs. Prebuilt dylibs are not in this worktree, so
+  no reason codes were added for them.
+-->
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- QSettings stores this app's own preferences, hosts, and identity.
+		     No app group. CA92.1: user defaults accessible only to the app. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<!-- mappingfetcher.cpp reads the cache file's modification time
+		     (QFileInfo::lastModified) to send If-Modified-Since. In the
+		     sandbox that cache is inside the app container. C617.1. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<!-- vt_avsamplelayer.mm calls mach_absolute_time() to stamp a
+		     sample buffer for the display layer. The timestamp stays on
+		     device. 8FFB.1: absolute timestamps for in-app events. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>8FFB.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -52,6 +52,10 @@ SystemProperties::SystemProperties()
 #else
     hasPyroWave = false;
 #endif
+    // Metal is the only PyroWave decoder on this tree. Vulkan stays off so
+    // the settings page does not offer a backend that is not linked.
+    hasPyroWaveMetal = hasPyroWave;
+    hasPyroWaveVulkan = false;
     hasDesktopEnvironment = WMUtils::isRunningDesktopEnvironment();
     isRunningWayland = WMUtils::isRunningWayland();
     isRunningXWayland = isRunningWayland && QGuiApplication::platformName() == "xcb";

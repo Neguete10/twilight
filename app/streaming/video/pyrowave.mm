@@ -8,6 +8,8 @@
 #include "ffmpeg-renderers/vt.h"
 #include "ffmpeg-renderers/framepacing/framepacer.h"
 #include "streaming/session.h"
+#include "gui/streamhudstats.h"
+#include "settings/streamingpreferences.h"
 #include "utils.h"
 #include <pyrowave_metal.h>
 
@@ -276,10 +278,17 @@ int PyroWaveVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
     impl.haveLastFrameNumber = true;
     Stats::instance().SubmitVideoBytesAndReassemblyTime(du, dropped);
     auto& overlay = Session::get()->getOverlayManager();
-    if (Stats::instance().ShouldUpdateDisplay(overlay.isOverlayEnabled(Overlay::OverlayDebug),
+    const bool overlayOn = overlay.isOverlayEnabled(Overlay::OverlayDebug);
+    const bool hudOn = StreamingPreferences::hudWantsSamples();
+    if (Stats::instance().ShouldUpdateDisplay(overlayOn || hudOn,
                                              overlay.getOverlayText(Overlay::OverlayDebug),
                                              overlay.getOverlayMaxTextLength())) {
-        overlay.setOverlayTextUpdated(Overlay::OverlayDebug);
+        if (overlayOn) {
+            overlay.setOverlayTextUpdated(Overlay::OverlayDebug);
+        }
+        if (hudOn) {
+            StreamHudStats::submitOverlayText(overlay.getOverlayText(Overlay::OverlayDebug));
+        }
     }
     if (du->hdrActive && !impl.tenBit) {
         return dropFrame("HDR frame received on an 8-bit stream");

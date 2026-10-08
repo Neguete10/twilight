@@ -45,16 +45,33 @@ public:
 
     Q_INVOKABLE Session* createSessionForCurrentGame(int computerIndex);
 
+    Q_INVOKABLE int computerCount() const;
+    Q_INVOKABLE QString computerNameAt(int row) const;
+    Q_INVOKABLE QString computerUuidAt(int row) const;
+    Q_INVOKABLE bool computerOnlineAt(int row) const;
+    Q_INVOKABLE bool computerPairedAt(int row) const;
+    Q_INVOKABLE bool computerWakeableAt(int row) const;
+    Q_INVOKABLE bool computerBusyAt(int row) const;
+    Q_INVOKABLE bool computerStatusUnknownAt(int row) const;
+    Q_INVOKABLE bool computerSupportedAt(int row) const;
+    Q_INVOKABLE QString computerDetailsAt(int row) const;
+
 signals:
     void pairingCompleted(QVariant error);
     void connectionTestCompleted(int result, QString blockedPorts);
+    void wakeCompleted(int computerIndex, QString message, bool sent);
 
 private slots:
     void handleComputerStateChanged(NvComputer* computer);
 
     void handlePairingCompleted(NvComputer* computer, QString error);
 
+    void deliverWakeResult(int computerIndex, int outcome, int generation);
+
 private:
+    QVariant roleAt(int row, int role) const;
+
     QVector<NvComputer*> m_Computers;
     ComputerManager* m_ComputerManager;
+    int m_WakeGeneration;
 };

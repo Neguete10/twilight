@@ -43,6 +43,8 @@ private:
     void setOutputDeviceName(CFStringRef);
 
     AudioUnit m_OutputAU;
+    bool m_OutputInitialized;
+    bool m_OutputStarted;
     AUSpatialRenderer m_SpatialAU;
 
     // output device metadata
