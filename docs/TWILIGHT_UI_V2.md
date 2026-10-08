@@ -10,7 +10,7 @@ The interactive app is the Twilight shell. There is no Classic shell and no vers
 
 | Screen | What it does |
 | --- | --- |
-| Shell | Sidebar of hosts, app library, search, one-click stream, Desktop hero. Arrow keys and the gamepad move between hosts and apps. Menu opens the host sheet or the app menu. Start opens settings. |
+| Shell | Sidebar of hosts, app library, search, one-click stream, Desktop hero. The hero fits box art in its 220×148 frame so the whole picture stays centered. Square tiles stay cropped. Arrow keys and the gamepad move between hosts and apps. Menu opens the host sheet or the app menu. Start opens settings. |
 | Host sheet | Wake, pair, rename, remove, network test, show hidden apps. Up and down move, confirm activates. |
 | Settings | Video, Audio (including spatial, head tracking, and on macOS the host microphone), Input, Network, Advanced (codec and PyroWave GPU backend). Same `StreamingPreferences` object the stream uses. D-pad up and down walk the focus chain. Resolution and frame rate include a typed custom value, native and notch-excluded sizes, and the refresh rate of every attached display. Bitrate has a slider, a typed Mb/s field (0.5–500), and Unlimited. Unlimited sends 500 Mb/s. A saved number outside that range is kept and shown until it is changed. GeForce Experience will not encode above 100 Mb/s. |
 | Stream start | Twilight launch card, then the existing `Session` |

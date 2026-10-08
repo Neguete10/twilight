@@ -1313,7 +1313,14 @@ Item {
                                     anchors.top: parent.top
                                     anchors.bottom: parent.bottom
                                     width: 220
-                                    fillMode: Image.PreserveAspectCrop
+                                    // Fit, not crop. This frame is 220×148. Sunshine's
+                                    // desktop.png is 600×800 and the monitor sits above
+                                    // the middle, so a centered cover crop cuts its top
+                                    // and leaves the rest high in the frame. Fit keeps
+                                    // the whole picture centered for that art and for a
+                                    // host poster of any aspect. The square tiles stay
+                                    // cropped.
+                                    fillMode: Image.PreserveAspectFit
                                     horizontalAlignment: Image.AlignHCenter
                                     verticalAlignment: Image.AlignVCenter
                                     asynchronous: true
