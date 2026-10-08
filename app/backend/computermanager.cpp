@@ -49,7 +49,15 @@ private:
             return false;
         }
 
+        const int reportedGameId = newState.currentGameId;
         changed = m_Computer->update(newState);
+        // A quit clears the id immediately and leaves pendingQuit set so a
+        // stale non-zero sample cannot put the tile back on Live. pendingQuit
+        // clears only when a sample itself says nothing is running. Forcing
+        // a notification is what lets that clear run when the id was already 0.
+        if (m_Computer->pendingQuit && m_Computer->currentGameId == 0 && reportedGameId == 0) {
+            changed = true;
+        }
         return true;
     }
 
@@ -693,7 +701,9 @@ void ComputerManager::quitRunningApp(NvComputer* computer)
                 return;
             }
             computer->currentGameId = 0;
-            computer->pendingQuit = false;
+            // Stay set until a serverinfo sample reports 0. Clearing it here
+            // lets the next stale poll adopt the app id again.
+            computer->pendingQuit = true;
         }
         // Same notifications as a poll that sees the app stop, without
         // waiting for the next serverinfo pass (that pass used to be the
@@ -707,6 +717,30 @@ void ComputerManager::quitRunningApp(NvComputer* computer)
         quit->deleteLater();
     }, Qt::QueuedConnection);
     QThreadPool::globalInstance()->start(quit);
+}
+
+void ComputerManager::applyReportedRunningGame(NvComputer* computer, int gameId)
+{
+    if (computer == nullptr) {
+        return;
+    }
+
+    {
+        QWriteLocker lock(&computer->lock);
+        if (gameId == 0) {
+            computer->currentGameId = 0;
+            // Do not call handleComputerStateChanged(): that clears
+            // pendingQuit as soon as the id is 0, before a poll confirms it.
+            computer->pendingQuit = true;
+        }
+        else {
+            computer->pendingQuit = false;
+            computer->currentGameId = gameId;
+        }
+    }
+
+    emit computerStateChanged(computer);
+    saveHost(computer);
 }
 
 void ComputerManager::stopPollingAsync()

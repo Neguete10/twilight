@@ -305,6 +305,8 @@ HEADERS += \
     gui/appmodel.h \
     gui/streamhudparse.h \
     gui/streamhudstats.h \
+    gui/overlay_toggle.h \
+    streaming/video/auto_codec.h \
     gui/streamhudplace.h \
     gui/sfsymbolprovider.h \
     streaming/video/decoder.h \

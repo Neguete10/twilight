@@ -18,6 +18,8 @@
 #ifdef HAVE_PYROWAVE_METAL
 #include "video/pyrowave_metal.h"
 #endif
+#include "video/auto_codec.h"
+#include "gui/overlay_toggle.h"
 
 #ifdef HAVE_SLVIDEO
 #include "video/slvid.h"
@@ -721,6 +723,7 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_AudioMuted(false),
       m_QtWindow(nullptr),
       m_UnexpectedTermination(true), // Failure prior to streaming is unexpected
+      m_HostAppLaunched(false),
       m_InputHandler(nullptr),
       m_MouseEmulationRefCount(0),
       m_FlushingWindowEventsRef(0),
@@ -910,17 +913,9 @@ bool Session::initialize()
     case StreamingPreferences::VCC_AUTO:
     {
 #if defined(HAVE_PYROWAVE) || defined(HAVE_PYROWAVE_METAL)
-        // Offer PyroWave only when the GPU decoder actually comes up. A failed
-        // probe leaves H.264/HEVC/AV1 in their existing order.
-        if (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE ||
-                getDecoderAvailability(testWindow,
-                                       m_Preferences->videoDecoderSelection,
-                                       VIDEO_FORMAT_PYROWAVE,
-                                       m_StreamConfig.width,
-                                       m_StreamConfig.height,
-                                       m_StreamConfig.fps) == DecoderAvailability::None) {
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "PyroWave decoder unavailable; not advertising it");
+        // PyroWave is an explicit opt-in. Automatic must not advertise it,
+        // even when this Mac can decode it and the host supports it.
+        if (!automaticOffersPyroWave()) {
             m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_PYROWAVE);
         }
 #endif
@@ -975,31 +970,24 @@ bool Session::initialize()
             }
         }
 
-#if 0
-        // TODO: Determine if AV1 is better depending on the decoder
-        if (getDecoderAvailability(testWindow,
-                                   m_Preferences->videoDecoderSelection,
-                                   m_Preferences->enableYUV444 ?
-                                        (m_Preferences->enableHdr ? VIDEO_FORMAT_AV1_HIGH10_444 : VIDEO_FORMAT_AV1_HIGH8_444) :
-                                        (m_Preferences->enableHdr ? VIDEO_FORMAT_AV1_MAIN10 : VIDEO_FORMAT_AV1_MAIN8),
-                                   m_StreamConfig.width,
-                                   m_StreamConfig.height,
-                                   m_StreamConfig.fps) != DecoderAvailability::Hardware) {
-            // Deprioritize AV1 unless we can't hardware decode HEVC and have HDR enabled.
-            // We want to keep AV1 at the top of the list for HDR with software decoding
-            // because dav1d is higher performance than FFmpeg's HEVC software decoder.
-            if (hevcDA == DecoderAvailability::Hardware || !m_Preferences->enableHdr) {
-                m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_AV1);
-            }
-        }
-#else
-        // Deprioritize AV1 unless we can't hardware decode HEVC and have HDR enabled.
-        // We want to keep AV1 at the top of the list for HDR with software decoding
-        // because dav1d is higher performance than FFmpeg's HEVC software decoder.
-        if (hevcDA == DecoderAvailability::Hardware || !m_Preferences->enableHdr) {
+        // Hardware AV1 (M3 and later) stays ahead of HEVC and H.264.
+        // Anything else, including software AV1, is moved behind them.
+        // The host then takes the first family it actually supports.
+        const int av1ProbeFormat = m_Preferences->enableHdr
+                ? (m_Preferences->enableYUV444 ? VIDEO_FORMAT_AV1_HIGH10_444 : VIDEO_FORMAT_AV1_MAIN10)
+                : (m_Preferences->enableYUV444 ? VIDEO_FORMAT_AV1_HIGH8_444 : VIDEO_FORMAT_AV1_MAIN8);
+        const bool av1Hardware = getDecoderAvailability(testWindow,
+                                                        m_Preferences->videoDecoderSelection,
+                                                        av1ProbeFormat,
+                                                        m_StreamConfig.width,
+                                                        m_StreamConfig.height,
+                                                        m_StreamConfig.fps) == DecoderAvailability::Hardware;
+        if (automaticDeprioritizesAv1(av1Hardware)) {
             m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_AV1);
         }
-#endif
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Automatic video codec: PyroWave off, AV1 hardware %s",
+                    av1Hardware ? "yes" : "no");
 
 #ifdef Q_OS_DARWIN
         {
@@ -1493,6 +1481,7 @@ private:
             emit m_Session->quitStarting();
         }
         else {
+            reportRunningGame(false);
             emit m_Session->sessionFinished(m_Session->m_PortTestResults);
         }
 
@@ -1511,17 +1500,32 @@ private:
         // Perform a best-effort app quit
         if (shouldQuit) {
             NvHTTP http(m_Session->m_Computer);
+            bool quitOk = false;
 
             // Logging is already done inside NvHTTP
             try {
                 http.quitApp();
+                quitOk = true;
             } catch (const GfeHttpResponseException&) {
             } catch (const QtNetworkReplyException&) {
             }
 
+            // Clear the shell's running app only when the host actually quit.
+            // A failed quit leaves the id in place so Quit stays available.
+            reportRunningGame(quitOk);
+
             // Session is finished now
             emit m_Session->sessionFinished(m_Session->m_PortTestResults);
         }
+    }
+
+    void reportRunningGame(bool quitSucceeded)
+    {
+        if (!m_Session->m_HostAppLaunched) {
+            return;
+        }
+        const int gameId = quitSucceeded ? 0 : m_Session->m_App.id;
+        emit m_Session->runningGameChanged(gameId);
     }
 
     Session* m_Session;
@@ -1836,6 +1840,13 @@ static void macPipMenuToggle()
 {
     if (Session::get() != nullptr) {
         Session::get()->togglePictureInPicture();
+    }
+}
+
+static void macEndStreamMenu()
+{
+    if (Session::get() != nullptr) {
+        Session::get()->endStreamFromQuickMenu();
     }
 }
 
@@ -2172,6 +2183,11 @@ bool Session::startConnectionAsync()
         return false;
     }
 
+    // The host accepted the launch. Publish the app id before the RTSP
+    // handshake so Quit is available even if the stream itself fails.
+    m_HostAppLaunched = true;
+    emit runningGameChanged(m_App.id);
+
     QByteArray hostnameStr = m_Computer->activeAddress.address().toLatin1();
     QByteArray siAppVersion = m_Computer->appVersion.toLatin1();
 
@@ -2290,6 +2306,71 @@ void Session::startMicrophone()
 void Session::stopMicrophone()
 {
     m_Microphone.stop();
+}
+
+void Session::toggleEnabledPerformanceOverlays()
+{
+    const int targets = performanceOverlayToggleTargets(m_Preferences->showPerformanceOverlay,
+                                                        m_Preferences->showTwilightHud());
+    if (targets & OverlayToggleClassic) {
+        const bool next = !m_OverlayManager.isOverlayEnabled(Overlay::OverlayDebug);
+        m_OverlayManager.setOverlayState(Overlay::OverlayDebug, next);
+        m_OverlayManager.setOverlayState(Overlay::OverlayDebugAudio, next);
+    }
+    if ((targets & OverlayToggleTwilight) && StreamHudStats::instance() != nullptr) {
+        StreamHudStats* hud = StreamHudStats::instance();
+        hud->setHudShown(!hud->hudShown());
+    }
+    StreamHudStats::flushStreamUi();
+    StreamHudStats::followStream();
+}
+
+bool Session::quickMenuOpen() const
+{
+    return StreamHudStats::instance() != nullptr && StreamHudStats::instance()->quickMenuOpen();
+}
+
+void Session::toggleQuickMenu()
+{
+    if (StreamHudStats::instance() == nullptr || !StreamHudStats::instance()->streaming()) {
+        return;
+    }
+    if (quickMenuOpen()) {
+        closeQuickMenu();
+    }
+    else {
+        if (m_InputHandler != nullptr) {
+            m_InputHandler->releaseCaptureForQuickMenu();
+        }
+        StreamHudStats::instance()->setQuickMenuOpen(true);
+        StreamHudStats::flushStreamUi();
+        StreamHudStats::followStream();
+    }
+}
+
+void Session::closeQuickMenu()
+{
+    if (StreamHudStats::instance() != nullptr) {
+        StreamHudStats::instance()->setQuickMenuOpen(false);
+    }
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->restoreCaptureAfterQuickMenu();
+    }
+    StreamHudStats::flushStreamUi();
+    StreamHudStats::followStream();
+}
+
+void Session::endStreamFromQuickMenu()
+{
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->cancelQuickMenuRecapture();
+    }
+    if (StreamHudStats::instance() != nullptr) {
+        StreamHudStats::instance()->setQuickMenuOpen(false);
+    }
+    if (StreamHudStats::instance() != nullptr) {
+        StreamHudStats::instance()->requestDisconnect();
+    }
 }
 
 void Session::toggleMicrophoneMute()
@@ -2681,7 +2762,7 @@ void Session::execInternal()
     m_OverlayManager.setOverlayState(Overlay::OverlayDebugAudio, m_Preferences->showPerformanceOverlay);
 
 #ifdef Q_OS_DARWIN
-    MacPipInstallMenu(macPipMenuToggle);
+    MacPipInstallMenu(macPipMenuToggle, macEndStreamMenu);
 #endif
 
     // Hijack this thread to be the SDL main thread. We have to do this
@@ -3085,6 +3166,15 @@ DispatchDeferredCleanup:
     m_PipSnapBackUntil = 0;
     MacPipRemoveMenu();
 #endif
+
+    // The quick menu must not recapture on the way out, and it must not
+    // stay up over the shell after the SDL window is gone.
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->cancelQuickMenuRecapture();
+    }
+    if (StreamHudStats::instance() != nullptr) {
+        StreamHudStats::instance()->setQuickMenuOpen(false);
+    }
 
     // Uncapture the mouse and hide the window immediately,
     // so we can return to the Qt GUI ASAP.

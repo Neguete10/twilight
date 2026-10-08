@@ -119,6 +119,12 @@ public:
 
     void setCaptureActive(bool active);
 
+    // Quick menu: drop capture and zero the pads so the game does not keep
+    // moving, then put capture back when the menu closes.
+    void releaseCaptureForQuickMenu();
+    void restoreCaptureAfterQuickMenu();
+    void cancelQuickMenuRecapture();
+
     bool isMouseInVideoRegion(int mouseX, int mouseY, int windowWidth = -1, int windowHeight = -1);
 
     void updateKeyboardGrabState();
@@ -143,6 +149,7 @@ private:
         KeyComboToggleGamepadOverlay,
         KeyComboCycleTriggerPreview,
         KeyComboToggleMicrophoneMute,
+        KeyComboQuickMenu,
         KeyComboMax
     };
 
@@ -162,6 +169,8 @@ private:
     void handleRelativeFingerEvent(SDL_TouchFingerEvent* event);
 
     void performSpecialKeyCombo(KeyCombo combo);
+
+    void publishQuickMenuGamepad(bool keepAxes);
 
     static
     Uint32 longPressTimerCallback(Uint32 interval, void* param);
@@ -212,6 +221,8 @@ private:
     GamepadState m_GamepadState[MAX_GAMEPADS];
     QSet<short> m_KeysDown;
     bool m_FakeCaptureActive;
+    bool m_QuickMenuOpen;
+    bool m_RestoreCaptureAfterMenu;
     QString m_OldIgnoreDevices;
     QString m_OldIgnoreDevicesExcept;
     QStringList m_IgnoreDeviceGuids;

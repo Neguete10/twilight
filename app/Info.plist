@@ -39,6 +39,15 @@
 	</array>
 	<key>GCSupportsControllerUserInteraction</key>
 	<true/>
+	<!-- Read at process start. macOS 14+ turns Game Mode on for a game
+	     that is frontmost in a native fullscreen space, including when
+	     the shell opens that way. It does not stay on in a window or
+	     while Twilight is in the background. GCSupportsGameMode is the
+	     older key; LSSupportsGameMode is the one current macOS reads. -->
+	<key>GCSupportsGameMode</key>
+	<true/>
+	<key>LSSupportsGameMode</key>
+	<true/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
 	<!-- prepare-macos-infoplist.py keeps this dictionary for desktop builds.

@@ -157,6 +157,12 @@ Item {
         appRevision = appRevision + 1
         refreshDesktop()
         rebuildSlots()
+        if (appMenuOpen) {
+            if (!appModel || menuAppIndex < 0 || menuAppIndex >= appModel.appCount())
+                appMenuOpen = false
+            else
+                openAppMenu(menuAppIndex)
+        }
     }
 
     function rebuildSlots() {
@@ -620,6 +626,12 @@ Item {
     function confirmQuit() {
         if (!appModel || quitting)
             return
+        if (appModel.getRunningAppId() === 0) {
+            quitOpen = false
+            quitOnly = false
+            toast(qsTr("Nothing is running on this host."))
+            return
+        }
         // Snapshot before the dialog closes. Hiding it delivers the same
         // click to whatever is underneath (often Resume) and Cancel clears
         // quitOnly. Either one used to start another session instead of
@@ -1361,7 +1373,10 @@ Item {
                                             id: streamLabel
                                             anchors.centerIn: parent
                                             theme: shell.theme
-                                            text: shell.appModel && shell.appModel.appRunningAt(shell.desktopIndex) ? qsTr("Resume") : qsTr("Stream")
+                                            text: {
+                                                var rev = shell.appRevision
+                                                return shell.appModel && shell.appModel.appRunningAt(shell.desktopIndex) ? qsTr("Resume") : qsTr("Stream")
+                                            }
                                             color: theme.accentInk
                                             font.pixelSize: 14
                                             font.weight: Font.DemiBold
@@ -1376,7 +1391,10 @@ Item {
                                         spacing: 8
                                         anchors.right: parent.right
                                         Rectangle {
-                                            visible: shell.appModel && shell.appModel.appRunningAt(shell.desktopIndex)
+                                            visible: {
+                                                var rev = shell.appRevision
+                                                return shell.appModel && shell.appModel.appRunningAt(shell.desktopIndex)
+                                            }
                                             width: visible ? desktopQuitLabel.implicitWidth + 24 : 0
                                             height: 32
                                             radius: 10
@@ -1665,6 +1683,7 @@ Item {
         }
         onDeleteRequested: shell.deleteOpen = true
         onShowHiddenToggled: shell.setShowHidden(next)
+        onQuitRequested: shell.requestQuitOnly()
     }
 
     SettingsSheetV2 {

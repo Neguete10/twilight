@@ -3,6 +3,7 @@ import QtQuick.Window 2.2
 
 import SdlGamepadKeyNavigation 1.0
 import StreamHudStats 1.0
+import StreamingPreferences 1.0
 
 // Twilight stream launch. Mirrors StreamSegue.qml signal handling without
 // touching the stack the command-line windows still use.
@@ -32,6 +33,16 @@ Item {
         }
     }
 
+    function showShellWindow() {
+        if (!Window.window)
+            return
+        Window.window.visible = true
+        // Hiding the Qt window leaves the native fullscreen space. Game Mode
+        // only stays available if that space is restored when the shell returns.
+        if (StreamingPreferences.uiDisplayMode === StreamingPreferences.UI_FULLSCREEN)
+            Window.window.showFullScreen()
+    }
+
     function connectionStarted() {
         card.visible = false
         if (Window.window)
@@ -53,8 +64,7 @@ Item {
     function quitStarting() {
         stageText = qsTr("Quitting %1").arg(appName)
         card.visible = true
-        if (Window.window)
-            Window.window.visible = true
+        showShellWindow()
     }
 
     function sessionFinished(portTestResult) {
@@ -64,10 +74,9 @@ Item {
 
         SdlGamepadKeyNavigation.enable()
         StreamHudStats.noteSessionEnded()
-        if (Window.window) {
+        if (Window.window)
             Window.window.streamActive = false
-            Window.window.visible = true
-        }
+        showShellWindow()
 
         card.visible = false
         if (errorText !== "" && host && host.showError)

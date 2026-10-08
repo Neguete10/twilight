@@ -20,7 +20,7 @@ It sits beside Moonlight. Moonlight has not endorsed it.
 
 **CoreHID raw mouse.** There is an opt-in raw mouse path for macOS games, aimed at the HID reports instead of the usual SDL warp. It is off until you turn on **Use CoreHID raw mouse (macOS games)**. Trackpads stay on SDL either way.
 
-**macOS Game Mode.** That is the project's name for it, and Apple's. On a recent Mac, a full-screen stream can land in Game Mode, which is the system putting that game first: more of the CPU and GPU, and snappier Bluetooth for controllers and headphones.
+**macOS Game Mode.** Twilight sets the Game Mode flags Apple reads at launch. On macOS 14 and later, Game Mode turns on when Twilight is the frontmost app in a native fullscreen space, including the shell when Settings → Window when Twilight opens is Fullscreen. A window cannot enter Game Mode, and Apple turns it off when Twilight is not frontmost. While it is on, the system puts that app first: more of the CPU and GPU, and snappier Bluetooth for controllers and headphones.
 
 **A performance overlay.** Two of them, and they mind their own business. The classic one is the yellow stats Moonlight people already know. Twilight's own is a small HUD while its shell is in use: frame rate, bitrate, network latency, and an End button when you are done.
 

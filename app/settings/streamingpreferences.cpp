@@ -180,6 +180,15 @@ void StreamingPreferences::reload()
                                                         // Try to load from the old preference value too
                                                         static_cast<int>(settings.value(SER_FULLSCREEN, true).toBool() ?
                                                                              recommendedFullScreenMode : WindowMode::WM_WINDOWED)).toInt());
+#ifdef Q_OS_DARWIN
+    // Game Mode engages when Twilight is frontmost in a native fullscreen
+    // space. A fresh install (no saved UI mode and no legacy startwindowed
+    // key) opens that way. A saved window or maximized choice is left alone.
+    if (!settings.contains(SER_UIDISPLAYMODE) && !settings.contains(SER_STARTWINDOWED)) {
+        uiDisplayMode = UIDisplayMode::UI_FULLSCREEN;
+    }
+    else
+#endif
     uiDisplayMode = static_cast<UIDisplayMode>(settings.value(SER_UIDISPLAYMODE,
                                                static_cast<int>(settings.value(SER_STARTWINDOWED, true).toBool() ? UIDisplayMode::UI_WINDOWED
                                                                                                                  : UIDisplayMode::UI_MAXIMIZED)).toInt());

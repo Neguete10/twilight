@@ -52,12 +52,13 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
     case KeyComboToggleStatsOverlay:
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected stats toggle combo");
+        Session::get()->toggleEnabledPerformanceOverlays();
+        break;
 
-        // Toggle the stats overlay
-        Session::get()->getOverlayManager().setOverlayState(Overlay::OverlayDebug,
-                                                            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug));
-        Session::get()->getOverlayManager().setOverlayState(Overlay::OverlayDebugAudio,
-                                                            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebugAudio));
+    case KeyComboQuickMenu:
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected quick menu combo");
+        Session::get()->toggleQuickMenu();
         break;
 
     case KeyComboToggleMouseMode:
@@ -219,6 +220,14 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
                 return;
             }
         }
+    }
+
+    // Escape closes the quick menu and is not forwarded to the game.
+    if (event->state == SDL_PRESSED &&
+            (event->keysym.sym == SDLK_ESCAPE || event->keysym.scancode == SDL_SCANCODE_ESCAPE) &&
+            Session::get() != nullptr && Session::get()->quickMenuOpen()) {
+        Session::get()->closeQuickMenu();
+        return;
     }
 
     // Set modifier flags

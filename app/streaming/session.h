@@ -120,6 +120,17 @@ public:
 
     Q_INVOKABLE void exec(QWindow* qtWindow);
 
+    // Ctrl+Alt+Shift+S and Select+L1+R1+X. Flips each performance overlay
+    // whose setting is on. An overlay that is off stays off.
+    void toggleEnabledPerformanceOverlays();
+
+    // Ctrl+Alt+Shift+E and Select+Start. Releases mouse capture only while
+    // the menu is open, then restores it. A and End Stream end the session.
+    void toggleQuickMenu();
+    void closeQuickMenu();
+    void endStreamFromQuickMenu();
+    bool quickMenuOpen() const;
+
 #ifdef Q_OS_DARWIN
     // Shrinks the SDL stream window into a floating mini player that stays
     // visible across Spaces and Stage Manager. Same call exits. The stream
@@ -150,6 +161,11 @@ signals:
     void stageFailed(QString stage, int errorCode, QString failingPorts);
 
     void connectionStarted();
+
+    // 0 means the host app is no longer running. Emitted after a successful
+    // launch and again when the stream ends, so the shell does not wait for
+    // the next host poll.
+    void runningGameChanged(int gameId);
 
     void displayLaunchError(QString text);
 
@@ -301,6 +317,9 @@ private:
     QWindow* m_QtWindow;
     bool m_ThreadedExec;
     bool m_UnexpectedTermination;
+    // Set once startApp() succeeds, so cleanup can publish the running id
+    // or clear it after quit-on-exit. A failed launch leaves this false.
+    bool m_HostAppLaunched;
     SdlInputHandler* m_InputHandler;
     int m_MouseEmulationRefCount;
     int m_FlushingWindowEventsRef;

@@ -236,6 +236,10 @@ public:
 
     void quitRunningApp(NvComputer* computer);
 
+    // Session publishes the host app id on the UI thread. gameId 0 keeps
+    // pendingQuit set so a stale serverinfo sample cannot restore Live.
+    void applyReportedRunningGame(NvComputer* computer, int gameId);
+
     QVector<NvComputer*> getComputers();
 
     // computer is deleted inside this call

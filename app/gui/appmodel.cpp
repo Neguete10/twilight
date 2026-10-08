@@ -1,5 +1,7 @@
 #include "appmodel.h"
 
+#include <QReadWriteLock>
+
 AppModel::AppModel(QObject *parent)
     : QAbstractListModel(parent)
 {
@@ -15,10 +17,15 @@ void AppModel::initialize(ComputerManager* computerManager, int computerIndex, b
 
     Q_ASSERT(computerIndex < m_ComputerManager->getComputers().count());
     m_Computer = m_ComputerManager->getComputers().at(computerIndex);
-    m_CurrentGameId = m_Computer->currentGameId;
     m_ShowHiddenGames = showHiddenGames;
 
-    updateAppList(m_Computer->appList);
+    QVector<NvApp> appList;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        m_CurrentGameId = m_Computer->currentGameId;
+        appList = m_Computer->appList;
+    }
+    updateAppList(appList);
 }
 
 int AppModel::getRunningAppId()
@@ -97,7 +104,15 @@ Session* AppModel::createSessionForApp(int appIndex)
     Q_ASSERT(appIndex < m_VisibleApps.count());
     NvApp app = m_VisibleApps.at(appIndex);
 
-    return new Session(m_Computer, app);
+    Session* session = new Session(m_Computer, app);
+    NvComputer* computer = m_Computer;
+    ComputerManager* manager = m_ComputerManager;
+    connect(session, &Session::runningGameChanged, manager,
+            [manager, computer](int gameId) {
+                manager->applyReportedRunningGame(computer, gameId);
+            },
+            Qt::QueuedConnection);
+    return session;
 }
 
 int AppModel::getDirectLaunchAppIndex()
@@ -134,7 +149,9 @@ QVariant AppModel::data(const QModelIndex &index, int role) const
     case NameRole:
         return app.name;
     case RunningRole:
-        return m_Computer->currentGameId == app.id;
+        // Same cache requestQuitOnly and the desktop Quit button read.
+        // The live computer field can disagree with that cache for a poll.
+        return m_CurrentGameId == app.id;
     case BoxArtRole:
         // FIXME: const-correctness
         return const_cast<BoxArtManager&>(m_BoxArtManager).loadBoxArt(m_Computer, app);
@@ -310,37 +327,28 @@ void AppModel::handleComputerStateChanged(NvComputer* computer)
         return;
     }
 
-    // If the computer has gone offline or we've been unpaired,
-    // signal the UI so we can go back to the PC view.
-    if (m_Computer->state == NvComputer::CS_OFFLINE ||
-            m_Computer->pairState == NvComputer::PS_NOT_PAIRED) {
-        emit computerLost();
-        return;
-    }
-
-    // First, process additions/removals from the app list. This
-    // is required because the new game may now be running, so
-    // we can't check that first.
-    if (computer->appList != m_AllApps) {
-        updateAppList(computer->appList);
-    }
-
-    // Finally, process changes to the active app
-    if (computer->currentGameId != m_CurrentGameId) {
-        // First, invalidate the running state of newly running game
-        for (int i = 0; i < m_VisibleApps.count(); i++) {
-            if (m_VisibleApps[i].id == computer->currentGameId) {
-                emit dataChanged(createIndex(i, 0),
-                                 createIndex(i, 0),
-                                 QVector<int>() << RunningRole);
-                break;
-            }
+    int gameId = 0;
+    bool lost = false;
+    QVector<NvApp> appList;
+    {
+        QReadLocker lock(&computer->lock);
+        gameId = computer->currentGameId;
+        lost = computer->state == NvComputer::CS_OFFLINE ||
+                computer->pairState == NvComputer::PS_NOT_PAIRED;
+        if (!lost) {
+            appList = computer->appList;
         }
+    }
 
-        // Next, invalidate the running state of the old game (if it exists)
-        if (m_CurrentGameId != 0) {
+    // If the computer has gone offline or we've been unpaired,
+    // signal the UI so we can go back to the PC view. Drop the running
+    // cache first so a later read does not still say an app is live.
+    if (lost) {
+        const int previous = m_CurrentGameId;
+        m_CurrentGameId = 0;
+        if (previous != 0) {
             for (int i = 0; i < m_VisibleApps.count(); i++) {
-                if (m_VisibleApps[i].id == m_CurrentGameId) {
+                if (m_VisibleApps[i].id == previous) {
                     emit dataChanged(createIndex(i, 0),
                                      createIndex(i, 0),
                                      QVector<int>() << RunningRole);
@@ -348,9 +356,42 @@ void AppModel::handleComputerStateChanged(NvComputer* computer)
                 }
             }
         }
+        emit computerLost();
+        return;
+    }
 
-        // Now update our internal state
-        m_CurrentGameId = m_Computer->currentGameId;
+    // First, process additions/removals from the app list. This
+    // is required because the new game may now be running, so
+    // we can't check that first.
+    if (appList != m_AllApps) {
+        updateAppList(appList);
+    }
+
+    // Finally, process changes to the active app. The cache moves first
+    // so RunningRole and getRunningAppId() agree when the view re-reads.
+    if (gameId != m_CurrentGameId) {
+        const int previous = m_CurrentGameId;
+        m_CurrentGameId = gameId;
+
+        for (int i = 0; i < m_VisibleApps.count(); i++) {
+            if (m_VisibleApps[i].id == gameId) {
+                emit dataChanged(createIndex(i, 0),
+                                 createIndex(i, 0),
+                                 QVector<int>() << RunningRole);
+                break;
+            }
+        }
+
+        if (previous != 0) {
+            for (int i = 0; i < m_VisibleApps.count(); i++) {
+                if (m_VisibleApps[i].id == previous) {
+                    emit dataChanged(createIndex(i, 0),
+                                     createIndex(i, 0),
+                                     QVector<int>() << RunningRole);
+                    break;
+                }
+            }
+        }
     }
 }
 

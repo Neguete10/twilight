@@ -78,6 +78,13 @@ def test_plist_rewrite():
         "Twilight uses the microphone" in desktop_plist["NSMicrophoneUsageDescription"],
         "microphone usage string",
     )
+    for prepared in (desktop_plist, mas_plist):
+        expect(prepared.get("LSSupportsGameMode") is True, "LSSupportsGameMode survives plist prep")
+        expect(prepared.get("GCSupportsGameMode") is True, "GCSupportsGameMode survives plist prep")
+        expect(
+            prepared.get("LSApplicationCategoryType") == "public.app-category.games",
+            "game category stays public.app-category.games",
+        )
 
 
 def test_entitlements():

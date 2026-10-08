@@ -1260,7 +1260,7 @@ Item {
                             width: parent.width
                             theme: sheet.theme
                             title: qsTr("Classic performance overlay")
-                            subtitle: qsTr("The yellow Classic stats, including FEC on H.264, HEVC, and AV1. Separate from Twilight's chips, and it does not add those FEC lines to PyroWave.")
+                            subtitle: qsTr("The yellow Classic stats, including FEC on H.264, HEVC, and AV1. Separate from Twilight's chips, and it does not add those FEC lines to PyroWave. Ctrl+Alt+Shift+S and Select+L1+R1+X toggle each overlay that is turned on.")
                             SwitchV2 {
                                 id: classicHudSwitch
                                 theme: sheet.theme
@@ -1272,7 +1272,7 @@ Item {
                             width: parent.width
                             theme: sheet.theme
                             title: qsTr("Twilight performance overlay")
-                            subtitle: qsTr("FPS, bitrate, and latency chips while a Twilight stream is open. Turn this off to hide them.")
+                            subtitle: qsTr("FPS, bitrate, and latency chips while a Twilight stream is open. Turn this off to hide them. The same stats shortcut toggles this with the Classic overlay when both are on. Ctrl+Alt+Shift+E or Select+Start opens End Stream while the mouse is captured.")
                             SwitchV2 {
                                 id: twilightHudSwitch
                                 theme: sheet.theme
@@ -1301,7 +1301,7 @@ Item {
                             color: sheet.theme.tertiary
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
-                            text: qsTr("The window mode applies the next time the app opens. Packet size keeps the value already saved.")
+                            text: qsTr("Fullscreen is the native space macOS Game Mode can use, and it applies the next time Twilight opens. A window cannot enter Game Mode. Apple pauses Game Mode when Twilight is not the frontmost app. Packet size keeps the value already saved.")
                         }
 
                     }

@@ -13,6 +13,11 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         return;
     }
     else if (!isCaptureActive()) {
+        // The quick menu is using the cursor. A click on the video must not
+        // grab it again until the menu closes.
+        if (m_QuickMenuOpen) {
+            return;
+        }
         if (event->button == SDL_BUTTON_LEFT && event->state == SDL_RELEASED &&
                 isMouseInVideoRegion(event->x, event->y)) {
             // Capture the mouse again if clicked when unbound.
