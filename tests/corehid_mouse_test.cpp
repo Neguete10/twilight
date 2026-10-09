@@ -59,9 +59,9 @@ static void testDecoderMotion()
     expectTrue(x.hasMotion && x.motion.motion && x.motion.dx == 5 && x.motion.dy == 0, "relative X");
 
     CoreHidDecodedUpdate y = decoder.apply(element(1, CoreHidUsage::PageGenericDesktop, CoreHidUsage::DesktopY, -3, true));
-    expectTrue(y.hasMotion && y.motion.dy == 3 && y.motion.dx == 0, "relative Y is negated once for SDL");
-    expectInt(coreHidPointerDyForHost(-3), 3, "upward count becomes downward host dy");
-    expectInt(coreHidPointerDyForHost(4), -4, "downward count becomes upward host dy");
+    expectTrue(y.hasMotion && y.motion.dy == -3 && y.motion.dx == 0, "IOHID relative Y stays down-positive");
+    expectInt(coreHidPointerDyForHost(-3), 3, "GCMouse upward count becomes downward host dy");
+    expectInt(coreHidPointerDyForHost(4), -4, "GCMouse downward count becomes upward host dy");
     expectInt(coreHidPointerDyForHost(0), 0, "zero pointer Y stays zero");
     expectInt(coreHidPointerDyForHost(static_cast<int32_t>(0x80000000)), 2147483647, "int32 min Y saturates");
 
@@ -93,8 +93,10 @@ static void testWheel()
     expectTrue(pan.motion.hWheelChanged && pan.motion.hWheel == -2, "consumer AC pan");
     expectTrue(decoder.sawHorizontalWheel(), "horizontal wheel remembered");
 
-    CoreHidDecodedUpdate quiet = decoder.apply(element(1, CoreHidUsage::PageGenericDesktop, CoreHidUsage::DesktopWheel, 0, true));
-    expectTrue(!quiet.hasMotion && decoder.sawWheel(), "zero wheel still counts as a wheel device");
+    CoreHidMouseDecoder resting;
+    CoreHidDecodedUpdate quiet = resting.apply(element(1, CoreHidUsage::PageGenericDesktop, CoreHidUsage::DesktopWheel, 0, true));
+    expectTrue(!quiet.hasMotion && !resting.sawWheel(), "zero wheel does not claim the wheel");
+    expectTrue(decoder.sawWheel(), "a real notch is still remembered after a later zero");
 }
 
 static void testButtons()
@@ -138,10 +140,22 @@ static void testHostButtonsAndScroll()
     expectInt(coreHidHostButtonForUsage(5), 0x05, "x2");
     expectInt(coreHidHostButtonForUsage(6), 0, "usage 6 is not sent");
 
-    expectInt(coreHidScrollToHighRes(1, false), 120, "one notch");
-    expectInt(coreHidScrollToHighRes(1, true), -120, "reversed notch");
-    expectInt(coreHidScrollToHighRes(300, false), 32767, "scroll clamps high");
-    expectInt(coreHidScrollToHighRes(-300, false), -32768, "scroll clamps low");
+    expectInt(coreHidScrollToHighRes(1, false, false), 120, "one notch, classic direction");
+    expectInt(coreHidScrollToHighRes(1, true, false), -120, "natural scrolling negates");
+    expectInt(coreHidScrollToHighRes(1, false, true), -120, "reverse-scroll negates");
+    expectInt(coreHidScrollToHighRes(1, true, true), 120, "natural and reverse cancel");
+    expectInt(coreHidScrollToHighRes(300, false, false), 32767, "scroll clamps high");
+    expectInt(coreHidScrollToHighRes(-300, false, false), -32768, "scroll clamps low");
+
+    expectInt(static_cast<int>(kCoreHidSdlSuppressWindowMs), 250, "SDL suppress window");
+    expectInt(static_cast<int>(kCoreHidTrackpadSupersedeWindowMs), 100, "trackpad supersede window");
+    expectTrue(!coreHidEventIsRecent(-1, 1000, kCoreHidSdlSuppressWindowMs), "never is not recent");
+    expectTrue(!coreHidEventIsRecent(1000, 999, kCoreHidSdlSuppressWindowMs), "clock going backwards is not recent");
+    expectTrue(coreHidEventIsRecent(1000, 1000, kCoreHidSdlSuppressWindowMs), "same instant is recent");
+    expectTrue(coreHidEventIsRecent(1000, 1250, kCoreHidSdlSuppressWindowMs), "edge of the 250 ms window is recent");
+    expectTrue(!coreHidEventIsRecent(1000, 1251, kCoreHidSdlSuppressWindowMs), "past the 250 ms window is not recent");
+    expectTrue(coreHidEventIsRecent(500, 600, kCoreHidTrackpadSupersedeWindowMs), "edge of the 100 ms window is recent");
+    expectTrue(!coreHidEventIsRecent(500, 601, kCoreHidTrackpadSupersedeWindowMs), "past the 100 ms window is not recent");
 }
 
 static void testEnableScaleBackend()

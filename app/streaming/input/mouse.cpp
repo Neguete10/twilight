@@ -57,7 +57,7 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Ignore button presses outside the video region, but allow button releases
         return;
     }
-    else if (coreHidSuppressesRelativeMotion()) {
+    else if (coreHidSuppressesButtons()) {
         return;
     }
 
@@ -200,7 +200,7 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
         return;
     }
     else if (coreHidSuppressesScroll()) {
-        // CoreHID already forwarded this wheel.
+        // The native backend sent a wheel event within the suppress window.
         return;
     }
 

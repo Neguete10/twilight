@@ -2,7 +2,7 @@
 
 Twilight’s game-mouse path on macOS is SDL relative mode. SDL hides the cursor, warps it back to the window, and sends the warp delta. That delta includes macOS pointer acceleration, and it dies at the screen edge when the warp fails. `LiSendMouseMoveAsMousePositionEvent` is the other workaround in `moonlight-common-c`: it keeps a **virtual client cursor** and sends absolute positions. Twilight does not call that function. This change reads the mouse and sends `LiSendMouseMoveEvent` instead, and only when you turn it on.
 
-Windows and Linux are unchanged. The new code is compiled only in the `macx` qmake block (`app/streaming/input/corehid_mouse.cpp`, `corehid_mouse.mm`).
+Windows and Linux are unchanged. The new code is compiled only in the `macx` qmake block (`app/streaming/input/corehid_mouse_decoder.cpp`, `corehid_mouse.mm`).
 
 ## What “CoreHID” means here
 
@@ -13,7 +13,7 @@ The capture path uses the C API that framework wraps:
 1. **IOHIDManager** (IOKit). Primary path. Matches Generic Desktop / Mouse (`usage page 0x01`, `usage 0x02`). Relative X/Y (`0x30` / `0x31`), wheel (`0x38`), AC Pan (`0x238` on the desktop or consumer page), and buttons 1–5 are decoded and sent to the host. The device is not seized.
 2. **GCMouse** (Game Controller). Used only when IOHID cannot open (permission denied, no HID mouse, or `TWILIGHT_COREHID_BACKEND=gcmouse`). Deltas are in points and can still include pointer acceleration. Scroll stays on SDL for this backend, because GCMouse scroll axes are not HID notches.
 
-If neither backend sees a mouse, capture fails and SDL relative mode runs as before. Trackpads are not HID mice, so a trackpad-only Mac keeps SDL.
+If neither backend sees a mouse, capture fails and SDL relative mode runs as before. Trackpads are not HID mice. A trackpad-only Mac keeps SDL. When a mouse is captured, trackpad motion is read with an `NSEvent` local monitor (moved and dragged). That monitor does not send a delta if IOHID or GCMouse already sent pointer motion within 100 ms, so the mouse is not applied twice. `NSEvent` `deltaY` is already positive downward and is not flipped.
 
 Absolute / remote-desktop mouse mode (`--absolute-mouse`, Ctrl+Alt+Shift+M) does not start this path. Gamepad mouse emulation (right stick) is unchanged.
 
@@ -29,7 +29,7 @@ Default is **off**, so an existing stream keeps SDL.
 
 Capture starts when the stream grabs the cursor, not at process launch. The log line is `CoreHID mouse capture started via IOHID` or `via GCMouse`. A failure logs `Falling back to SDL relative mouse` and the stream still grabs the cursor the old way.
 
-While this path is active, SDL mouse-move and mouse-button events are not forwarded (they would double-send). SDL scroll is suppressed only after a relative HID wheel element has been seen. Magic Mouse gesture scroll often is not that element, so it still uses SDL.
+While this path is active, SDL relative mouse-move events are not forwarded (they would double-send the mouse; the trackpad uses the `NSEvent` monitor instead). SDL clicks are forwarded unless the native backend sent a button edge within the last 250 ms. SDL scroll is forwarded unless the native backend sent a nonzero wheel or horizontal-pan notch within the last 250 ms. A wheel element whose value is 0 does not count, so a resting wheel does not take scroll away from the trackpad.
 
 Ctrl+Alt+Shift+Z releases capture and puts the cursor back on the pointer (`CGAssociateMouseAndMouseCursorPosition`).
 
@@ -37,7 +37,7 @@ Ctrl+Alt+Shift+Z releases capture and puts the cursor back on the pointer (`CGAs
 
 IOHID for a mouse needs **Input Monitoring**:
 
-System Settings → Privacy & Security → Input Monitoring → enable the app (Moonlight, unless the bundle was renamed) → recapture the mouse (or restart the stream).
+System Settings → Privacy & Security → Input Monitoring → enable Twilight (`io.github.neguete10.twilight`) → recapture the mouse (or restart the stream).
 
 The first capture calls `IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)`. If the prompt is still pending, that session falls back to SDL. Grant access and capture again.
 
@@ -71,9 +71,10 @@ There is no Mac in this change’s build environment, so the `.mm` file was not 
 ## Known limits
 
 - Off unless you opt in.
-- Trackpads, graphics tablets, and devices whose top-level usage is not Mouse stay on SDL. If a mouse is captured, SDL relative motion is suppressed for the whole grab, including the trackpad.
-- IOHID counts are device units, not macOS points. Pointer Y from IOHID Desktop `0x31` and from GCMouse is positive upward, so it is negated once (`coreHidPointerDyForHost`) before scale. That matches SDL `yrel` and `LiSendMouseMoveEvent`, which are positive downward. X and the wheel are not negated. `TWILIGHT_COREHID_SCALE` is the sensitivity knob. The host still applies its own mouse settings.
-- SDL can still deliver the wheel event that taught us the device has a wheel, so the first notch may be sent twice. Later notches are HID only.
+- Trackpads, graphics tablets, and devices whose top-level usage is not Mouse are not HID mice. With no captured mouse, they stay on SDL. With a captured mouse, trackpad pointer motion uses the `NSEvent` monitor described above. SDL relative motion stays suppressed for the whole grab so it does not double the mouse.
+- IOHID counts are device units, not macOS points. IOHID Desktop Y (`0x31`) is already positive downward, matching SDL `yrel` and `LiSendMouseMoveEvent`, so the decoder does not negate it. GCMouse `deltaY` is positive upward and is negated once (`coreHidPointerDyForHost`) before scale. X is not negated. `TWILIGHT_COREHID_SCALE` is the sensitivity knob. The host still applies its own mouse settings.
+- IOHID wheel notches follow macOS natural scrolling (`com.apple.swipescrolldirection`; a missing key means on) combined with Settings “Reverse mouse scrolling direction”. Each one negates the notch, so both together leave the sign unchanged. One notch is still 120 high-res units. GCMouse does not send wheel notches; that scroll stays on SDL.
+- SDL can still deliver a click or a notch that races the HID report. After the native event is stamped, further SDL events of that kind are dropped for 250 ms.
 - GCMouse can be accelerated. It is the fallback, not the raw path.
 - Buttons past X2 (HID usage 6+) are tracked so they can be released, and they are not sent. Limelight has no code for them.
 - Two mice at once: each button edge is sent. Releasing one mouse’s left button releases host left even if the other mouse is still held.
@@ -88,7 +89,7 @@ The parser does not touch IOKit. From the repo root:
 ```sh
 c++ -std=c++11 -Wall -Wextra -Werror \
     tests/corehid_mouse_test.cpp \
-    app/streaming/input/corehid_mouse.cpp \
+    app/streaming/input/corehid_mouse_decoder.cpp \
     -Iapp/streaming/input \
     -o /tmp/corehid_mouse_test
 /tmp/corehid_mouse_test

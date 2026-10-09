@@ -168,6 +168,13 @@ macx {
         CONFIG += discord-rpc libplacebo
     }
 
+    # Same availability error as globaldefs.pri. Repeated here so the app
+    # target still fails the macOS 13 scan if that .pri is bypassed.
+    QMAKE_CFLAGS += -Werror=unguarded-availability-new
+    QMAKE_OBJECTIVE_CFLAGS += -Werror=unguarded-availability-new
+    QMAKE_CXXFLAGS += -Werror=unguarded-availability-new
+    QMAKE_OBJCXXFLAGS += -Werror=unguarded-availability-new
+
     LIBS += -lobjc \
         -framework Accelerate \
         -framework AppKit \

@@ -101,8 +101,72 @@ def test_parser():
         empty.cleanup()
 
 
+LC_LOAD_DYLIB = 0xC
+LC_LOAD_WEAK_DYLIB = 0x80000018
+CPU_ARM64 = 0x0100000C
+CPU_X86_64 = 0x01000007
+
+
+def dylib_command(cmd, path):
+    raw = path.encode("ascii") + b"\x00"
+    size = 24 + len(raw)
+    pad = (8 - (size % 8)) % 8
+    raw += b"\x00" * pad
+    size = 24 + len(raw)
+    return struct.pack("<IIIIII", cmd, size, 24, 0, 0, 0) + raw
+
+
+def image(cputype, commands):
+    blob = b"".join(commands)
+    header = struct.pack("<IIIIIIII", MH_MAGIC_64, cputype, 0, 2, len(commands), len(blob), 0, 0)
+    return header + blob
+
+
+def build_version(major, minor, patch):
+    minos = packed(major, minor, patch)
+    return struct.pack("<IIIIII", LC_BUILD_VERSION, 24, 1, minos, minos, 0)
+
+
+def expect_exit(checker, root, floor, needle):
+    try:
+        checker.scan_path(root, floor)
+    except SystemExit as exc:
+        text = exc.code if isinstance(exc.code, str) else str(exc)
+        expect(needle in text, "failure mentions %s, got %r" % (needle, text))
+        return
+    expect(False, "expected failure mentioning %s" % needle)
+
+
+def test_arm64_and_linkage():
+    checker = load_checker()
+    floor = (13, 0, 0)
+    corehid = "/System/Library/Frameworks/CoreHID.framework/Versions/A/CoreHID"
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "x86").write_bytes(image(CPU_X86_64, [build_version(13, 0, 0)]))
+        expect_exit(checker, root, floor, "arm64")
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "strong").write_bytes(image(CPU_ARM64, [
+            build_version(13, 0, 0),
+            dylib_command(LC_LOAD_DYLIB, corehid),
+        ]))
+        expect_exit(checker, root, floor, "CoreHID")
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "weak").write_bytes(image(CPU_ARM64, [
+            build_version(13, 0, 0),
+            dylib_command(LC_LOAD_WEAK_DYLIB, corehid),
+        ]))
+        offenders, count = checker.scan_path(root, floor)
+        expect(count == 1 and offenders == [], "a weak CoreHID link is allowed")
+
+
 def main():
     test_parser()
+    test_arm64_and_linkage()
     if FAILURES:
         print("%d failure(s)" % FAILURES)
         return 1

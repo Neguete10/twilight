@@ -55,7 +55,7 @@ macx:!disable-prebuilts {
 }
 
 macx {
-    QMAKE_OBJECTIVE_CFLAGS = -fobjc-arc
+    QMAKE_OBJECTIVE_CFLAGS += -fobjc-arc
 
     OBJECTIVE_SOURCES += \
         $$PWD/imgui/backends/imgui_impl_metal.mm

@@ -32,7 +32,7 @@ This tree is rebuilt on [Andy Grundman's](https://github.com/andygrundman/moonli
 - Prebuilt libraries from [moonlight-qt-deps](https://github.com/moonlight-stream/moonlight-qt-deps) tag `v19` (`python3 setup-deps.py`). Do not substitute Homebrew libraries into the bundle.
 - [create-dmg](https://github.com/create-dmg/create-dmg) (`brew install create-dmg`) for the disk image
 
-Nothing copied into `Twilight.app` may require a newer macOS than 13.0. `scripts/generate-dmg.sh` runs `scripts/check-macos-minos.py` and stops if one does.
+Nothing copied into `Twilight.app` may require a newer macOS than 13.0, and every Mach-O in the bundle must have an arm64 slice. `scripts/generate-dmg.sh` runs `scripts/check-macos-availability.py` before compile and `scripts/check-macos-minos.py` on the finished bundle. The bundle check stops if minos is above 13.0, arm64 is missing, or a non-weak `LC_LOAD_DYLIB` pulls in a system framework that macOS 13 does not have. Frameworks and APIs newer than macOS 13 must be weak-linked and used only from `@available` / `__builtin_available`, with a fallback. The Mac compile treats `-Wunguarded-availability-new` as an error at deployment target 13.0.
 
 ## Building
 

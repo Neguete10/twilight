@@ -265,7 +265,9 @@ bool AUSpatialRenderer::setup(AUSpatialMixerOutputType outputType, float sampleR
     }
 
 #if TARGET_OS_OSX
-    if (@available(macOS 13.0, *))
+    // Head tracking and personalized HRTF mode are macOS 14 APIs. The spatial
+    // mixer itself still starts on macOS 13; these properties are skipped there.
+    if (@available(macOS 14.0, *))
 #elif TARGET_OS_IOS
     if (@available(iOS 18.0, *))
 #elif TARGET_OS_TV
@@ -359,7 +361,7 @@ bool AUSpatialRenderer::setup(AUSpatialMixerOutputType outputType, float sampleR
     m_Initialized = true;
 
 #if TARGET_OS_OSX
-    // you can set HRTF in 13 but only check the status in 14
+    // Personalized HRTF status is readable on macOS 14, same as the set properties.
     if (@available(macOS 14.0, *))
 #elif TARGET_OS_IOS
     if (@available(iOS 18.0, *))

@@ -623,10 +623,19 @@ bool SdlInputHandler::coreHidSuppressesRelativeMotion() const
 #endif
 }
 
+bool SdlInputHandler::coreHidSuppressesButtons() const
+{
+#ifdef Q_OS_DARWIN
+    return m_CoreHidActive && m_CoreHid != nullptr && coreHidMouseCaptureSawRecentButtons(m_CoreHid);
+#else
+    return false;
+#endif
+}
+
 bool SdlInputHandler::coreHidSuppressesScroll() const
 {
 #ifdef Q_OS_DARWIN
-    return m_CoreHidActive && m_CoreHid != nullptr && coreHidMouseCaptureOwnsWheel(m_CoreHid);
+    return m_CoreHidActive && m_CoreHid != nullptr && coreHidMouseCaptureSawRecentScroll(m_CoreHid);
 #else
     return false;
 #endif
@@ -650,15 +659,16 @@ void SdlInputHandler::sendCoreHidMotion(const CoreHidMouseDelta& delta)
         LiSendMouseMoveEvent(static_cast<short>(delta.dx), static_cast<short>(delta.dy));
     }
 
+    const bool natural = coreHidSystemNaturalScrolling();
     if (delta.wheelChanged && delta.wheel != 0) {
-        const int16_t amount = coreHidScrollToHighRes(delta.wheel, m_ReverseScrollDirection);
+        const int16_t amount = coreHidScrollToHighRes(delta.wheel, natural, m_ReverseScrollDirection);
         if (amount != 0) {
             LiSendHighResScrollEvent(amount);
         }
     }
 
     if (delta.hWheelChanged && delta.hWheel != 0) {
-        const int16_t amount = coreHidScrollToHighRes(delta.hWheel, m_ReverseScrollDirection);
+        const int16_t amount = coreHidScrollToHighRes(delta.hWheel, natural, m_ReverseScrollDirection);
         if (amount != 0) {
             LiSendHighResHScrollEvent(amount);
         }

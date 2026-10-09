@@ -131,6 +131,14 @@ int32_t coreHidPointerDyForHost(int32_t dy)
     return -dy;
 }
 
+bool coreHidEventIsRecent(int64_t lastMs, int64_t nowMs, int64_t windowMs)
+{
+    if (lastMs < 0 || nowMs < lastMs || windowMs < 0) {
+        return false;
+    }
+    return (nowMs - lastMs) <= windowMs;
+}
+
 int16_t coreHidApplyScale(int32_t raw, float scale)
 {
     if (!(scale > 0.0f)) {
@@ -146,9 +154,12 @@ int16_t coreHidApplyScale(int32_t raw, float scale)
     return static_cast<int16_t>(std::lround(scaled));
 }
 
-int16_t coreHidScrollToHighRes(int32_t notches, bool reverse)
+int16_t coreHidScrollToHighRes(int32_t notches, bool naturalScrolling, bool reverse)
 {
     int32_t amount = notches * 120;
+    if (naturalScrolling) {
+        amount = -amount;
+    }
     if (reverse) {
         amount = -amount;
     }
@@ -224,14 +235,15 @@ CoreHidDecodedUpdate CoreHidMouseDecoder::apply(const CoreHidElementUpdate& upda
         if (coreHidMotionPolicy(coreHidElementCarriesDelta(update)) != CoreHidMotionPolicy::Relative) {
             return decoded;
         }
+        // A resting wheel element is not a notch and does not claim the wheel.
+        if (update.value == 0) {
+            return decoded;
+        }
         if (wheel) {
             m_SawWheel = true;
         }
         if (hWheel) {
             m_SawHWheel = true;
-        }
-        if (update.value == 0) {
-            return decoded;
         }
         decoded.hasMotion = true;
         if (axisX) {
@@ -239,7 +251,7 @@ CoreHidDecodedUpdate CoreHidMouseDecoder::apply(const CoreHidElementUpdate& upda
             decoded.motion.motion = true;
         }
         else if (axisY) {
-            decoded.motion.dy = coreHidPointerDyForHost(update.value);
+            decoded.motion.dy = update.value;
             decoded.motion.motion = true;
         }
         else if (wheel) {

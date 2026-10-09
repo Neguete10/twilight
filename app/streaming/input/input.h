@@ -169,6 +169,7 @@ private:
     bool tryStartCoreHidCapture();
     bool stopCoreHidCapture();
     bool coreHidSuppressesRelativeMotion() const;
+    bool coreHidSuppressesButtons() const;
     bool coreHidSuppressesScroll() const;
     bool sendDualSenseReport(SDL_GameController* controller, const DualSenseOutputReport& report);
     void clearAdaptiveTriggers();

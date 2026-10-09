@@ -107,6 +107,8 @@ MACOS_DEPLOYMENT_TARGET=$(sh "$SOURCE_ROOT/scripts/macos-deployment-target.sh") 
 export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
 echo "macOS deployment target: $MACOS_DEPLOYMENT_TARGET"
 
+python3 "$SOURCE_ROOT/scripts/check-macos-availability.py" "$SOURCE_ROOT" || fail "Unguarded macOS API newer than the 13.0 deployment target"
+
 # Enable LTO for official builds
 export CFLAGS=-flto=thin
 export CXXFLAGS=-flto=thin
@@ -174,7 +176,7 @@ if [ "${TWILIGHT_PYROWAVE:-1}" != "0" ]; then
   sh "$SOURCE_ROOT/scripts/bundle-macos-vulkan.sh" "$APP_BUNDLE" || fail "Vulkan loader bundling failed"
 fi
 
-python3 "$SOURCE_ROOT/scripts/check-macos-minos.py" "$APP_BUNDLE" || fail "A Mach-O in the bundle requires a newer macOS than 13.0"
+python3 "$SOURCE_ROOT/scripts/check-macos-minos.py" "$APP_BUNDLE" || fail "A Mach-O in the bundle is missing arm64, requires a newer macOS than 13.0, or strong-links a framework macOS 13 does not have"
 
 if [ "${TWILIGHT_MAS:-}" = "1" ]; then
   echo Signing app bundle

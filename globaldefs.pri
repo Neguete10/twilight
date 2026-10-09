@@ -36,3 +36,13 @@ QMAKE_LFLAGS   += $$(LDFLAGS)
 # Refuse to inherit the SDK minos. An empty QMAKE_MACOSX_DEPLOYMENT_TARGET
 # lets clang stamp the build Mac's SDK version onto every Mach-O.
 QMAKE_MACOSX_DEPLOYMENT_TARGET = 13.0
+
+macx {
+    # Uses -mmacosx-version-min from the deployment target above. A macOS 14+
+    # API outside @available / API_AVAILABLE is an error, so it cannot become
+    # a strong symbol that dyld aborts on macOS 13.
+    QMAKE_CFLAGS += -Werror=unguarded-availability-new
+    QMAKE_OBJECTIVE_CFLAGS += -Werror=unguarded-availability-new
+    QMAKE_CXXFLAGS += -Werror=unguarded-availability-new
+    QMAKE_OBJCXXFLAGS += -Werror=unguarded-availability-new
+}

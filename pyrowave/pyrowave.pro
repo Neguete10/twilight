@@ -16,6 +16,12 @@ QMAKE_APPLE_DEVICE_ARCHS = arm64
 # Keep ARC local to this library; Moonlight's Metal renderer uses manual ownership.
 QMAKE_OBJECTIVE_CFLAGS += -fobjc-arc
 QMAKE_CXXFLAGS += -Wshadow -fvisibility=hidden
+# Metal sources in this library are compiled for macOS 13. Newer Metal APIs
+# must sit in @available or the Mac build fails.
+QMAKE_CFLAGS += -Werror=unguarded-availability-new
+QMAKE_OBJECTIVE_CFLAGS += -Werror=unguarded-availability-new
+QMAKE_CXXFLAGS += -Werror=unguarded-availability-new
+QMAKE_OBJCXXFLAGS += -Werror=unguarded-availability-new
 DEFINES += PYROWAVE_EXPORT_SYMBOLS
 
 PYROWAVE_METAL_DIR = $$PWD/pyrowave/metal
