@@ -6,11 +6,18 @@
 #include <QtGlobal>
 #include <SDL.h>
 
-#ifndef NDEBUG
+#if !defined(NDEBUG)
+    #define COREAUDIO_DEBUG
+#endif
+
 #define COREAUDIO_DEBUG
-# define DEBUG_TRACE(...) SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, __VA_ARGS__)
+
+#ifdef COREAUDIO_DEBUG
+    #define DEBUG_TRACE(fmt, ...) SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, fmt, ##__VA_ARGS__)
 #else
-# define DEBUG_TRACE(...)
+    #define DEBUG_TRACE(fmt, ...) \
+        do { \
+        } while (0)
 #endif
 
 static void CA_LogError(OSStatus error, const char *fmt, ...)
@@ -38,7 +45,7 @@ static void CA_LogError(OSStatus error, const char *fmt, ...)
     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CoreAudio Error: %s (%s)\n", logBuffer, errorString);
 }
 
-static void __attribute__((unused)) CA_FourCC(uint32_t value, char *outFormatIDStr)
+static void CA_FourCC(uint32_t value, char *outFormatIDStr)
 {
     uint32_t formatID = CFSwapInt32HostToBig(value);
     bcopy(&formatID, outFormatIDStr, 4);
@@ -48,7 +55,6 @@ static void __attribute__((unused)) CA_FourCC(uint32_t value, char *outFormatIDS
 // based on mpv ca_print_asbd()
 static void CA_PrintASBD(const char *description, const AudioStreamBasicDescription *asbd)
 {
-#ifdef COREAUDIO_DEBUG
     char formatIDStr[5];
     CA_FourCC(asbd->mFormatID, formatIDStr);
 
@@ -68,14 +74,9 @@ static void CA_PrintASBD(const char *description, const AudioStreamBasicDescript
         (flags & kAudioFormatFlagIsPacked) ? " packed" : "",
         (flags & kAudioFormatFlagIsAlignedHigh) ? " aligned" : "",
         (flags & kAudioFormatFlagIsNonInterleaved) ? " non-interleaved" : " interleaved");
-#else
-    Q_UNUSED(description);
-    Q_UNUSED(asbd);
-#endif
 }
 
 // classic hex dump
-#ifdef COREAUDIO_DEBUG
 static void CA_HexDump(const float *buffer, size_t length)
 {
     const uint8_t *bytePtr = (const uint8_t *)buffer;
@@ -104,4 +105,3 @@ static void CA_HexDump(const float *buffer, size_t length)
         printf("|\n");
     }
 }
-#endif

@@ -5,6 +5,9 @@
 
 #ifdef Q_OS_DARWIN
 #include <ApplicationServices/ApplicationServices.h>
+#include <QCoreApplication>
+#include <QFileInfo>
+#include <SDL_vulkan.h>
 #endif
 
 #ifdef Q_OS_WINDOWS
@@ -68,20 +71,61 @@ static int __riscv_hwprobe(struct riscv_hwprobe *pairs, size_t pair_count,
 #endif
 #endif
 
+#if defined(Q_OS_FREEBSD) || defined(Q_OS_OPENBSD)
+#include <sys/auxv.h>
+#endif
+
 Uint32 StreamUtils::getPlatformWindowFlags()
 {
-#if defined(Q_OS_DARWIN)
-    // VideoToolbox and PyroWave Metal present through this flag. PyroWave
-    // Vulkan replaces it with SDL_WINDOW_VULKAN on the stream window only
-    // (Session::execInternal), after the backend probe. The hardware-decode
-    // probe window stays Metal so H.264/HEVC/AV1 do not change.
-    return SDL_WINDOW_METAL;
-#elif defined(HAVE_LIBPLACEBO_VULKAN)
+#if defined(HAVE_LIBPLACEBO_VULKAN)
     // We'll fall back to GL if Vulkan fails
     return SDL_WINDOW_VULKAN;
+#elif defined(Q_OS_DARWIN)
+    // Vulkan needs to supersede Metal, otherwise the Vulkan library won't be loaded
+    return SDL_WINDOW_METAL;
 #else
     return 0;
 #endif
+}
+
+SDL_Window* StreamUtils::createTestWindow()
+{
+    SDL_Window* testWindow;
+    Uint32 baseFlags = 0;
+
+    // Stop text input before creating the test window to avoid sdl2-compat
+    // starting text input on the new window. This might trigger the IME to
+    // be displayed.
+    SDL_StopTextInput();
+
+    // Test windows are always hidden
+    baseFlags |= SDL_WINDOW_HIDDEN;
+
+    // Creating a Vulkan surface with KMSDRM requires finding a display mode
+    // that exactly matches the window size. This is not always possible,
+    // particularly with drivers (Nvidia) that only expose modes matching
+    // the current resolution (only differing by refresh rate). Fullscreen
+    // desktop mode ensures the window size exactly matches the display mode
+    // which prevents false Vulkan renderer failures during decoder probing.
+    if (QString(SDL_GetCurrentVideoDriver()) == "KMSDRM") {
+        baseFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+    }
+
+    // Try to add the platform-specific flags first and fall back if that fails
+    testWindow = SDL_CreateWindow("", 0, 0, 1280, 720,
+                                  baseFlags | StreamUtils::getPlatformWindowFlags());
+    if (!testWindow) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to create test window with platform flags: %s",
+                    SDL_GetError());
+
+        testWindow = SDL_CreateWindow("", 0, 0, 1280, 720, baseFlags);
+        if (!testWindow) {
+            return nullptr;
+        }
+    }
+
+    return testWindow;
 }
 
 void StreamUtils::scaleSourceToDestinationSurface(SDL_Rect* src, SDL_Rect* dst)
@@ -157,9 +201,18 @@ int StreamUtils::getDisplayRefreshRate(SDL_Window* window)
                     "Refresh rate unknown; assuming 60 Hz");
         mode.refresh_rate = 60;
     }
-
     return mode.refresh_rate;
 }
+
+#ifndef Q_OS_DARWIN
+RefreshRateRational StreamUtils::getDisplayRefreshRateRational(SDL_Window* window)
+{
+    int refresh_rate = getDisplayRefreshRate(window);
+
+    RefreshRateRational result {refresh_rate, 1, (double)refresh_rate, true};
+    return result;
+}
+#endif
 
 bool StreamUtils::hasFastAes()
 {
@@ -180,11 +233,21 @@ bool StreamUtils::hasFastAes()
 #elif defined(Q_OS_DARWIN)
     // Everything that runs Catalina and later has AES-NI or ARMv8 crypto instructions
     return true;
+#elif (defined(Q_OS_FREEBSD) || defined(Q_OS_OPENBSD)) && defined(Q_PROCESSOR_ARM) && QT_POINTER_SIZE == 4
+    unsigned long hwcap2;
+    if (elf_aux_info(AT_HWCAP2, &hwcap2, sizeof(hwcap2)) != 0)
+        hwcap2 = 0;
+    return (hwcap2 & HWCAP2_AES);
+#elif (defined(Q_OS_FREEBSD) || defined(Q_OS_OPENBSD)) && defined(Q_PROCESSOR_ARM) && QT_POINTER_SIZE == 8
+    unsigned long hwcap;
+    if (elf_aux_info(AT_HWCAP, &hwcap, sizeof(hwcap)) != 0)
+        hwcap = 0;
+    return (hwcap & HWCAP_AES);
 #elif defined(Q_OS_LINUX) && defined(Q_PROCESSOR_ARM) && QT_POINTER_SIZE == 4
     return getauxval(AT_HWCAP2) & HWCAP2_AES;
 #elif defined(Q_OS_LINUX) && defined(Q_PROCESSOR_ARM) && QT_POINTER_SIZE == 8
     return getauxval(AT_HWCAP) & HWCAP_AES;
-#elif defined(Q_PROCESSOR_RISCV)
+#elif defined(Q_OS_LINUX) && defined(Q_PROCESSOR_RISCV)
     riscv_hwprobe pairs[1] = {
         { RISCV_HWPROBE_KEY_IMA_EXT_0, 0 },
     };
@@ -408,4 +471,47 @@ int StreamUtils::getDrmFd(bool preferRenderNode)
 #endif
 
     return -1;
+}
+
+extern QAtomicInt g_AsyncLoggingEnabled;
+
+void StreamUtils::enterAsyncLoggingMode()
+{
+    g_AsyncLoggingEnabled.ref();
+}
+
+void StreamUtils::exitAsyncLoggingMode()
+{
+    g_AsyncLoggingEnabled.deref();
+}
+
+void StreamUtils::loadBundledVulkanLoader()
+{
+#ifdef Q_OS_DARWIN
+    // SDL_Vulkan_LoadLibrary requires the video subsystem. The bundled
+    // libvulkan is what opens MoltenVK through the ICD; opening MoltenVK
+    // itself leaves a decoder that never presents a frame.
+    const QString loader = QDir(QCoreApplication::applicationDirPath()).filePath("../Frameworks/libvulkan.1.dylib");
+    if (!QFileInfo::exists(loader)) {
+        return;
+    }
+    const QByteArray path = QFileInfo(loader).absoluteFilePath().toUtf8();
+    static bool logged = false;
+    if (SDL_Vulkan_LoadLibrary(path.constData()) != 0) {
+        if (!logged) {
+            logged = true;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "SDL_Vulkan_LoadLibrary(%s) failed: %s",
+                        path.constData(),
+                        SDL_GetError());
+        }
+        return;
+    }
+    if (!logged) {
+        logged = true;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Loaded bundled Vulkan loader: %s",
+                    path.constData());
+    }
+#endif
 }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Developer ID (DMG) entitlements. Signed with the Hardened Runtime.
+  No App Sandbox: sandbox entitlements broke launch in 7.0.1.
+  com.apple.security.device.audio-input is the Hardened Runtime
+  "Audio Input" resource exception. Without it macOS refuses microphone
+  access without showing the NSMicrophoneUsageDescription prompt.
+  It is not a restricted entitlement and needs no provisioning profile.
+-->
+<dict>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

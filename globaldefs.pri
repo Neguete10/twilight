@@ -9,23 +9,40 @@ CONFIG(release, debug|release) {
     DEFINES += NDEBUG
 }
 
+# Enable CFG, EHCont, and CET
+*-msvc {
+    QMAKE_CFLAGS += -guard:cf -guard:ehcont
+    QMAKE_CXXFLAGS += -guard:cf -guard:ehcont
+    QMAKE_LFLAGS += -guard:cf -guard:ehcont
+
+    contains(QT_ARCH, x86_64) {
+        QMAKE_LFLAGS += -cetcompat
+    }
+}
+
 # Enable ASan for Linux or macOS
 #CONFIG += sanitizer sanitize_address
 
 # Enable ASan for Windows
 #QMAKE_CFLAGS += -fsanitize=address
 #QMAKE_CXXFLAGS += -fsanitize=address
-#QMAKE_LFLAGS += -incremental:no -wholearchive:clang_rt.asan_dynamic-x86_64.lib -wholearchive:clang_rt.asan_dynamic_runtime_thunk-x86_64.lib
+#QMAKE_LFLAGS += -incremental:no
 
-# macOS minos for every qmake target that includes this file: the Twilight
-# app and the static libraries linked into it. This is the same floor as
-# LSMinimumSystemVersion (11.0.0) in app/Info.plist. scripts/macos-deployment-target.sh
-# reads the assignment below and passes it to the PyroWave dylib builds.
-# Do not remove it. With no deployment target, clang stamps the SDK version,
-# which is why the 7.0.0 binary (minos 27.0) would not launch on Sequoia.
+# Propagate environment variable flags
+QMAKE_CFLAGS   += $$(CFLAGS)
+QMAKE_CXXFLAGS += $$(CXXFLAGS)
+QMAKE_LFLAGS   += $$(LDFLAGS)
+
+# Refuse to inherit the SDK minos. An empty QMAKE_MACOSX_DEPLOYMENT_TARGET
+# lets clang stamp the build Mac's SDK version onto every Mach-O.
+QMAKE_MACOSX_DEPLOYMENT_TARGET = 13.0
+
 macx {
-    QMAKE_MACOSX_DEPLOYMENT_TARGET = 11.0
-    isEmpty(QMAKE_MACOSX_DEPLOYMENT_TARGET) {
-        error("QMAKE_MACOSX_DEPLOYMENT_TARGET is empty. Refusing to build with the SDK minos.")
-    }
+    # Uses -mmacosx-version-min from the deployment target above. A macOS 14+
+    # API outside @available / API_AVAILABLE is an error, so it cannot become
+    # a strong symbol that dyld aborts on macOS 13.
+    QMAKE_CFLAGS += -Werror=unguarded-availability-new
+    QMAKE_OBJECTIVE_CFLAGS += -Werror=unguarded-availability-new
+    QMAKE_CXXFLAGS += -Werror=unguarded-availability-new
+    QMAKE_OBJCXXFLAGS += -Werror=unguarded-availability-new
 }

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Teach moonlight-common-c to send one raw control-stream packet.
 
-The spatial-mixer pin (583754fc) has no microphone API. Vibelight sends
-Opus on the encrypted control stream with LiSendRawControlStreamPacket().
-Retargeting the submodule would drop the macOS clock fix, so qmake applies
-this delta in place. It is idempotent.
+The 7feb0a6 pin (upstream f900dd4 plus PyroWave) still has no microphone
+sender. Vibelight sends Opus on the encrypted control stream with
+LiSendRawControlStreamPacket(). moonlight-common-c.pro applies this delta
+before that static library compiles, and app.pro applies it again. It is
+idempotent. The functions close over ControlStream.c, and this repo cannot
+publish a commit on andygrundman/moonlight-common-c, so the change stays in
+this script. Do not roll the submodule back, and do not run the PyroWave
+or adaptive-trigger protocol scripts: those packets are already in this pin.
 
 Pass a src directory as argv[1] to test the patch against a copy of the
 pinned tree. The default path is the submodule src directory.

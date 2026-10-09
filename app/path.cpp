@@ -6,6 +6,11 @@
 #include <QSettings>
 #include <QCoreApplication>
 
+#ifdef Q_OS_DARWIN
+#include <pwd.h>
+#include <unistd.h>
+#endif
+
 QString Path::s_CacheDir;
 QString Path::s_LogDir;
 QString Path::s_BoxArtCacheDir;
@@ -33,7 +38,7 @@ QByteArray Path::readDataFile(QString fileName)
 {
     QFile dataFile(getDataFilePath(fileName));
     if (!dataFile.open(QIODevice::ReadOnly)) {
-        return QByteArray();
+        return {};
     }
     return dataFile.readAll();
 }
@@ -48,10 +53,9 @@ void Path::writeCacheFile(QString fileName, QByteArray data)
     }
 
     QFile dataFile(cacheDir.absoluteFilePath(fileName));
-    if (!dataFile.open(QIODevice::WriteOnly)) {
-        return;
+    if (dataFile.open(QIODevice::WriteOnly)) {
+        dataFile.write(data);
     }
-    dataFile.write(data);
 }
 
 void Path::deleteCacheFile(QString fileName)
@@ -115,12 +119,23 @@ void Path::initialize(bool portable)
         s_CacheDir = QDir::currentPath() + "/cache";
     }
     else {
-#ifdef Q_OS_DARWIN
-        // On macOS, $TMPDIR is some random folder under /var/folders/ that nobody can
-        // easily find, so use the system's global tmp directory instead.
-        s_LogDir = "/tmp";
-#else
         s_LogDir = QDir::tempPath();
+#ifdef Q_OS_DARWIN
+        // We're running in a sandbox so it's a bit more work to get the home directory
+        const struct passwd* user = getpwuid(getuid());
+        if (user != nullptr && user->pw_dir != nullptr && user->pw_dir[0] != '\0') {
+            const QString logDir = QDir(QFile::decodeName(user->pw_dir)).filePath("Library/Logs/Moonlight");
+            if (QDir().mkpath(logDir)) {
+                s_LogDir = logDir;
+            }
+            else {
+                qWarning() << "Unable to create log directory:" << logDir
+                           << "- using temporary directory:" << s_LogDir;
+            }
+        }
+        else {
+            qWarning() << "Unable to resolve the user home directory - using temporary directory:" << s_LogDir;
+        }
 #endif
         s_CacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
         s_BoxArtCacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/boxart";

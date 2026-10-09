@@ -1,12 +1,12 @@
 #include "coreaudio.h"
 #include "coreaudio_helpers.h"
+#include "imgui/devui.h"
 #include "settings/streamingpreferences.h"
 
 #if TARGET_OS_OSX
 #include <IOKit/audio/IOAudioTypes.h>
 #endif
 
-#include <Accelerate/Accelerate.h>
 #include <QtGlobal>
 #include <SDL.h>
 #include <string>
@@ -15,13 +15,12 @@
 
 CoreAudioRenderer::CoreAudioRenderer()
     : m_OutputAU(nullptr),
-      m_OutputDeviceID(0),
-      m_OutputDeviceName(nullptr),
-      m_RingBuffer(),
-      m_SpatialBuffer(2, 4096),
-      m_OutputInitialized(false),
-      m_OutputStarted(false),
-      m_RingReady(false)
+    m_OutputInitialized(false),
+    m_OutputStarted(false),
+    m_SpatialBuffer(2, 4096),
+    m_DropCount(0),
+    m_DropCountUnderrun(0),
+    m_QueuedAudioSize{0}
 {
     DEBUG_TRACE("CoreAudioRenderer construct");
 
@@ -54,71 +53,41 @@ CoreAudioRenderer::~CoreAudioRenderer()
     cleanup();
 }
 
-CoreAudioPlaybackState CoreAudioRenderer::playbackState() const
+void CoreAudioRenderer::cleanup()
 {
-    CoreAudioPlaybackState state = {};
-    state.instance = m_OutputAU != nullptr;
-    state.initialized = m_OutputInitialized;
-    state.started = m_OutputStarted;
-    state.ring = m_RingReady;
-    state.listeners = m_OutputDeviceID != 0;
-    state.deviceName = m_OutputDeviceName != nullptr;
-    return state;
-}
+    DEBUG_TRACE("CoreAudioRenderer cleanup");
 
-void CoreAudioRenderer::applyTeardown(const CoreAudioTeardownStep& step)
-{
-    // AudioOutputUnitStop and AudioUnitUninitialize run at most once, and
-    // only after the matching start or initialize succeeded. A second stop,
-    // or a unit that was created but never started, does not call them.
-    if (step.stop && m_OutputAU != nullptr) {
-        AudioOutputUnitStop(m_OutputAU);
-    }
-    if (step.uninitialize && m_OutputAU != nullptr) {
-        AURenderCallbackStruct callbackStruct = {};
-        AudioUnitSetProperty(m_OutputAU,
-                             kAudioUnitProperty_SetRenderCallback,
-                             kAudioUnitScope_Input,
-                             0,
-                             &callbackStruct,
-                             sizeof(callbackStruct));
-        AudioUnitUninitialize(m_OutputAU);
-    }
-    if (step.dispose && m_OutputAU != nullptr) {
-        AudioComponentInstanceDispose(m_OutputAU);
-        m_OutputAU = nullptr;
-    }
-
-    // The render callback reads the ring. Destroy it only after stop.
-    if (step.cleanupRing) {
-        TPCircularBufferCleanup(&m_RingBuffer);
-    }
-
-    if (step.removeListeners) {
+    if (m_OutputDeviceID) {
         deinitListeners();
         m_OutputDeviceID = 0;
     }
 
-    if (step.freeDeviceName) {
+    if (m_OutputAU != nullptr) {
+        // Stop and uninitialize only after those calls succeeded. Stopping a
+        // unit that never started, or uninitializing one that never
+        // initialized, trips Core Audio during teardown.
+        if (m_OutputStarted) {
+            AudioOutputUnitStop(m_OutputAU);
+            m_OutputStarted = false;
+        }
+        clearCallback();
+
+        m_SpatialAU.cleanup();
+
+        if (m_OutputInitialized) {
+            AudioUnitUninitialize(m_OutputAU);
+            m_OutputInitialized = false;
+        }
+        AudioComponentInstanceDispose(m_OutputAU);
+        m_OutputAU = nullptr;
+    }
+
+    TPCircularBufferCleanup(&m_RingBuffer);
+
+    if (m_OutputDeviceName) {
         free(m_OutputDeviceName);
         m_OutputDeviceName = nullptr;
     }
-
-    m_OutputInitialized = step.after.initialized;
-    m_OutputStarted = step.after.started;
-    m_RingReady = step.after.ring;
-}
-
-void CoreAudioRenderer::stop()
-{
-    DEBUG_TRACE("CoreAudioRenderer stop");
-    applyTeardown(coreAudioStop(playbackState()));
-}
-
-void CoreAudioRenderer::cleanup()
-{
-    DEBUG_TRACE("CoreAudioRenderer cleanup");
-    applyTeardown(coreAudioCleanup(playbackState()));
 }
 
 int CoreAudioRenderer::getCapabilities()
@@ -134,25 +103,39 @@ IAudioRenderer::AudioFormat CoreAudioRenderer::getAudioBufferFormat()
 
 void CoreAudioRenderer::statsIncDeviceOverload()
 {
-    m_ActiveWndAudioStats.totalGlitches++;
+   //m_ActiveWndAudioStats.totalGlitches++;
 }
 
 // realtime method
-void CoreAudioRenderer::statsTrackRender(uint64_t startTimeUs, const AudioTimeStamp *inTimestamp, uint32_t inNumberFrames)
+void CoreAudioRenderer::statsTrackRender(uint64_t startTimeUs, const AudioTimeStamp *inTimestamp, uint32_t inNumberFrames, bool didUnderrun)
 {
+    // If no audio is playing, it's normal to get many underruns in a row.
+    // We will only increment the underrun stat for the first empty buffer and
+    // require some audio data before counting it again.
+    static bool seenAudio = true;
+    if (didUnderrun) {
+        if (seenAudio) {
+            ++m_DropCountUnderrun;
+            seenAudio = false;
+        }
+    } else {
+        seenAudio = true;
+    }
+
     // check for lost packets because we weren't called in time, possibly due to system overload
     if (m_LastSampleTime && inTimestamp->mFlags & kAudioTimeStampSampleTimeValid) {
         double expectedSampleTime = m_LastSampleTime + inNumberFrames;
         if (expectedSampleTime != inTimestamp->mSampleTime) {
-            m_ActiveWndAudioStats.totalGlitches++;
-
-#ifdef COREAUDIO_DEBUG
             uint32_t lostFrames = (inTimestamp->mSampleTime - m_LastSampleTime) - m_LastNumFrames;
             double lostDuration = (double)lostFrames / 48000.0;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                DEBUG_TRACE("[%llu] Error: lost/dropped audio frames: %u (%.02fms)", inTimestamp->mHostTime, lostFrames, lostDuration * 1000.0);
-            });
-#endif
+
+            //m_ActiveWndAudioStats.totalGlitches++;
+
+// #ifdef COREAUDIO_DEBUG
+//             dispatch_async(dispatch_get_main_queue(), ^{
+//                 DEBUG_TRACE("[%llu] Error: lost/dropped audio frames: %u (%.02fms)", inTimestamp->mHostTime, lostFrames, lostDuration * 1000.0);
+//             });
+// #endif
         }
     }
 
@@ -160,61 +143,13 @@ void CoreAudioRenderer::statsTrackRender(uint64_t startTimeUs, const AudioTimeSt
     m_LastNumFrames = inNumberFrames;
 
     // add this to our decoderTime
-    uint64_t decodeTimeUs = LiGetMicroseconds() - startTimeUs;
-    m_ActiveWndAudioStats.decodeDurationUs += decodeTimeUs;
+    //uint64_t decodeTimeUs = LiGetMicroseconds() - startTimeUs;
+    //m_ActiveWndAudioStats.decodeDurationUs += decodeTimeUs;
 
     // We now have decodeDurationUs covering 2 time periods:
     // 1. Filling the queue: Opus decoding plus write to circular buffer (statsTrackDecodeTime)
     // 2. Emptying the queue: from start of AudioUnit callback in either direct or spatial mode (statsTrackRender)
     //    Although it's referred to as render time, the time is just added to decodeDurationUs
-}
-
-int CoreAudioRenderer::stringifyAudioStats(AUDIO_STATS& stats, char *output, int length)
-{
-    // let parent class provide generic stats first
-    int offset = IAudioRenderer::stringifyAudioStats(stats, output, length);
-    if (offset < 0) {
-        return -1;
-    }
-
-    int ret = snprintf(
-        &output[offset],
-        length - offset,
-        "Output device: %s @ %.1f kHz, %u-channel\n"
-        "Render mode: %s %s %s %s\n"
-        "Latency: %0.1f ms (network %d ms, buffers %.1f ms, hardware: %.1f ms)\n",
-
-        // "Output device: %s @ %.1f kHz, %u-channel\n"
-        m_OutputDeviceName,
-        m_OutputASBD.mSampleRate / 1000.0,
-        m_OutputASBD.mChannelsPerFrame,
-
-        // "Render mode: %s %s %s %s\n"
-        m_Spatial ? (m_SpatialAU.m_PersonalizedHRTF ? "personalized spatial audio" : "spatial audio") : "passthrough",
-        m_Spatial && m_SpatialAU.m_HeadTracking ? "with head-tracking for" : "for",
-        !strcmp(m_OutputTransportType, "blue") ? "Bluetooth"
-            : !strcmp(m_OutputTransportType, "bltn") ? "built-in"
-            : !strcmp(m_OutputTransportType, "usb ") ? "USB"
-            : !strcmp(m_OutputTransportType, "hdmi") ? "HDMI"
-            : !strcmp(m_OutputTransportType, "airp") ? "AirPlay"
-            : m_OutputTransportType,
-        !strcmp(m_OutputDataSource      , "hdpn") ? "headphones"
-            : !strcmp(m_OutputDataSource, "ispk") ? "internal speakers"
-            : !strcmp(m_OutputDataSource, "espk") ? "external speakers"
-            : m_OutputDataSource,
-
-        // "Latency: %0.1fms (network %dms, buffers %.1fms, hardware: %.1fms)\n"
-        (double)stats.lastRtt + (m_TotalSoftwareLatency + m_OutputHardwareLatency) * 1000.0,
-        stats.lastRtt,
-        m_TotalSoftwareLatency * 1000.0,
-        m_OutputHardwareLatency * 1000.0
-    );
-    if (ret < 0 || ret >= length - offset) {
-        SDL_assert(false);
-        return -1;
-    }
-
-    return offset + ret;
 }
 
 // realtime method
@@ -230,26 +165,30 @@ OSStatus renderCallbackDirect(void *inRefCon,
     CoreAudioRenderer *me = (CoreAudioRenderer *)inRefCon;
     int bytesToCopy = ioData->mBuffers[0].mDataByteSize;
     float *targetBuffer = (float *)ioData->mBuffers[0].mData;
-    // mDataByteSize is bytes. vDSP lengths are float samples.
-    const int samplesToCopy = coreAudioFloatSampleCount(bytesToCopy);
 
     // Pull audio from playthrough buffer
     uint32_t availableBytes;
     float *buffer = (float *)TPCircularBufferTail(&me->m_RingBuffer, &availableBytes);
 
-    if (targetBuffer == nullptr || samplesToCopy <= 0) {
-        *ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
-    } else if ((int)availableBytes < bytesToCopy) {
-        // write silence if not enough buffered data is available
-        vDSP_vclr(targetBuffer, 1, (vDSP_Length)samplesToCopy);
-        *ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
-    } else {
-        const int samples = qMin(samplesToCopy, coreAudioFloatSampleCount((int)availableBytes));
-        vDSP_mmov(buffer, targetBuffer, 1, (vDSP_Length)samples, 1, 1);
-        TPCircularBufferConsume(&me->m_RingBuffer, samples * (int)sizeof(float));
+    // Optionally force a minimum buffer size before playback
+    bool buffering = false;
+    uint32_t channelCount = ioData->mNumberBuffers;
+    float queuedAudioMs = (float)availableBytes / (48 * channelCount * sizeof(float));
+    if (queuedAudioMs < 20.0) {
+        buffering = true;
     }
 
-    me->statsTrackRender(start, inTimestamp, inNumberFrames);
+    if ((int)availableBytes < bytesToCopy) {
+        // write silence if not enough buffered data is available
+        memset(targetBuffer, 0, bytesToCopy);
+        *ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
+    } else {
+        const int bytesCopied = qMin(bytesToCopy, (int)availableBytes);
+        memcpy(targetBuffer, buffer, bytesCopied);
+        TPCircularBufferConsume(&me->m_RingBuffer, bytesCopied);
+    }
+
+    me->statsTrackRender(start, inTimestamp, inNumberFrames, *ioActionFlags & kAudioUnitRenderAction_OutputIsSilence);
 
     return noErr;
 }
@@ -266,6 +205,16 @@ OSStatus renderCallbackSpatial(void *inRefCon,
     CoreAudioRenderer *me = (CoreAudioRenderer *)inRefCon;
     AudioBufferList *spatialBuffer = me->m_SpatialBuffer.get();
 
+    // SpatialAU's inputCallback can't return a status via ioActionFlags, so we need to track underruns here
+    uint32_t availableBytes;
+    TPCircularBufferTail(&me->m_RingBuffer, &availableBytes);
+    uint32_t channelCount = ioData->mNumberBuffers;
+    uint32_t wantedBytes  = channelCount * inNumberFrames * sizeof(float);
+    bool didUnderrun = false;
+    if (availableBytes < wantedBytes) {
+        didUnderrun = true;
+    }
+
     // Set the byte size with the output audio buffer list.
     for (uint32_t i = 0; i < spatialBuffer->mNumberBuffers; i++) {
         spatialBuffer->mBuffers[i].mDataByteSize = inNumberFrames * 4;
@@ -274,13 +223,12 @@ OSStatus renderCallbackSpatial(void *inRefCon,
     // Process the input frames with the audio unit spatial mixer.
     me->m_SpatialAU.process(spatialBuffer, ioActionFlags, inTimestamp, inNumberFrames);
 
-    // Copy the temporary buffer to the output. One planar float sample per frame.
-    const vDSP_Length planarSamples = coreAudioPlanarSampleCount(inNumberFrames);
+    // Copy the temporary buffer to the output.
     for (uint32_t i = 0; i < spatialBuffer->mNumberBuffers; i++) {
-        vDSP_mmov((const float *)spatialBuffer->mBuffers[i].mData, (float *)ioData->mBuffers[i].mData, 1, planarSamples, 1, 1);
+        memcpy(ioData->mBuffers[i].mData, spatialBuffer->mBuffers[i].mData, inNumberFrames * sizeof(float));
     }
 
-    me->statsTrackRender(start, inTimestamp, inNumberFrames);
+    me->statsTrackRender(start, inTimestamp, inNumberFrames, didUnderrun);
 
     return noErr;
 }
@@ -330,7 +278,7 @@ bool CoreAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION*
     // If necessary, the OS takes care of resampling (but not downmixing, hmm)
     AudioStreamBasicDescription streamDesc;
     memset(&streamDesc, 0, sizeof(AudioStreamBasicDescription));
-    streamDesc.mSampleRate       = m_opusConfig->sampleRate;
+    streamDesc.mSampleRate       = opusConfig->sampleRate;
     streamDesc.mFormatID         = kAudioFormatLinearPCM;
     streamDesc.mFormatFlags      = kAudioFormatFlagIsFloat | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked;
     streamDesc.mFramesPerPacket  = 1;
@@ -341,9 +289,7 @@ bool CoreAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION*
 
     if (m_Spatial) {
         // render audio for binaural headphones or built-in laptop speakers
-        if (!setCallback(renderCallbackSpatial)) {
-            return false;
-        }
+        setCallback(renderCallbackSpatial);
 
         // this callback is non-interleaved
         streamDesc.mFormatFlags    |= kAudioFormatFlagIsNonInterleaved;
@@ -362,9 +308,7 @@ bool CoreAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION*
         m_TotalSoftwareLatency += m_SpatialAU.getAudioUnitLatency();
     } else {
         // direct passthrough of all channels for stereo and HDMI
-        if (!setCallback(renderCallbackDirect)) {
-            return false;
-        }
+        setCallback(renderCallbackDirect);
 
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "CoreAudioRenderer is using passthrough mode");
     }
@@ -372,21 +316,6 @@ bool CoreAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION*
     status = AudioUnitSetProperty(m_OutputAU, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &streamDesc, sizeof(streamDesc));
     if (status != noErr) {
         CA_LogError(status, "Failed to set output stream format");
-        return false;
-    }
-
-    // EnableIO, the device, the callback, and the stream format are set.
-    // Initialize now so the ExtendedAudioBufferList matches this configuration.
-    // Doing it earlier, then changing those properties, frees that list and
-    // AudioUnitUninitialize frees it again when the stream stops.
-    status = AudioUnitInitialize(m_OutputAU);
-    if (status != noErr) {
-        CA_LogError(status, "Failed to initialize the output audio unit");
-        return false;
-    }
-    m_OutputInitialized = true;
-
-    if (!readInitializedOutputLatency()) {
         return false;
     }
 
@@ -398,30 +327,47 @@ bool CoreAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION*
     }
     m_OutputStarted = true;
 
+    DevUISettings::instance().UpdateMetrics([&](DevUIMetrics& metrics) {
+        metrics.opusChannelCount = m_opusConfig->channelCount;
+        strncpy(metrics.audioOutputDeviceName, m_OutputDeviceName, sizeof(metrics.audioOutputDeviceName));
+        metrics.audioFrameDurationMs = m_AudioPacketDuration * 1000;
+        metrics.audioSampleRate = m_OutputASBD.mSampleRate;
+        metrics.audioChannels = m_OutputASBD.mChannelsPerFrame;
+        metrics.spatialAudioActive = m_Spatial;
+        metrics.audioPersonalizedHRTF = m_SpatialAU.m_PersonalizedHRTF;
+        metrics.audioHeadTracking = m_SpatialAU.getHeadTracking();
+        strncpy(metrics.audioOutputTransportType, m_OutputTransportType, 5);
+        strncpy(metrics.audioOutputDataSource, m_OutputDataSource, 5);
+        metrics.audioTotalSoftwareLatency = m_TotalSoftwareLatency;
+        metrics.audioOutputHardwareLatency = m_OutputHardwareLatency;
+    });
+
     return true;
 }
 
-bool CoreAudioRenderer::readInitializedOutputLatency()
+void CoreAudioRenderer::updateMetrics()
 {
-#if TARGET_OS_OSX
-    double audioUnitLatency = 0.0;
-    uint32_t size = sizeof(audioUnitLatency);
-    OSStatus status = AudioUnitGetProperty(m_OutputAU, kAudioUnitProperty_Latency, kAudioUnitScope_Global, 0, &audioUnitLatency, &size);
-    if (status != noErr) {
-        CA_LogError(status, "Failed to get OutputAU AudioUnit latency");
-        return false;
-    }
-    m_TotalSoftwareLatency += audioUnitLatency;
-    DEBUG_TRACE("CoreAudioRenderer OutputAU AudioUnit latency: %0.2f ms", audioUnitLatency * 1000.0);
-#endif
-    return true;
+    DevUISettings::instance().UpdateMetrics([&](DevUIMetrics& metrics) {
+        metrics.audioDropCount += m_DropCount;
+        metrics.audioDropCountUnderrun += m_DropCountUnderrun;
+        int bytesPerMs = (m_OutputASBD.mSampleRate * m_opusConfig->channelCount * sizeof(float)) / 1000;
+        metrics.audioInBufferMs = (float)m_QueuedAudioSize.load() / bytesPerMs;
+
+        // Let DevUI reset the counters to 0
+        m_DropCount = 0;
+        m_DropCountUnderrun = 0;
+    });
 }
 
 bool CoreAudioRenderer::initAudioUnit()
 {
-    // Configure only. AudioUnitInitialize runs in prepareForPlayback after
-    // the stream format and render callback are installed.
-    OSStatus status = noErr;
+    // Initialize the audio unit interface to begin configuring it.
+    OSStatus status = AudioUnitInitialize(m_OutputAU);
+    if (status != noErr) {
+        CA_LogError(status, "Failed to initialize the output audio unit");
+        return false;
+    }
+    m_OutputInitialized = true;
 
     /* macOS:
      * disable OutputAU input IO
@@ -565,6 +511,18 @@ bool CoreAudioRenderer::initAudioUnit()
     }
 
     {
+        double audioUnitLatency = 0.0;
+        uint32_t size = sizeof(audioUnitLatency);
+        status = AudioUnitGetProperty(m_OutputAU, kAudioUnitProperty_Latency, kAudioUnitScope_Global, 0, &audioUnitLatency, &size);
+        if (status != noErr) {
+            CA_LogError(status, "Failed to get OutputAU AudioUnit latency");
+            return false;
+        }
+        m_TotalSoftwareLatency += audioUnitLatency;
+        DEBUG_TRACE("CoreAudioRenderer OutputAU AudioUnit latency: %0.2f ms", audioUnitLatency * 1000.0);
+    }
+
+    {
         uint32_t safetyOffsetLatency = 0;
         uint32_t size = sizeof(safetyOffsetLatency);
         AudioObjectPropertyAddress addrGet{kAudioDevicePropertySafetyOffset, kAudioDevicePropertyScopeOutput, kAudioObjectPropertyElementMain};
@@ -605,7 +563,6 @@ bool CoreAudioRenderer::initRingBuffer()
                                    m_opusConfig->samplesPerFrame *
                                    packetsToBuffer);
     if (!ok) return false;
-    m_RingReady = true;
 
     // Spatial mixer code needs to be able to read from the ring buffer
     m_SpatialAU.setRingBufferPtr(&m_RingBuffer);
@@ -635,7 +592,7 @@ OSStatus onAudioNeedsReinit(AudioObjectID /*inObjectID*/,
 {
     CoreAudioRenderer *me = (CoreAudioRenderer *)inClientData;
     SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "CoreAudioRenderer output device had a change, will reinit");
-    me->m_needsReinit = true;
+    me->m_needsReinit.store(true);
     return noErr;
 }
 
@@ -696,15 +653,25 @@ bool CoreAudioRenderer::setCallback(AURenderCallback callback)
     callbackStruct.inputProc = callback;
     callbackStruct.inputProcRefCon = this;
 
-    // Input scope is the client buffer the output unit pulls. Output scope
-    // is the unit's own renderer, which owns the ExtendedAudioBufferList.
-    OSStatus status = AudioUnitSetProperty(m_OutputAU, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callbackStruct, sizeof(callbackStruct));
+    OSStatus status = AudioUnitSetProperty(m_OutputAU, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Output, 0, &callbackStruct, sizeof(callbackStruct));
     if (status != noErr) {
         CA_LogError(status, "Failed to set output render callback");
         return false;
     }
 
     return true;
+}
+
+void CoreAudioRenderer::clearCallback()
+{
+    AURenderCallbackStruct callbackStruct = {};
+    callbackStruct.inputProc = nullptr;
+    callbackStruct.inputProcRefCon = nullptr;
+
+    OSStatus status = AudioUnitSetProperty(m_OutputAU, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Output, 0, &callbackStruct, sizeof(callbackStruct));
+    if (status != noErr) {
+        CA_LogError(status, "Error clearing output render callback");
+    }
 }
 
 void* CoreAudioRenderer::getAudioBuffer(int* size)
@@ -727,7 +694,7 @@ void* CoreAudioRenderer::getAudioBuffer(int* size)
 bool CoreAudioRenderer::submitAudio(int bytesWritten)
 {
     // We'll be fully recreated after any changes to the audio device, default output, etc.
-    if (m_needsReinit) {
+    if (m_needsReinit.load()) {
         return false;
     }
 
@@ -737,14 +704,18 @@ bool CoreAudioRenderer::submitAudio(int bytesWritten)
     }
 
     // drop packet if we've fallen behind Moonlight's queue by at least 30 ms
-    if (LiGetPendingAudioDuration() > 30) {
-        m_ActiveWndAudioStats.totalGlitches++;
-        m_ActiveWndAudioStats.droppedOverload++;
+    if (LiGetPendingAudioDuration() > 60) {
+        ++m_DropCount;
         return true;
     }
 
     // Advance the write pointer
     TPCircularBufferProduce(&m_RingBuffer, bytesWritten);
+
+    // Get buffered audio size
+    uint32_t availableBytes;
+    TPCircularBufferTail(&m_RingBuffer, &availableBytes);
+    m_QueuedAudioSize.store(availableBytes);
 
     return true;
 }
@@ -844,4 +815,11 @@ void CoreAudioRenderer::setOutputDeviceName(const CFStringRef cfstr)
 
         m_OutputDeviceName = buffer;
     }
+}
+
+void CoreAudioRenderer::setHeadTracking(bool enabled)
+{
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "CoreAudioRenderer head tracking set to %d", enabled);
+    m_SpatialAU.setHeadTracking(enabled);
+    m_needsReinit.store(true);
 }

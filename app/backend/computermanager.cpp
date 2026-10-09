@@ -9,8 +9,7 @@
 #include <QThread>
 #include <QThreadPool>
 #include <QCoreApplication>
-
-#include <random>
+#include <QRandomGenerator>
 
 #define SER_HOSTS "hosts"
 #define SER_HOSTS_BACKUP "hostsbackup"
@@ -30,9 +29,9 @@ public:
     }
 
 private:
-    bool tryPollComputer(NvAddress address, bool& changed)
+    bool tryPollComputer(QNetworkAccessManager* nam, NvAddress address, bool& changed)
     {
-        NvHTTP http(address, 0, m_Computer->serverCert);
+        NvHTTP http(address, 0, m_Computer->serverCert, !m_Computer->isNvidiaServerSoftware, nam);
 
         QString serverInfo;
         try {
@@ -49,13 +48,21 @@ private:
             return false;
         }
 
+        const int reportedGameId = newState.currentGameId;
         changed = m_Computer->update(newState);
+        // A quit clears the id immediately and leaves pendingQuit set so a
+        // stale non-zero sample cannot put the tile back on Live. pendingQuit
+        // clears only when a sample itself says nothing is running. Forcing
+        // a notification is what lets that clear run when the id was already 0.
+        if (m_Computer->pendingQuit && m_Computer->currentGameId == 0 && reportedGameId == 0) {
+            changed = true;
+        }
         return true;
     }
 
-    bool updateAppList(bool& changed)
+    bool updateAppList(QNetworkAccessManager* nam, bool& changed)
     {
-        NvHTTP http(m_Computer);
+        NvHTTP http(m_Computer, nam);
 
         QVector<NvApp> appList;
 
@@ -75,6 +82,21 @@ private:
 
     void run() override
     {
+        // Reduce the power and performance impact of our
+        // computer status polling while it's running.
+        setPriority(QThread::LowPriority);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+        setServiceLevel(QThread::QualityOfService::Eco);
+#endif
+
+        // Share the QNetworkAccessManager to conserve resources when polling.
+        // Each instance creates a worker thread, so sharing them ensures that
+        // we are not spamming a new thread for every single polling attempt.
+        //
+        // Since QThread inherit the priority of the current thread, this also
+        // ensures that the NAM's worker thread will inherit our lower priority.
+        QNetworkAccessManager nam;
+
         // Always fetch the applist the first time
         int pollsSinceLastAppListFetch = POLLS_PER_APPLIST_FETCH;
         while (!isInterruptionRequested()) {
@@ -87,7 +109,7 @@ private:
                         return;
                     }
 
-                    if (tryPollComputer(address, stateChanged)) {
+                    if (tryPollComputer(&nam, address, stateChanged)) {
                         if (!wasOnline) {
                             qInfo() << m_Computer->name << "is now online at" << m_Computer->activeAddress.toString();
                         }
@@ -118,7 +140,7 @@ private:
                     stateChanged = false;
                 }
 
-                if (updateAppList(stateChanged)) {
+                if (updateAppList(&nam, stateChanged)) {
                     pollsSinceLastAppListFetch = 0;
                 }
             }
@@ -217,17 +239,17 @@ ComputerManager::~ComputerManager()
     m_MdnsBrowser = nullptr;
 
     // Interrupt polling
-    for (ComputerPollingEntry* entry : m_PollEntries) {
+    for (ComputerPollingEntry* entry : std::as_const(m_PollEntries)) {
         entry->interrupt();
     }
 
     // Delete all polling entries (and associated threads)
-    for (ComputerPollingEntry* entry : m_PollEntries) {
+    for (ComputerPollingEntry* entry : std::as_const(m_PollEntries)) {
         delete entry;
     }
 
     // Destroy all NvComputer objects now that polling is halted
-    for (NvComputer* computer : m_KnownHosts) {
+    for (NvComputer* computer : std::as_const(m_KnownHosts)) {
         delete computer;
     }
 }
@@ -254,7 +276,7 @@ void DelayedFlushThread::run() {
 
             // Update the last serialized hosts map under the delayed flush mutex
             m_ComputerManager->m_LastSerializedHosts.clear();
-            for (const NvComputer* computer : m_ComputerManager->m_KnownHosts) {
+            for (const NvComputer* computer : std::as_const(m_ComputerManager->m_KnownHosts)) {
                 // Copy the current state of the NvComputer to allow us to check later if we need
                 // to serialize it again when attribute updates occur.
                 QReadLocker computerLock(&computer->lock);
@@ -271,7 +293,7 @@ void DelayedFlushThread::run() {
             {
                 QReadLocker lock(&m_ComputerManager->m_Lock);
                 int i = 0;
-                for (const NvComputer* computer : m_ComputerManager->m_KnownHosts) {
+                for (const NvComputer* computer : std::as_const(m_ComputerManager->m_KnownHosts)) {
                     settings.setArrayIndex(i++);
                     computer->serialize(settings, false);
                 }
@@ -284,7 +306,7 @@ void DelayedFlushThread::run() {
             {
                 QReadLocker lock(&m_ComputerManager->m_Lock);
                 int i = 0;
-                for (const NvComputer* computer : m_ComputerManager->m_KnownHosts) {
+                for (const NvComputer* computer : std::as_const(m_ComputerManager->m_KnownHosts)) {
                     settings.setArrayIndex(i++);
                     computer->serialize(settings, true);
                 }
@@ -410,13 +432,15 @@ void ComputerManager::handleMdnsServiceResolved(MdnsPendingComputer* computer,
     bool added = false;
 
     // Add the host using the IPv4 address
-    for (const QHostAddress& address : addresses) {
+    for (const QHostAddress& address : std::as_const(addresses)) {
         if (address.protocol() == QAbstractSocket::IPv4Protocol) {
             // NB: We don't just call addNewHost() here with v6Global because the IPv6
             // address may not be reachable (if the user hasn't installed the IPv6 helper yet
             // or if this host lacks outbound IPv6 capability). We want to add IPv6 even if
             // it's not currently reachable.
-            addNewHost(NvAddress(address, computer->port()), true, NvAddress(v6Global, computer->port()));
+            addNewHost(NvAddress(address, computer->port()),
+                       true, computer->hostname(),
+                       NvAddress(v6Global, computer->port()));
             added = true;
             break;
         }
@@ -424,13 +448,15 @@ void ComputerManager::handleMdnsServiceResolved(MdnsPendingComputer* computer,
 
     if (!added) {
         // If we get here, there wasn't an IPv4 address so we'll do it v6-only
-        for (const QHostAddress& address : addresses) {
+        for (const QHostAddress& address : std::as_const(addresses)) {
             if (address.protocol() == QAbstractSocket::IPv6Protocol) {
                 // Use a link-local or site-local address for the "local address"
                 if (address.isInSubnet(QHostAddress("fe80::"), 10) ||
                         address.isInSubnet(QHostAddress("fec0::"), 10) ||
                         address.isInSubnet(QHostAddress("fc00::"), 7)) {
-                    addNewHost(NvAddress(address, computer->port()), true, NvAddress(v6Global, computer->port()));
+                    addNewHost(NvAddress(address, computer->port()),
+                               true, computer->hostname(),
+                               NvAddress(v6Global, computer->port()));
                     break;
                 }
             }
@@ -551,7 +577,7 @@ void ComputerManager::handleAboutToQuit()
 
     // Interrupt polling threads immediately, so they
     // avoid making additional requests while quitting
-    for (ComputerPollingEntry* entry : m_PollEntries) {
+    for (ComputerPollingEntry* entry : std::as_const(m_PollEntries)) {
         entry->interrupt();
     }
 }
@@ -693,7 +719,9 @@ void ComputerManager::quitRunningApp(NvComputer* computer)
                 return;
             }
             computer->currentGameId = 0;
-            computer->pendingQuit = false;
+            // Stay set until a serverinfo sample reports 0. Clearing it here
+            // lets the next stale poll adopt the app id again.
+            computer->pendingQuit = true;
         }
         // Same notifications as a poll that sees the app stop, without
         // waiting for the next serverinfo pass (that pass used to be the
@@ -707,6 +735,30 @@ void ComputerManager::quitRunningApp(NvComputer* computer)
         quit->deleteLater();
     }, Qt::QueuedConnection);
     QThreadPool::globalInstance()->start(quit);
+}
+
+void ComputerManager::applyReportedRunningGame(NvComputer* computer, int gameId)
+{
+    if (computer == nullptr) {
+        return;
+    }
+
+    {
+        QWriteLocker lock(&computer->lock);
+        if (gameId == 0) {
+            computer->currentGameId = 0;
+            // Do not call handleComputerStateChanged(): that clears
+            // pendingQuit as soon as the id is 0, before a poll confirms it.
+            computer->pendingQuit = true;
+        }
+        else {
+            computer->pendingQuit = false;
+            computer->currentGameId = gameId;
+        }
+    }
+
+    emit computerStateChanged(computer);
+    saveHost(computer);
 }
 
 void ComputerManager::stopPollingAsync()
@@ -731,7 +783,7 @@ void ComputerManager::stopPollingAsync()
     m_MdnsServer.reset();
 
     // Interrupt all threads, but don't wait for them to terminate
-    for (ComputerPollingEntry* entry : m_PollEntries) {
+    for (ComputerPollingEntry* entry : std::as_const(m_PollEntries)) {
         entry->interrupt();
     }
 }
@@ -743,6 +795,10 @@ void ComputerManager::addNewHostManually(QString address)
         // If there wasn't a port specified, use the default
         addNewHost(NvAddress(url.host(), url.port(DEFAULT_HTTP_PORT)), false);
     }
+    else if (QHostAddress(address).protocol() == QAbstractSocket::IPv6Protocol) {
+        // The user specified an IPv6 literal without URL escaping, so use the default port
+        addNewHost(NvAddress(address, DEFAULT_HTTP_PORT), false);
+    }
     else {
         emit computerAddCompleted(false, false);
     }
@@ -753,8 +809,9 @@ class PendingAddTask : public QObject, public QRunnable
     Q_OBJECT
 
 public:
-    PendingAddTask(ComputerManager* computerManager, NvAddress address, NvAddress mdnsIpv6Address, bool mdns)
+    PendingAddTask(ComputerManager* computerManager, QString name, NvAddress address, NvAddress mdnsIpv6Address, bool mdns)
         : m_ComputerManager(computerManager),
+          m_Name(name),
           m_Address(address),
           m_MdnsIpv6Address(mdnsIpv6Address),
           m_Mdns(mdns),
@@ -830,9 +887,21 @@ private:
 
     void run()
     {
-        NvHTTP http(m_Address, 0, QSslCertificate());
+        // Use the placeholder UID for the initial poll, then we'll switch to the real one if it's not GFE
+        NvHTTP http(m_Address, 0, QSslCertificate(), false);
 
-        qInfo() << "Processing new PC at" << m_Address.toString() << "from" << (m_Mdns ? "mDNS" : "user") << "with IPv6 address" << m_MdnsIpv6Address.toString();
+        if (m_Mdns) {
+            if (m_MdnsIpv6Address.isNull()) {
+                qInfo() << "Processing new PC" << m_Name << "from mDNS with local address" << m_Address.toString();
+            }
+            else {
+                qInfo() << "Processing new PC" << m_Name << "from mDNS with local address" << m_Address.toString()
+                        << "and IPv6 address" << m_MdnsIpv6Address.toString();
+            }
+        }
+        else {
+            qInfo() << "Processing new PC at" << m_Address.toString() << "from user";
+        }
 
         // Perform initial serverinfo fetch over HTTP since we don't know which cert to use
         QString serverInfo = fetchServerInfo(http);
@@ -847,6 +916,7 @@ private:
 
         // Create initial newComputer using HTTP serverinfo with no pinned cert
         NvComputer* newComputer = new NvComputer(http, serverInfo);
+        http.setTrueUid(!newComputer->isNvidiaServerSoftware);
 
         // Check if we have a record of this host UUID to pull the pinned cert
         NvComputer* existingComputer;
@@ -980,28 +1050,24 @@ private:
     }
 
     ComputerManager* m_ComputerManager;
+    QString m_Name;
     NvAddress m_Address;
     NvAddress m_MdnsIpv6Address;
     bool m_Mdns;
     bool m_AboutToQuit;
 };
 
-void ComputerManager::addNewHost(NvAddress address, bool mdns, NvAddress mdnsIpv6Address)
+void ComputerManager::addNewHost(NvAddress address, bool mdns, QString name, NvAddress mdnsIpv6Address)
 {
     // Punt to a worker thread to avoid stalling the
     // UI while waiting for serverinfo query to complete
-    PendingAddTask* addTask = new PendingAddTask(this, address, mdnsIpv6Address, mdns);
+    PendingAddTask* addTask = new PendingAddTask(this, name, address, mdnsIpv6Address, mdns);
     QThreadPool::globalInstance()->start(addTask);
 }
 
-// TODO: Use QRandomGenerator when we drop Qt 5.9 support
 QString ComputerManager::generatePinString()
 {
-    std::uniform_int_distribution<int> dist(0, 9999);
-    std::random_device rd;
-    std::mt19937 engine(rd());
-
-    return QString::asprintf("%04u", dist(engine));
+    return QString::asprintf("%04u", QRandomGenerator::system()->bounded(10000));
 }
 
 #include "computermanager.moc"

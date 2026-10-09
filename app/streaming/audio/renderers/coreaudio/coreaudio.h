@@ -4,10 +4,11 @@
 #include "au_spatial_renderer.h"
 #include "AllocatedAudioBufferList.h"
 #include "TPCircularBuffer.h"
-#include "coreaudio_playback.h"
 
 #include <AudioUnit/AudioUnit.h>
 #include <AudioToolbox/AudioToolbox.h>
+
+#include <atomic>
 
 class CoreAudioRenderer : public IAudioRenderer
 {
@@ -15,19 +16,20 @@ public:
     CoreAudioRenderer();
     ~CoreAudioRenderer();
 
-    bool prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* opusConfig);
-    virtual void* getAudioBuffer(int* size);
-    virtual bool submitAudio(int bytesWritten);
+    bool prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* opusConfig) override;
+    virtual void updateMetrics() override;
+    virtual void* getAudioBuffer(int* size) override;
+    virtual bool submitAudio(int bytesWritten) override;
     virtual int getCapabilities();
-    virtual AudioFormat getAudioBufferFormat();
+    virtual AudioFormat getAudioBufferFormat() override;
+    virtual void setHeadTracking(bool enabled) override;
     const char * getRendererName() { return "CoreAudio"; }
-    virtual int stringifyAudioStats(AUDIO_STATS &stats, char* output, int length);
 
     friend OSStatus renderCallbackDirect(void *, AudioUnitRenderActionFlags *, const AudioTimeStamp *, uint32_t, uint32_t, AudioBufferList *);
     friend OSStatus renderCallbackSpatial(void *, AudioUnitRenderActionFlags *, const AudioTimeStamp *, uint32_t, uint32_t, AudioBufferList *);
     friend OSStatus onDeviceOverload(AudioObjectID, UInt32, const AudioObjectPropertyAddress *, void *);
     friend OSStatus onAudioNeedsReinit(AudioObjectID, UInt32, const AudioObjectPropertyAddress *, void *);
-    friend OSStatus onAudioNeedsReinit(Uint32, AudioObjectID, UInt32, const AudioObjectPropertyAddress *, void *);
+    friend OSStatus onAudioNeedsReinit(UInt32, AudioObjectID, UInt32, const AudioObjectPropertyAddress *, void *);;
 
 private:
     bool initAudioUnit();
@@ -35,15 +37,14 @@ private:
     bool initListeners();
     void deinitListeners();
     bool setCallback(AURenderCallback);
-    bool readInitializedOutputLatency();
-    CoreAudioPlaybackState playbackState() const;
-    void applyTeardown(const CoreAudioTeardownStep& step);
-    void stop();
+    void clearCallback();
     void cleanup();
     AUSpatialMixerOutputType getSpatialMixerOutputType();
     void setOutputDeviceName(CFStringRef);
 
     AudioUnit m_OutputAU;
+    bool m_OutputInitialized;
+    bool m_OutputStarted;
     AUSpatialRenderer m_SpatialAU;
 
     // output device metadata
@@ -52,6 +53,7 @@ private:
     char *m_OutputDeviceName;
     char m_OutputTransportType[5];
     char m_OutputDataSource[5];
+    const OPUS_MULTISTREAM_CONFIGURATION* m_opusConfig;
 
     // buffers
     TPCircularBuffer m_RingBuffer;
@@ -66,10 +68,7 @@ private:
     double m_OutputSoftwareLatencyMax;
 
     // internal device state
-    bool m_OutputInitialized;
-    bool m_OutputStarted;
-    bool m_RingReady;
-    bool m_needsReinit;
+    std::atomic<bool> m_needsReinit{false};
     bool m_Spatial;
     uint32_t m_SpatialOutputType;
     uint64_t m_LastDebugOutputTime;
@@ -80,5 +79,8 @@ private:
     uint32_t m_BufferSize;
     uint32_t m_BufferFilledBytes;
     void statsIncDeviceOverload();
-    void statsTrackRender(uint64_t, const AudioTimeStamp *, uint32_t);
+    void statsTrackRender(uint64_t, const AudioTimeStamp *, uint32_t, bool);
+    uint32_t m_DropCount;
+    uint32_t m_DropCountUnderrun;
+    std::atomic<int> m_QueuedAudioSize;
 };

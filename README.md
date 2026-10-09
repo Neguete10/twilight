@@ -1,33 +1,51 @@
 # Twilight
 
-Twilight is a Mac client for streaming a game from another computer. It is a fork of [Moonlight](https://github.com/moonlight-stream/moonlight-qt)'s Qt client through [Andy Grundman's](https://github.com/andygrundman/moonlight-qt) Core Audio spatial fork ([`andyg.coreaudio-spatial-mixer`](https://github.com/andygrundman/moonlight-qt/tree/andyg.coreaudio-spatial-mixer)), made to keep helping macOS people specifically. That Qt client is a joy, and so is the open source community around it.
+Twilight is an Apple Silicon Mac client for streaming a game from another computer. It is a fork of [Moonlight Qt](https://github.com/moonlight-stream/moonlight-qt). Moonlight has not endorsed it.
 
-It sits beside Moonlight. Moonlight has not endorsed it.
+This tree is rebuilt on [Andy Grundman's](https://github.com/andygrundman/moonlight-qt) `v6.2.0-metal-v9b` tag, which already contains upstream Moonlight Qt 6.2.0. The interactive shell is Twilight's own. The previous Classic shell is not the app you land in.
 
 ## On the Mac
 
-**A new UI.** You land in Twilight's own shell: your hosts along the side, your games in a library.
+**Twilight's shell.** Hosts along the side, games in a library, and an About page that can check GitHub for a newer release. Nothing is installed for you.
 
-**PyroWave on Vulkan and Metal.** Twilight can decode [PyroWave](https://github.com/Themaister/pyrowave) on either backend. Vulkan goes through MoltenVK. Metal is the native path, and settings can pick Automatic, Metal, or Vulkan when both are built in. A normal GameStream or Sunshine host does not send this codec. When a host does, both decoders are in the v7 build.
+**PyroWave on Metal and Vulkan, opt-in.** Built when `CONFIG+=pyrowave` is set. Settings can force the PyroWave codec. Automatic codec selection stays on HEVC or AV1 and does not advertise PyroWave. The Vulkan backend is MoltenVK and is used only when the PyroWave GPU backend is set to Vulkan. Automatic and Metal use the Metal decoder.
 
-**Spatial audio through Core Audio.** Surround streams get Apple's spatial mixer. Headphones come out binaural, the MacBook's own speakers get Apple's built-in processing, and something like HDMI is passed through. Stereo is already where it wants to be, so the mixer sits that one out. Head tracking stays off until you ask for it.
+**Spatial audio through Core Audio.** Surround streams can use Apple's spatial mixer. Stereo is passed through. Head tracking stays off until you ask for it.
 
-**Picture-in-picture.** The stream window can shrink into a floating mini player at the corner of the screen. Same decoder, same picture, just smaller and out of the way. The menu is Window → Enter Picture in Picture, and Control+Option+Shift+P does the same thing. Close that window and the stream ends, the same as always.
+**Picture-in-picture.** The stream window can shrink into a floating mini player. Control+Option+Shift+P toggles it. Closing the stream window still ends the stream.
 
-**The Mac microphone, sent through to the host.** Twilight can capture this Mac's microphone and send it along on the encrypted control stream. Game audio coming back is unchanged. The host has to know how to play that audio. Stock Sunshine does not.
+**Microphone forwarding.** This Mac's microphone can be sent to the host on the encrypted control stream (packet `0x3003`). Stock Sunshine does not play it. GeForce Experience does not receive it.
 
-**Adaptive triggers.** A DualSense can still push back. When the host sends adaptive-trigger effects, Twilight programs the triggers on the Mac, over USB or Bluetooth. Pairing stays with macOS. Twilight just teaches the pad the effect.
+**Adaptive triggers.** When the host sends DualSense effects, Twilight programs the triggers over USB or Bluetooth, with an IOKit fallback when SDL cannot. Pairing stays with macOS.
 
-**CoreHID raw mouse.** There is an opt-in raw mouse path for macOS games, aimed at the HID reports instead of the usual SDL warp. It is off until you turn on **Use CoreHID raw mouse (macOS games)**. Trackpads stay on SDL either way.
+**CoreHID raw mouse.** Off until you turn on **Use CoreHID raw mouse (macOS games)**.
 
-**macOS Game Mode.** That is the project's name for it, and Apple's. On a recent Mac, a full-screen stream can land in Game Mode, which is the system putting that game first: more of the CPU and GPU, and snappier Bluetooth for controllers and headphones.
+**Game Mode.** The bundle declares Game Mode support. A full-screen stream on a recent Mac can be scheduled ahead of other apps.
 
-**A performance overlay.** Two of them, and they mind their own business. The classic one is the yellow stats Moonlight people already know. Twilight's own is a small HUD while its shell is in use: frame rate, bitrate, network latency, and an End button when you are done.
+**Performance overlay.** The classic yellow stats overlay is still there. Twilight's HUD (frame rate, bitrate, latency, End) is separate and off until you enable it.
 
-## Download
+## Requirements
 
-The notarized disk image is on the [v7.0.0 release](https://github.com/Neguete10/twilight/releases/tag/v7.0.0): [Twilight-7.0.0.dmg](https://github.com/Neguete10/twilight/releases/download/v7.0.0/Twilight-7.0.0.dmg). Developer ID signed, notarized by Apple, a direct download. It wants macOS 11 or later.
+- Apple Silicon Mac
+- macOS 13 Ventura or later
+- Qt 6.11.2 (`qmake` and `macdeployqt`), matching Moonlight Qt 6.2
+- Prebuilt libraries from [moonlight-qt-deps](https://github.com/moonlight-stream/moonlight-qt-deps) tag `v19` (`python3 setup-deps.py`). Do not substitute Homebrew libraries into the bundle.
+- [create-dmg](https://github.com/create-dmg/create-dmg) (`brew install create-dmg`) for the disk image
+
+Nothing copied into `Twilight.app` may require a newer macOS than 13.0, and every Mach-O in the bundle must have an arm64 slice. `scripts/generate-dmg.sh` runs `scripts/check-macos-availability.py` before compile and `scripts/check-macos-minos.py` on the finished bundle. The bundle check stops if minos is above 13.0, arm64 is missing, or a non-weak `LC_LOAD_DYLIB` pulls in a system framework that macOS 13 does not have. Frameworks and APIs newer than macOS 13 must be weak-linked and used only from `@available` / `__builtin_available`, with a fallback. The Mac compile treats `-Wunguarded-availability-new` as an error at deployment target 13.0.
 
 ## Building
 
-To build it, init the submodules and run `scripts/generate-dmg.sh Release`. You will want Qt 6 (`qmake` and `macdeployqt`), Xcode, and the [create-dmg](https://github.com/create-dmg/create-dmg) shell script (`brew install create-dmg`). The disk image opens with Twilight.app on the left and an Applications folder alias on the right. The window picture is `app/deploy/macos/dmg/background.png`. Regenerate it, and the retina copy beside it, with `python3 scripts/make_dmg_background.py` (Pillow). Positions for both live in `app/deploy/macos/dmg/layout.env`. PyroWave's Vulkan and Metal decoders also need `CONFIG+=pyrowave`. That flag is described in `app/app.pro`. The disk-image script leaves it off.
+Init the submodules, then:
+
+```sh
+scripts/generate-dmg.sh Release
+```
+
+That configures an arm64 build, passes `CONFIG+=pyrowave` unless `TWILIGHT_PYROWAVE=0`, and writes `build/installer-Release/Twilight-<version>.dmg`. The disk image opens with Twilight.app on the left and an Applications alias on the right. Layout and the window picture live in `app/deploy/macos/dmg/`.
+
+Developer ID signing and notarization are hooks only. They do not run unless you set `TWILIGHT_SIGN=1` and, for notarization, `TWILIGHT_NOTARIZE=1`. Developer ID uses `app/deploy/macos/Twilight-DeveloperID.entitlements`, which contains only the Hardened Runtime microphone exception `com.apple.security.device.audio-input` and does not enable the App Sandbox. The notary keychain profile name is `twilight-notary` (team `TAV97BM6HV`).
+
+`TWILIGHT_MAS=1` is the optional Mac App Store package path. It is not the desktop disk image.
+
+The version in this tree is `7.1.0`. That number is not a published release.

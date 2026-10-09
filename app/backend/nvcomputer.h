@@ -1,8 +1,8 @@
 #pragma once
 
-#include "wake_notice.h"
 #include "nvhttp.h"
 #include "nvaddress.h"
+#include "wake_notice.h"
 
 #include <QThread>
 #include <QReadWriteLock>

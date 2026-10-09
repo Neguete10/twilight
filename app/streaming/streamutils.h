@@ -1,23 +1,22 @@
 #pragma once
 
-#include <SDL.h>
+#include "SDL_compat.h"
 
-// SDL_FRect wasn't added until 2.0.10
-#if !SDL_VERSION_ATLEAST(2, 0, 10)
-typedef struct SDL_FRect
-{
-    float x;
-    float y;
-    float w;
-    float h;
-} SDL_FRect;
-#endif
+struct RefreshRateRational {
+    int32_t numerator;
+    int32_t denominator;
+    double hz;
+    bool valid;
+};
 
 class StreamUtils
 {
 public:
     static
     Uint32 getPlatformWindowFlags();
+
+    static
+    SDL_Window* createTestWindow();
 
     static
     void scaleSourceToDestinationSurface(SDL_Rect* src, SDL_Rect* dst);
@@ -35,6 +34,9 @@ public:
     int getDisplayRefreshRate(SDL_Window* window);
 
     static
+    RefreshRateRational getDisplayRefreshRateRational(SDL_Window* window);
+
+    static
     bool hasFastAes();
 
     static
@@ -42,4 +44,16 @@ public:
 
     static
     int getDrmFd(bool preferRenderNode);
+
+    static
+    void enterAsyncLoggingMode();
+
+    static
+    void exitAsyncLoggingMode();
+
+    // After SDL_INIT_VIDEO and before any window. No-op when the bundle has
+    // no loader. Calling this before the video subsystem is initialized makes
+    // SDL reject the load.
+    static
+    void loadBundledVulkanLoader();
 };

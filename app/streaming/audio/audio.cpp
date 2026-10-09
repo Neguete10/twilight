@@ -1,10 +1,6 @@
 #include "../session.h"
 #include "renderers/renderer.h"
 
-#ifdef HAVE_SOUNDIO
-#include "renderers/soundioaudiorenderer.h"
-#endif
-
 #ifdef HAVE_SLAUDIO
 #include "renderers/slaud.h"
 #endif
@@ -27,6 +23,8 @@
 
 IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATION opusConfig)
 {
+    StreamingPreferences *prefs = StreamingPreferences::get();
+
     // Handle explicit ML_AUDIO setting and fail if the requested backend fails
     QString mlAudio = qgetenv("ML_AUDIO").toLower();
     if (mlAudio == "sdl") {
@@ -36,12 +34,6 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
 #ifdef HAVE_COREAUDIO
     else if (mlAudio == "coreaudio") {
         TRY_INIT_RENDERER(CoreAudioRenderer, opusConfig)
-        return nullptr;
-    }
-#endif
-#ifdef HAVE_SOUNDIO
-    else if (mlAudio == "libsoundio") {
-        TRY_INIT_RENDERER(SoundIoAudioRenderer, opusConfig)
         return nullptr;
     }
 #endif
@@ -67,14 +59,13 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
 
 #ifdef HAVE_COREAUDIO
     // Native renderer for macOS/iOS/tvOS, suports spatial audio
-    TRY_INIT_RENDERER(CoreAudioRenderer, opusConfig)
+    if (prefs->audioRenderer == StreamingPreferences::AUDIO_RENDERER_COREAUDIO) {
+        TRY_INIT_RENDERER(CoreAudioRenderer, opusConfig)
+    }
 #endif
 
-    // Default to SDL and use libsoundio as a fallback
+    // Default to SDL
     TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig)
-#ifdef HAVE_SOUNDIO
-    TRY_INIT_RENDERER(SoundIoAudioRenderer, opusConfig)
-#endif
 
     return nullptr;
 }
@@ -123,21 +114,17 @@ bool Session::initializeAudioRenderer()
 
 int Session::getAudioRendererCapabilities(int audioConfiguration)
 {
-    // Build a fake OPUS_MULTISTREAM_CONFIGURATION to give
-    // the renderer the channel count and sample rate.
-    OPUS_MULTISTREAM_CONFIGURATION opusConfig = {};
-    opusConfig.sampleRate = 48000;
-    opusConfig.samplesPerFrame = 240;
-    opusConfig.channelCount = CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(audioConfiguration);
+    int caps = 0;
 
-    IAudioRenderer* audioRenderer = createAudioRenderer(&opusConfig);
-    if (audioRenderer == nullptr) {
-        return 0;
-    }
+    Q_UNUSED(audioConfiguration);
 
-    int caps = audioRenderer->getCapabilities();
+    // All audio renderers support arbitrary audio duration
+    caps |= CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
 
-    delete audioRenderer;
+#ifdef STEAM_LINK
+    // Steam Link devices have slow Opus decoders
+    caps |= CAPABILITY_SLOW_OPUS_DECODER;
+#endif
 
     return caps;
 }
@@ -172,18 +159,11 @@ int Session::arInit(int /* audioConfiguration */,
 
 void Session::arCleanup()
 {
-    s_ActiveSession->m_AudioRenderer->logGlobalAudioStats();
-
     delete s_ActiveSession->m_AudioRenderer;
     s_ActiveSession->m_AudioRenderer = nullptr;
 
     opus_multistream_decoder_destroy(s_ActiveSession->m_OpusDecoder);
     s_ActiveSession->m_OpusDecoder = nullptr;
-}
-
-extern "C" void TwilightAudioDecodeAndPlaySample(char* sampleData, int sampleLength)
-{
-    Session::arDecodeAndPlaySample(sampleData, sampleLength);
 }
 
 void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
@@ -227,8 +207,6 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
     }
 
     if (s_ActiveSession->m_AudioRenderer != nullptr) {
-        uint64_t startTimeUs = LiGetMicroseconds();
-
         int sampleSize = s_ActiveSession->m_AudioRenderer->getAudioBufferSampleSize();
         int frameSize = sampleSize * s_ActiveSession->m_ActiveAudioConfig.channelCount;
         int desiredBufferSize = frameSize * s_ActiveSession->m_ActiveAudioConfig.samplesPerFrame;
@@ -263,29 +241,7 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
             desiredBufferSize = 0;
         }
 
-        // used to display the raw audio bitrate
-        s_ActiveSession->m_AudioRenderer->statsAddOpusBytesReceived(sampleLength);
-
-        // Once a second, maybe grab stats from the last two windows for display, then shift to the next stats window
-        if (LiGetMicroseconds() > s_ActiveSession->m_AudioRenderer->getActiveWndAudioStats().measurementStartUs + 1000000) {
-            if (s_ActiveSession->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebugAudio)) {
-                AUDIO_STATS lastTwoWndAudioStats = {};
-                s_ActiveSession->m_AudioRenderer->snapshotAudioStats(lastTwoWndAudioStats);
-
-                s_ActiveSession->m_AudioRenderer->stringifyAudioStats(lastTwoWndAudioStats,
-                                                                      s_ActiveSession->getOverlayManager().getOverlayText(Overlay::OverlayDebugAudio),
-                                                                      s_ActiveSession->getOverlayManager().getOverlayMaxTextLength());
-                s_ActiveSession->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebugAudio);
-            }
-
-            s_ActiveSession->m_AudioRenderer->flipAudioStatsWindows();
-        }
-
-        if (s_ActiveSession->m_AudioRenderer->submitAudio(desiredBufferSize)) {
-            // keep stats on how long the audio pipline took to execute
-            s_ActiveSession->m_AudioRenderer->statsTrackDecodeTime(startTimeUs);
-        }
-        else {
+        if (!s_ActiveSession->m_AudioRenderer->submitAudio(desiredBufferSize)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Reinitializing audio renderer after failure");
 

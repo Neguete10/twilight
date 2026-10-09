@@ -1,12 +1,11 @@
 #include "streaming/session.h"
-#include "streaming/input/gamepad_overlay.h"
 
 #include <Limelight.h>
-#include <SDL.h>
+#include "gamepad_overlay.h"
+#include "SDL_compat.h"
 #include "settings/mappingmanager.h"
-
-static_assert(kDualSenseEffectParamSize == DS_EFFECT_PAYLOAD_SIZE,
-              "client effect payload must match the 0x5503 packet");
+#include "utils.h"
+#include "imgui/gamepadmenu.h"
 
 #include <QtMath>
 
@@ -114,6 +113,8 @@ void SdlInputHandler::sendGamepadState(GamepadState* state)
                                lsY,
                                rsX,
                                rsY);
+
+    refreshGamepadOverlay(false);
 }
 
 void SdlInputHandler::sendGamepadBatteryState(GamepadState* state, SDL_JoystickPowerLevel level)
@@ -157,6 +158,30 @@ void SdlInputHandler::sendGamepadBatteryState(GamepadState* state, SDL_JoystickP
     LiSendControllerBatteryEvent(state->index, batteryState, batteryPercentage);
 }
 
+void SdlInputHandler::toggleMouseEmulation(SDL_JoystickID jsid)
+{
+    GamepadState* state = findStateForGamepad(jsid);
+    if (state == NULL) {
+        return;
+    }
+
+    if (state->mouseEmulationTimer != 0) {
+        SDL_RemoveTimer(state->mouseEmulationTimer);
+        state->mouseEmulationTimer = 0;
+
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Mouse emulation deactivated");
+        Session::get()->notifyMouseEmulationMode(false);
+    }
+    else {
+        state->mouseEmulationTimer = SDL_AddTimer(MOUSE_EMULATION_POLLING_INTERVAL, SdlInputHandler::mouseEmulationTimerCallback, state);
+
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Mouse emulation active");
+        Session::get()->notifyMouseEmulationMode(true);
+    }
+}
+
 Uint32 SdlInputHandler::mouseEmulationTimerCallback(Uint32 interval, void *param)
 {
     auto gamepad = reinterpret_cast<GamepadState*>(param);
@@ -192,6 +217,26 @@ Uint32 SdlInputHandler::mouseEmulationTimerCallback(Uint32 interval, void *param
     return interval;
 }
 
+static void updateAnalogStickAxis(short& value, short newValue, bool& dirty)
+{
+#ifdef STEAM_LINK
+    // Use a deadzone on Steam Link to reduce CPU usage from idle joysticks
+    newValue = abs(newValue) < 1500 ? 0 : newValue;
+#endif
+    dirty |= (newValue != value);
+    value = newValue;
+}
+
+static void updateTriggerAxis(unsigned char& value, unsigned char newValue, bool& dirty)
+{
+#ifdef STEAM_LINK
+    // Use a deadzone on Steam Link to reduce CPU usage from idle joysticks
+    newValue = newValue < 10 ? 0 : newValue;
+#endif
+    dirty |= (newValue != value);
+    value = newValue;
+}
+
 void SdlInputHandler::handleControllerAxisEvent(SDL_ControllerAxisEvent* event)
 {
     SDL_JoystickID gameControllerId = event->which;
@@ -202,11 +247,12 @@ void SdlInputHandler::handleControllerAxisEvent(SDL_ControllerAxisEvent* event)
 
     // Batch all pending axis motion events for this gamepad to save CPU time
     SDL_Event nextEvent;
+    bool dirty = false;
     for (;;) {
         switch (event->axis)
         {
             case SDL_CONTROLLER_AXIS_LEFTX:
-                state->lsX = event->value;
+                updateAnalogStickAxis(state->lsX, event->value, dirty);
                 break;
             case SDL_CONTROLLER_AXIS_LEFTY:
                 // Signed values have one more negative value than
@@ -214,19 +260,19 @@ void SdlInputHandler::handleControllerAxisEvent(SDL_ControllerAxisEvent* event)
                 // could actually cause the value to overflow and
                 // wrap around to be negative again. Avoid that by
                 // capping the value at 32767.
-                state->lsY = -qMax(event->value, (short)-32767);
+                updateAnalogStickAxis(state->lsY, -qMax(event->value, (short)-32767), dirty);
                 break;
             case SDL_CONTROLLER_AXIS_RIGHTX:
-                state->rsX = event->value;
+                updateAnalogStickAxis(state->rsX, event->value, dirty);
                 break;
             case SDL_CONTROLLER_AXIS_RIGHTY:
-                state->rsY = -qMax(event->value, (short)-32767);
+                updateAnalogStickAxis(state->rsY, -qMax(event->value, (short)-32767), dirty);
                 break;
             case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
-                state->lt = (unsigned char)(event->value * 255UL / 32767);
+                updateTriggerAxis(state->lt, (unsigned char)(event->value * 255UL / 32767), dirty);
                 break;
             case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
-                state->rt = (unsigned char)(event->value * 255UL / 32767);
+                updateTriggerAxis(state->rt, (unsigned char)(event->value * 255UL / 32767), dirty);
                 break;
             default:
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -250,8 +296,14 @@ void SdlInputHandler::handleControllerAxisEvent(SDL_ControllerAxisEvent* event)
         SDL_PeepEvents(&nextEvent, 1, SDL_GETEVENT, SDL_CONTROLLERAXISMOTION, SDL_CONTROLLERAXISMOTION);
     }
 
+    // Sticks keep their latest values for when the menu closes, but the
+    // host already received zeros when the menu opened.
+    if (m_QuickMenuOpen) {
+        return;
+    }
+
     // Only send the gamepad state to the host if it's not in mouse emulation mode
-    if (state->mouseEmulationTimer == 0) {
+    if (state->mouseEmulationTimer == 0 && dirty) {
         sendGamepadState(state);
     }
 }
@@ -267,6 +319,30 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
 
     GamepadState* state = findStateForGamepad(event->which);
     if (state == NULL) {
+        return;
+    }
+
+    // Help the ImGui code know the last used SDL JoystickID
+    GamepadMenu::instance().SetActiveJoystickID(event->which);
+
+    // While the quick menu is up, the pad drives the menu. Physical A ends
+    // the stream, B or Select+Start closes it, and nothing is sent to the host.
+    if (m_QuickMenuOpen) {
+        if (event->state == SDL_PRESSED) {
+            state->buttons |= k_ButtonMap[event->button];
+        }
+        else {
+            state->buttons &= ~k_ButtonMap[event->button];
+        }
+        if (event->state == SDL_PRESSED && Session::get() != nullptr) {
+            if (event->button == SDL_CONTROLLER_BUTTON_A) {
+                Session::get()->endStreamFromQuickMenu();
+            }
+            else if (event->button == SDL_CONTROLLER_BUTTON_B ||
+                     state->buttons == (PLAY_FLAG | BACK_FLAG)) {
+                Session::get()->closeQuickMenu();
+            }
+        }
         return;
     }
 
@@ -384,16 +460,28 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
         return;
     }
 
+    // Select+Start opens the quick menu. Exact match so it does not collide
+    // with Start+Select+L1+R1, which quits.
+    if (state->buttons == (PLAY_FLAG | BACK_FLAG)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected quick menu gamepad combo");
+        if (Session::get() != nullptr) {
+            Session::get()->toggleQuickMenu();
+        }
+        LiSendMultiControllerEvent(state->index, m_GamepadMask,
+                                   0, 0, 0, 0, 0, 0, 0);
+        state->buttons = 0;
+        return;
+    }
+
     // Handle Select+L1+R1+X as a gamepad overlay combo
     if (state->buttons == (BACK_FLAG | LB_FLAG | RB_FLAG | X_FLAG)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected stats toggle gamepad combo");
 
-        // Toggle the stats overlay
-        Session::get()->getOverlayManager().setOverlayState(Overlay::OverlayDebug,
-                                                            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug));
-        Session::get()->getOverlayManager().setOverlayState(Overlay::OverlayDebugAudio,
-                                                            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebugAudio));
+        if (Session::get() != nullptr) {
+            Session::get()->toggleEnabledPerformanceOverlays();
+        }
 
         // Clear buttons down on this gamepad
         LiSendMultiControllerEvent(state->index, m_GamepadMask,
@@ -401,7 +489,6 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
         return;
     }
 
-    // Select+L1+R1+Y toggles the on-stream gamepad overlay.
     if (state->buttons == (BACK_FLAG | LB_FLAG | RB_FLAG | Y_FLAG)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected gamepad viz toggle combo");
@@ -415,7 +502,6 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
         return;
     }
 
-    // Select+L1+R1+A cycles the local adaptive-trigger preview.
     if (state->buttons == (BACK_FLAG | LB_FLAG | RB_FLAG | A_FLAG)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected adaptive trigger preview gamepad combo");
@@ -491,7 +577,9 @@ void SdlInputHandler::handleControllerTouchpadEvent(SDL_ControllerTouchpadEvent*
         return;
     }
 
-    LiSendControllerTouchEvent((uint8_t)state->index, eventType, event->finger, event->x, event->y, event->pressure);
+    LiSendControllerTouchEvent2((uint8_t)state->index, eventType,
+                                (uint8_t)event->touchpad, event->finger,
+                                event->x, event->y, event->pressure);
 }
 
 #endif
@@ -693,6 +781,9 @@ void SdlInputHandler::handleControllerDeviceEvent(SDL_ControllerDeviceEvent* eve
         }
         if (SDL_GameControllerGetNumTouchpads(state->controller) > 0) {
             capabilities |= LI_CCAP_TOUCHPAD;
+            if (SDL_GameControllerGetNumTouchpads(state->controller) > 1) {
+                capabilities |= LI_CCAP_DUAL_TOUCHPAD;
+            }
         }
         if (SDL_GameControllerHasSensor(state->controller, SDL_SENSOR_ACCEL)) {
             capabilities |= LI_CCAP_ACCEL;
@@ -727,7 +818,32 @@ void SdlInputHandler::handleControllerDeviceEvent(SDL_ControllerDeviceEvent* eve
             type = LI_CTYPE_NINTENDO;
             break;
         default:
-            type = LI_CTYPE_UNKNOWN;
+            // These Steam Controller VID/PID combos come from SDL's controller_list.h
+            // TODO: Use SDL_GAMEPAD_TYPE_STEAM on SDL 3.6+
+            if (vendorId == 0x28de) {
+                switch (productId) {
+                case 0x1101:
+                case 0x1102:
+                case 0x1105:
+                case 0x1106:
+                case 0x1142:
+                case 0x1201:
+                case 0x1202:
+                case 0x1205:
+                case 0x1302:
+                case 0x1303:
+                case 0x1304:
+                case 0x1305:
+                    type = LI_CTYPE_STEAM;
+                    break;
+                default:
+                    type = LI_CTYPE_UNKNOWN;
+                    break;
+                }
+            }
+            else {
+                type = LI_CTYPE_UNKNOWN;
+            }
             break;
         }
 
@@ -781,7 +897,7 @@ void SdlInputHandler::handleControllerDeviceEvent(SDL_ControllerDeviceEvent* eve
                         state->index);
 
             // Send a final event to let the PC know this gamepad is gone
-            LiSendMultiControllerEvent(state->index, m_GamepadMask,
+            LiSendMultiControllerEvent(0, m_GamepadMask,
                                        0, 0, 0, 0, 0, 0, 0);
 
             // Clear all remaining state from this slot
@@ -898,6 +1014,15 @@ void SdlInputHandler::setMotionEventState(uint16_t controllerNumber, uint8_t mot
         return;
     }
 
+    uint16_t reportRateHzLimit;
+    if (Utils::getEnvironmentVariableOverride("SENSOR_REPORT_RATE_LIMIT_HZ", &reportRateHzLimit) &&
+        reportRateHz > reportRateHzLimit) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Sensor report rate limited to %u Hz by environment variable",
+                    reportRateHzLimit);
+        reportRateHz = reportRateHzLimit;
+    }
+
 #if SDL_VERSION_ATLEAST(2, 0, 14)
     if (m_GamepadState[controllerNumber].controller != nullptr) {
         uint8_t reportPeriodMs = reportRateHz ? (1000 / reportRateHz) : 0;
@@ -913,6 +1038,20 @@ void SdlInputHandler::setMotionEventState(uint16_t controllerNumber, uint8_t mot
             SDL_GameControllerSetSensorEnabled(m_GamepadState[controllerNumber].controller, SDL_SENSOR_GYRO, reportRateHz ? SDL_TRUE : SDL_FALSE);
             break;
         }
+    }
+#endif
+}
+
+void SdlInputHandler::setControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b)
+{
+    // Make sure the controller number is within our supported count
+    if (controllerNumber >= MAX_GAMEPADS) {
+        return;
+    }
+
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    if (m_GamepadState[controllerNumber].controller != nullptr) {
+        SDL_GameControllerSetLED(m_GamepadState[controllerNumber].controller, r, g, b);
     }
 #endif
 }
@@ -1011,7 +1150,6 @@ void SdlInputHandler::cycleAdaptiveTriggerPreview()
                 dualSenseTriggerPreviewLabel(m_TriggerPreview));
 
     if (m_TriggerPreview == DualSensePreviewFollowHost) {
-        // Drop the local effect. The next host packet, if any, replaces it.
         dualSenseFillPreviewReport(DualSensePreviewOff, &report);
     }
     else if (!dualSenseFillPreviewReport(m_TriggerPreview, &report)) {
@@ -1026,7 +1164,7 @@ void SdlInputHandler::cycleAdaptiveTriggerPreview()
     }
     if (applied == 0) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "No DualSense accepted the trigger preview. Pair the pad in macOS and confirm SDL is using the HIDAPI PS5 driver.");
+                    "No DualSense accepted the trigger preview");
     }
     refreshGamepadOverlay(true);
 }
@@ -1036,14 +1174,13 @@ void SdlInputHandler::refreshGamepadOverlay(bool force)
     GamepadVizPad pads[MAX_GAMEPADS];
     char text[1024];
     char triggerLine[128];
-    uint32_t now;
 
     if (Session::get() == nullptr ||
             !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayGamepad)) {
         return;
     }
 
-    now = SDL_GetTicks();
+    const uint32_t now = SDL_GetTicks();
     if (!force && m_LastGamepadOverlayTicks != 0 &&
             !SDL_TICKS_PASSED(now, m_LastGamepadOverlayTicks + 50)) {
         return;
@@ -1068,20 +1205,6 @@ void SdlInputHandler::refreshGamepadOverlay(bool force)
         return;
     }
     Session::get()->getOverlayManager().updateOverlayText(Overlay::OverlayGamepad, text);
-}
-
-void SdlInputHandler::setControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b)
-{
-    // Make sure the controller number is within our supported count
-    if (controllerNumber >= MAX_GAMEPADS) {
-        return;
-    }
-
-#if SDL_VERSION_ATLEAST(2, 0, 14)
-    if (m_GamepadState[controllerNumber].controller != nullptr) {
-        SDL_GameControllerSetLED(m_GamepadState[controllerNumber].controller, r, g, b);
-    }
-#endif
 }
 
 QString SdlInputHandler::getUnmappedGamepads()
@@ -1173,4 +1296,25 @@ int SdlInputHandler::getAttachedGamepadMask()
     }
 
     return mask;
+}
+
+void SdlInputHandler::raiseAllButtons()
+{
+    int mask = getAttachedGamepadMask();
+
+    for (int i = 0; i < MAX_GAMEPADS; i++) {
+        m_GamepadState[i].buttons = 0;
+    }
+
+    if (m_MultiController) {
+        int numJoysticks = SDL_NumJoysticks();
+        for (int i = 0; i < numJoysticks; i++) {
+            if (SDL_IsGameController(i)) {
+                LiSendMultiControllerEvent(i, mask, 0, 0, 0, 0, 0, 0, 0);
+            }
+        }
+    }
+    else {
+        LiSendMultiControllerEvent(0, mask, 0, 0, 0, 0, 0, 0, 0);
+    }
 }

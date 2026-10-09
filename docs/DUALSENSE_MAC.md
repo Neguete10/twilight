@@ -15,7 +15,7 @@ Adaptive triggers and the on-stream pad overlay are separate from that pairing p
 | Local trigger preview | Cycles resistance on the Mac without a host packet | Ctrl+Alt+Shift+T |
 | Gamepad overlay | Button highlight and stick position during the stream | Ctrl+Alt+Shift+G |
 
-`0x5503` is not in the pinned `moonlight-common-c` commit (`583754fc`). `scripts/apply_adaptive_triggers_protocol.py` adds it at qmake time, the same way the PyroWave bits are added. Do not commit the patched submodule; the script is the change.
+`0x5503` is already in the pinned `moonlight-common-c` commit (`7feb0a6`). Do not run `scripts/apply_adaptive_triggers_protocol.py` and do not roll the submodule back to `583754fc`.
 
 The payload, after the control header, is 25 bytes:
 
@@ -82,10 +82,9 @@ Select+L1+R1+X still toggles the performance stats. Select+L1+R1+Y is the pad ov
 4. Host packet, when you have a Linux Sunshine that emits `0x5503`: stay on `follow host` and do something in the game that sets a trigger effect. The overlay line changes from `no host packet yet` to `last L=0x.. R=0x..`, and the pad follows the game. A Windows ViGEm host will stay on `no host packet yet`; that is the host limitation, not a pairing failure.
 5. Bluetooth and USB both use the same preview. If SDL's effect call fails, Console.app / the Twilight log should contain either `SDL_GameControllerSendEffect failed` or `DualSense adaptive trigger via IOHID USB` / `Bluetooth`.
 
-Offline check, from a checkout that has `moonlight-common-c` initialized (the test includes the patched `Limelight.h`):
+Offline check. `7feb0a6` already defines `DS_EFFECT_PAYLOAD_SIZE` and the button flags, so the adaptive-trigger protocol script is not part of the build. The test includes `Limelight.h` from the submodule:
 
 ```sh
-python3 scripts/apply_adaptive_triggers_protocol.py
 c++ -std=c++17 \
     -I moonlight-common-c/moonlight-common-c/src \
     -I app/streaming/input \

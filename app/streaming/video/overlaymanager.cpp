@@ -12,14 +12,11 @@ OverlayManager::OverlayManager() :
     m_Overlays[OverlayType::OverlayDebug].color = {0xD0, 0xD0, 0x00, 0xFF};
     m_Overlays[OverlayType::OverlayDebug].fontSize = 20;
 
-    m_Overlays[OverlayType::OverlayDebugAudio].color = {0x00, 0xD0, 0xD0, 0xFF};
-    m_Overlays[OverlayType::OverlayDebugAudio].fontSize = 20;
-
     m_Overlays[OverlayType::OverlayStatusUpdate].color = {0xCC, 0x00, 0x00, 0xFF};
     m_Overlays[OverlayType::OverlayStatusUpdate].fontSize = 36;
 
-    m_Overlays[OverlayType::OverlayGamepad].color = {0xF2, 0xF2, 0xF2, 0xFF};
-    m_Overlays[OverlayType::OverlayGamepad].fontSize = 18;
+    m_Overlays[OverlayType::OverlayGamepad].color = {0xE8, 0xE8, 0xE8, 0xFF};
+    m_Overlays[OverlayType::OverlayGamepad].fontSize = 20;
 
     // While TTF will usually not be initialized here, it is valid for that not to
     // be the case, since Session destruction is deferred and could overlap with
@@ -66,9 +63,7 @@ char* OverlayManager::getOverlayText(OverlayType type)
 
 void OverlayManager::updateOverlayText(OverlayType type, const char* text)
 {
-    strncpy(m_Overlays[type].text, text, sizeof(m_Overlays[0].text));
-    m_Overlays[type].text[getOverlayMaxTextLength() - 1] = '\0';
-
+    SDL_utf8strlcpy(m_Overlays[type].text, text, sizeof(m_Overlays[0].text));
     setOverlayTextUpdated(type);
 }
 
@@ -152,22 +147,68 @@ void OverlayManager::notifyOverlayUpdated(OverlayType type)
         }
     }
 
-    SDL_Surface* oldSurface = (SDL_Surface*)SDL_AtomicSetPtr((void**)&m_Overlays[type].surface, nullptr);
+    // Exchange the old surface with the new one
+    SDL_Surface* oldSurface = (SDL_Surface*)SDL_AtomicSetPtr(
+        (void**)&m_Overlays[type].surface,
+        m_Overlays[type].enabled ?
+            // The _Wrapped variant is required for line breaks to work
+            RenderTextOutlinedWrapped(m_Overlays[type].font,
+                                      m_Overlays[type].text,
+                                      m_Overlays[type].color,
+                                      {0, 0, 0, 255},
+                                      4,
+                                      1024)
+            : nullptr);
+
+    // Notify the renderer
+    m_Renderer->notifyOverlayUpdated(type);
 
     // Free the old surface
     if (oldSurface != nullptr) {
         SDL_FreeSurface(oldSurface);
     }
+}
 
-    if (m_Overlays[type].enabled) {
-        // The _Wrapped variant is required for line breaks to work
-        SDL_Surface* surface = TTF_RenderText_Blended_Wrapped(m_Overlays[type].font,
-                                                              m_Overlays[type].text,
-                                                              m_Overlays[type].color,
-                                                              1024);
-        SDL_AtomicSetPtr((void**)&m_Overlays[type].surface, surface);
+SDL_Surface* OverlayManager::RenderTextOutlinedWrapped(TTF_Font* font, const char* text, SDL_Color textColor, SDL_Color outlineColor, int outlineWidth, int wrapWidth) {
+    if (text == nullptr || text[0] == '\0') {
+        return nullptr;
     }
 
-    // Notify the renderer
-    m_Renderer->notifyOverlayUpdated(type);
+    int oldOutline = TTF_GetFontOutline(font);
+    TTF_SetFontOutline(font, outlineWidth);
+
+    // Verify that the string won't require wrapping (which could cause the outline and the text
+    // to diverge due to different wrapping positions).
+    //
+    // FIXME: We do this rather than just disabling wrapping entirely (wrapWidth = 0) because we
+    // need further testing to ensure that all renderers can handle non-NPOT overlay textures.
+    for (const QString& line : QString(text).split('\n')) {
+        int extent, count;
+        if (TTF_MeasureUTF8(font, line.toUtf8(), wrapWidth, &extent, &count) == 0 && count < line.size()) {
+            // If it requires wrapping, render it without the outline
+            TTF_SetFontOutline(font, oldOutline);
+            return TTF_RenderUTF8_Blended_Wrapped(font, text, textColor, wrapWidth);
+        }
+    }
+
+    // Draw text twice, but outline is a bit bigger
+    auto outlineSurface = TTF_RenderUTF8_Blended_Wrapped(font, text, outlineColor, wrapWidth);
+    TTF_SetFontOutline(font, 0);
+    auto textSurface = TTF_RenderUTF8_Blended_Wrapped(font, text, textColor, wrapWidth);
+    TTF_SetFontOutline(font, oldOutline);
+
+    if (outlineSurface == nullptr || textSurface == nullptr) {
+        SDL_FreeSurface(outlineSurface);
+        SDL_FreeSurface(textSurface);
+        return nullptr;
+    }
+
+    // Merge the texts
+    SDL_Rect dst = { outlineWidth, outlineWidth, textSurface->w, textSurface->h };
+    SDL_BlitSurface(textSurface, nullptr, outlineSurface, &dst);
+
+    SDL_FreeSurface(textSurface);
+    return outlineSurface;
 }
+
+

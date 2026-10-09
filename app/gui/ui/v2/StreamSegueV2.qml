@@ -3,12 +3,17 @@ import QtQuick.Window 2.2
 
 import SdlGamepadKeyNavigation 1.0
 import StreamHudStats 1.0
+import StreamingPreferences 1.0
+import SystemProperties 1.0
 
 // Twilight stream launch. Mirrors StreamSegue.qml signal handling without
 // touching the stack the command-line windows still use.
 Item {
     id: segue
-    readonly property var hostWindow: Window.window
+    // Creator may pass Window.window from Shell (Item scope). Timer is a
+    // QtObject, so reading Window.window there returns undefined and Session
+    // falls back to display 0 (#28). Keep a snapshot, not a live binding.
+    property var hostWindow
     property var host
     property var session
     property string appName
@@ -27,6 +32,16 @@ Item {
         if (failingPorts) {
             errorText += "\n\n" + qsTr("Check your firewall and port forwarding rules for port(s): %1").arg(failingPorts)
         }
+    }
+
+    function showShellWindow() {
+        if (!Window.window)
+            return
+        Window.window.visible = true
+        // Hiding the Qt window leaves the native fullscreen space. Game Mode
+        // only stays available if that space is restored when the shell returns.
+        if (StreamingPreferences.uiDisplayMode === StreamingPreferences.UI_FULLSCREEN)
+            Window.window.showFullScreen()
     }
 
     function connectionStarted() {
@@ -50,8 +65,7 @@ Item {
     function quitStarting() {
         stageText = qsTr("Quitting %1").arg(appName)
         card.visible = true
-        if (Window.window)
-            Window.window.visible = true
+        showShellWindow()
     }
 
     function sessionFinished(portTestResult) {
@@ -61,10 +75,9 @@ Item {
 
         SdlGamepadKeyNavigation.enable()
         StreamHudStats.noteSessionEnded()
-        if (Window.window) {
+        if (Window.window)
             Window.window.streamActive = false
-            Window.window.visible = true
-        }
+        showShellWindow()
 
         card.visible = false
         if (errorText !== "" && host && host.showError)
@@ -80,11 +93,14 @@ Item {
     Component.onCompleted: {
         if (!session)
             return
+        // Snapshot before the timer. A live binding to Window.window can go
+        // undefined if the attached context shifts during the delay.
+        if (!hostWindow)
+            hostWindow = Window.window
         session.stageStarting.connect(stageStarting)
         session.stageFailed.connect(stageFailed)
         session.connectionStarted.connect(connectionStarted)
         session.displayLaunchError.connect(displayLaunchError)
-        session.displayLaunchWarning.connect(displayLaunchWarning)
         session.quitStarting.connect(quitStarting)
         session.sessionFinished.connect(sessionFinished)
         session.readyForDeletion.connect(sessionReadyForDeletion)
@@ -100,13 +116,37 @@ Item {
                 : qsTr("Ctrl+Alt+Shift+Q"))
             SdlGamepadKeyNavigation.disable()
             gc()
-            session.exec(hostWindow)
+            if (!hostWindow)
+                hostWindow = Window.window
+            if (!hostWindow)
+                console.warn("StreamSegueV2: hostWindow is null; stream may open on the primary display")
+            SystemProperties.waitForAsyncLoad()
+            if (!session.initialize(hostWindow)) {
+                sessionFinished(0)
+                sessionReadyForDeletion()
+                return
+            }
+            var warnings = session.launchWarnings
+            for (var i = 0; i < warnings.length; i++)
+                console.warn(warnings[i])
+            session.start()
         }
     }
 
     Rectangle {
         anchors.fill: parent
         color: host && host.theme ? host.theme.bg : "#12141A"
+    }
+
+    // The segue covers the shell while a session starts. Rectangles do not take
+    // input, so without this the app grid underneath stays clickable and can
+    // start a second session.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        hoverEnabled: true
+        preventStealing: true
+        onWheel: function(wheel) { wheel.accepted = true }
     }
 
     Rectangle {

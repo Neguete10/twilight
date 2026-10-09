@@ -1,6 +1,5 @@
 #import "au_spatial_renderer.h"
 #import "coreaudio_helpers.h"
-#import "coreaudio_playback.h"
 #import "AllocatedAudioBufferList.h"
 #include "settings/streamingpreferences.h"
 
@@ -8,11 +7,12 @@
 #import <AVFoundation/AVFoundation.h>
 #import <QtGlobal>
 
+// Global head tracking flag so it can be changed from DevUI and survive the decoder being
+// destroyed and recreated.
+std::atomic<bool> g_HeadTracking{false};
+
 AUSpatialRenderer::AUSpatialRenderer()
-    : m_HeadTracking(0),
-      m_PersonalizedHRTF(0),
-      m_Mixer(nullptr),
-      m_Initialized(false),
+    : m_PersonalizedHRTF(0),
       m_AudioUnitLatency(0.0)
 {
     DEBUG_TRACE("AUSpatialRenderer construct");
@@ -30,27 +30,64 @@ AUSpatialRenderer::AUSpatialRenderer()
         CA_LogError(status, "Failed to create Spatial Mixer");
         assert(status == noErr);
     }
+
+    StreamingPreferences *prefs = StreamingPreferences::get();
+    g_HeadTracking.store(prefs->spatialAudioConfig == StreamingPreferences::SAC_HEAD_TRACKED);
 }
 
 AUSpatialRenderer::~AUSpatialRenderer()
 {
     DEBUG_TRACE("AUSpatialRenderer destruct");
+    cleanup();
+}
 
-    if (m_Mixer) {
-        // setup() is the only AudioUnitInitialize. Skip it when spatial
-        // mode was never started, and don't uninitialize twice.
-        if (m_Initialized) {
-            AudioUnitUninitialize(m_Mixer);
-            m_Initialized = false;
-        }
-        AudioComponentInstanceDispose(m_Mixer);
-        m_Mixer = nullptr;
+void AUSpatialRenderer::cleanup()
+{
+    if (!m_Mixer) {
+        return;
+    }
+
+    clearCallback();
+
+    if (m_Initialized) {
+        AudioUnitUninitialize(m_Mixer);
+        m_Initialized = false;
+    }
+
+    AudioComponentInstanceDispose(m_Mixer);
+    m_Mixer = nullptr;
+    m_RingBufferPtr = nullptr;
+}
+
+void AUSpatialRenderer::clearCallback()
+{
+    if (!m_Mixer) {
+        return;
+    }
+
+    AURenderCallbackStruct callbackStruct = {};
+    callbackStruct.inputProc = nullptr;
+    callbackStruct.inputProcRefCon = nullptr;
+
+    OSStatus status = AudioUnitSetProperty(m_Mixer, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callbackStruct, sizeof(callbackStruct));
+    if (status != noErr) {
+        CA_LogError(status, "Error clearing AUSpatialRenderer input callback");
     }
 }
 
 double AUSpatialRenderer::getAudioUnitLatency()
 {
     return m_AudioUnitLatency;
+}
+
+bool AUSpatialRenderer::getHeadTracking()
+{
+    return g_HeadTracking.load();
+}
+
+void AUSpatialRenderer::setHeadTracking(bool enabled)
+{
+    g_HeadTracking.store(enabled);
 }
 
 void AUSpatialRenderer::setRingBufferPtr(const TPCircularBuffer *buffer)
@@ -64,10 +101,10 @@ OSStatus AUSpatialRenderer::setStreamFormatAndACL(float inSampleRate,
                                                   AudioUnitElement inElement)
 {
     AVAudioChannelLayout* layout = [AVAudioChannelLayout layoutWithLayoutTag:inLayoutTag];
-    AVAudioFormat *format = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
-                                                   sampleRate:inSampleRate
-                                                   interleaved:NO
-                                                   channelLayout:layout];
+    AVAudioFormat *format = [[[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
+                                                    sampleRate:inSampleRate
+                                                    interleaved:NO
+                                                    channelLayout:layout] autorelease];
 
     const AudioStreamBasicDescription* asbd = [format streamDescription];
     if (inScope == kAudioUnitScope_Input) {
@@ -84,7 +121,7 @@ OSStatus AUSpatialRenderer::setStreamFormatAndACL(float inSampleRate,
     const AudioChannelLayout* outLayout = [layout layout];
     status = AudioUnitSetProperty(m_Mixer, kAudioUnitProperty_AudioChannelLayout, inScope, inElement, outLayout, sizeof(AudioChannelLayout));
     if (status != noErr) {
-        CA_LogError(status, "Failed to set AUSpatialRenderer AudioChannelLayout scope=%d, layout=%d", inScope, outLayout);
+        CA_LogError(status, "Failed to set AUSpatialRenderer AudioChannelLayout scope=%d, layoutTag=%u", inScope, inLayoutTag);
         return status;
     }
 
@@ -107,9 +144,8 @@ OSStatus inputCallback(void *inRefCon,
     AUSpatialRenderer *me = (AUSpatialRenderer *)inRefCon;
 
     // Clear the buffer
-    const vDSP_Length planarSamples = coreAudioPlanarSampleCount(inNumberFrames);
     for (uint32_t i = 0; i < ioData->mNumberBuffers; i++) {
-        vDSP_vclr((float *)ioData->mBuffers[i].mData, 1, planarSamples);
+        memset((float *)ioData->mBuffers[i].mData, 0, inNumberFrames * sizeof(float));
     }
 
     // Pull audio from playthrough buffer
@@ -118,7 +154,14 @@ OSStatus inputCallback(void *inRefCon,
 
     // Total size of interleaved PCM for all channels
     uint32_t channelCount = ioData->mNumberBuffers;
-    uint32_t wantedBytes  = channelCount * inNumberFrames * 4;
+    uint32_t wantedBytes  = channelCount * inNumberFrames * sizeof(float);
+
+    // Optionally force a minimum buffer size before playback
+    bool buffering = false;
+    float queuedAudioMs = (float)availableBytes / (48 * channelCount * sizeof(float));
+    if (queuedAudioMs < 20.0) {
+        buffering = true;
+    }
 
     if (availableBytes < wantedBytes) {
         // not enough data for all channels, note we are sending back a zeroed-out buffer
@@ -222,7 +265,9 @@ bool AUSpatialRenderer::setup(AUSpatialMixerOutputType outputType, float sampleR
     }
 
 #if TARGET_OS_OSX
-    if (@available(macOS 13.0, *))
+    // Head tracking and personalized HRTF mode are macOS 14 APIs. The spatial
+    // mixer itself still starts on macOS 13; these properties are skipped there.
+    if (@available(macOS 14.0, *))
 #elif TARGET_OS_IOS
     if (@available(iOS 18.0, *))
 #elif TARGET_OS_TV
@@ -230,16 +275,11 @@ bool AUSpatialRenderer::setup(AUSpatialMixerOutputType outputType, float sampleR
 #endif
     {
         if (outputType == kSpatialMixerOutputType_Headphones) {
-            // XXX: Both of these might require the builder to have a paid Apple developer account due to the use of entitlements.
-
             // For devices that support it, enable head-tracking.
             // Apps that use low-latency head-tracking in iOS/tvOS need to set
             // the audio session category to ambient or run in Game Mode.
             // Head tracking requires the entitlement com.apple.developer.coremotion.head-pose.
-
-            // XXX Head-tracking may cause audio glitches. It's off by default.
-            StreamingPreferences *prefs = StreamingPreferences::get();
-            if (prefs->spatialHeadTracking) {
+            if (g_HeadTracking.load()) {
                 uint32_t ht = 1;
                 status = AudioUnitSetProperty(m_Mixer, kAudioUnitProperty_SpatialMixerEnableHeadTracking, kAudioUnitScope_Global, 0, &ht, sizeof(uint32_t));
                 if (status != noErr) {
@@ -247,7 +287,6 @@ bool AUSpatialRenderer::setup(AUSpatialMixerOutputType outputType, float sampleR
                 }
                 else {
                     DEBUG_TRACE("AUSpatialRenderer enabled head-tracking");
-                    m_HeadTracking = 1;
                 }
             }
 
@@ -322,7 +361,7 @@ bool AUSpatialRenderer::setup(AUSpatialMixerOutputType outputType, float sampleR
     m_Initialized = true;
 
 #if TARGET_OS_OSX
-    // you can set HRTF in 13 but only check the status in 14
+    // Personalized HRTF status is readable on macOS 14, same as the set properties.
     if (@available(macOS 14.0, *))
 #elif TARGET_OS_IOS
     if (@available(iOS 18.0, *))
@@ -361,9 +400,13 @@ bool AUSpatialRenderer::setup(AUSpatialMixerOutputType outputType, float sampleR
 
 // realtime method
 OSStatus AUSpatialRenderer::process(AudioBufferList* __nullable outputABL,
-                                AudioUnitRenderActionFlags *ioActionFlags,
-                                const AudioTimeStamp* __nullable inTimestamp,
-                                float inNumberFrames)
+                                    AudioUnitRenderActionFlags* ioActionFlags,
+                                    const AudioTimeStamp* __nullable inTimestamp,
+                                    uint32_t inNumberFrames)
 {
+    if (!m_Mixer || !m_Initialized) {
+        return kAudioUnitErr_Uninitialized;
+    }
+
     return AudioUnitRender(m_Mixer, ioActionFlags, inTimestamp, 0, inNumberFrames, outputABL);
 }

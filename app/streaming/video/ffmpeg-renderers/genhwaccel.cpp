@@ -1,7 +1,9 @@
 #include "genhwaccel.h"
+#include "utils.h"
 
 GenericHwAccelRenderer::GenericHwAccelRenderer(AVHWDeviceType hwDeviceType)
-    : m_HwDeviceType(hwDeviceType),
+    : IFFmpegRenderer(RendererType::Unknown),
+      m_HwDeviceType(hwDeviceType),
       m_HwContext(nullptr)
 {
 
@@ -47,11 +49,6 @@ void GenericHwAccelRenderer::renderFrame(AVFrame*)
     SDL_assert(false);
 }
 
-bool GenericHwAccelRenderer::needsTestFrame()
-{
-    return true;
-}
-
 bool GenericHwAccelRenderer::isDirectRenderingSupported()
 {
     // We only support rendering via read-back
@@ -60,9 +57,9 @@ bool GenericHwAccelRenderer::isDirectRenderingSupported()
 
 int GenericHwAccelRenderer::getDecoderCapabilities()
 {
-    bool ok;
-    int caps = qEnvironmentVariableIntValue("GENHWACCEL_CAPS", &ok);
-    if (ok) {
+    int caps;
+
+    if (Utils::getEnvironmentVariableOverride("GENHWACCEL_CAPS", &caps)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Using GENHWACCEL_CAPS for decoder capabilities: %x",
                     caps);

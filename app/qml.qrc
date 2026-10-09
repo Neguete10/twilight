@@ -1,42 +1,40 @@
 <RCC>
     <qresource prefix="/">
         <file>gui/main.qml</file>
+        <file>gui/PcView.qml</file>
+        <file>gui/AppView.qml</file>
+        <file>gui/SettingsView.qml</file>
+        <file>gui/RendererDisplayModeSection.qml</file>
         <file>gui/StreamSegue.qml</file>
+        <file>gui/GamepadMapper.qml</file>
         <file>gui/QuitSegue.qml</file>
+        <file>gui/NavigableToolButton.qml</file>
+        <file>gui/NavigableItemDelegate.qml</file>
+        <file>gui/NavigableMenuItem.qml</file>
         <file>gui/CliQuitStreamSegue.qml</file>
         <file>gui/CliStartStreamSegue.qml</file>
+        <file>gui/AutoResizingComboBox.qml</file>
+        <file>gui/NavigableMenu.qml</file>
         <file>gui/ErrorMessageDialog.qml</file>
         <file>gui/NavigableMessageDialog.qml</file>
         <file>gui/NavigableDialog.qml</file>
+        <file>gui/CenteredGridView.qml</file>
         <file>gui/CliPair.qml</file>
-        <file>gui/ui/v2/ThemeV2.qml</file>
-        <file>gui/ui/v2/TwTextV2.qml</file>
-        <file>gui/ui/v2/SymbolV2.qml</file>
-        <file>gui/ui/v2/SwitchV2.qml</file>
-        <file>gui/ui/v2/SliderV2.qml</file>
         <file>gui/ui/v2/ChoiceV2.qml</file>
-        <file>gui/ui/v2/SettingRowV2.qml</file>
         <file>gui/ui/v2/DialogCardV2.qml</file>
+        <file>gui/ui/v2/HostActionV2.qml</file>
+        <file>gui/ui/v2/HostSheetV2.qml</file>
         <file>gui/ui/v2/HudChipsV2.qml</file>
+        <file>gui/ui/v2/MenuCardV2.qml</file>
+        <file>gui/ui/v2/SettingRowV2.qml</file>
+        <file>gui/ui/v2/SettingsSheetV2.qml</file>
+        <file>gui/ui/v2/ShellV2.qml</file>
+        <file>gui/ui/v2/SliderV2.qml</file>
         <file>gui/ui/v2/StreamHudV2.qml</file>
         <file>gui/ui/v2/StreamSegueV2.qml</file>
-        <file>gui/ui/v2/SettingsSheetV2.qml</file>
-        <file>gui/ui/v2/HostSheetV2.qml</file>
-        <file>gui/ui/v2/HostActionV2.qml</file>
-        <file>gui/ui/v2/MenuCardV2.qml</file>
-        <file>gui/ui/v2/ShellV2.qml</file>
-    </qresource>
-    <qresource prefix="/licenses">
-        <file alias="NOTICES.txt">licenses/NOTICES.txt</file>
-        <file alias="GPL-3.0.txt">licenses/GPL-3.0.txt</file>
-        <file alias="qmdnsengine-MIT.txt">licenses/qmdnsengine-MIT.txt</file>
-        <file alias="h264bitstream-LGPL-2.1.txt">licenses/h264bitstream-LGPL-2.1.txt</file>
-        <file alias="SDL_GameControllerDB-Zlib.txt">licenses/SDL_GameControllerDB-Zlib.txt</file>
-        <file alias="FFmpeg-LGPL-2.1.txt">licenses/FFmpeg-LGPL-2.1.txt</file>
-        <file alias="OpenSSL-Apache-2.0.txt">licenses/OpenSSL-Apache-2.0.txt</file>
-        <file alias="Opus-BSD.txt">licenses/Opus-BSD.txt</file>
-        <file alias="SDL2-Zlib.txt">licenses/SDL2-Zlib.txt</file>
-        <file alias="SDL2_ttf-Zlib.txt">licenses/SDL2_ttf-Zlib.txt</file>
-        <file alias="libplacebo-LGPL-2.1.txt">licenses/libplacebo-LGPL-2.1.txt</file>
+        <file>gui/ui/v2/SwitchV2.qml</file>
+        <file>gui/ui/v2/SymbolV2.qml</file>
+        <file>gui/ui/v2/ThemeV2.qml</file>
+        <file>gui/ui/v2/TwTextV2.qml</file>
     </qresource>
 </RCC>

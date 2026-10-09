@@ -33,7 +33,6 @@ Item {
 
     readonly property color ink: pal.windowText
     readonly property color bg: dark ? Qt.tint(pal.window, "#22101828") : Qt.tint(pal.window, "#14FFFFFF")
-    readonly property color wash: dark ? Qt.rgba(0.35, 0.48, 0.95, 0.22) : Qt.rgba(0.20, 0.42, 0.95, 0.14)
     readonly property color accent: dark ? "#9EBEFF" : "#0B57D0"
     readonly property color accentInk: dark ? "#07111F" : "#FFFFFF"
     readonly property color online: dark ? "#32D74B" : "#1B7F34"

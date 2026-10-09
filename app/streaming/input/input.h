@@ -2,10 +2,14 @@
 
 #include "settings/streamingpreferences.h"
 #include "backend/computermanager.h"
+#include "dualsense_effects.h"
 #include "dualsense_hid.h"
-#include "streaming/input/corehid_mouse.h"
 
-#include <SDL.h>
+#ifdef Q_OS_DARWIN
+#include "corehid_mouse.h"
+#endif
+
+#include "SDL_compat.h"
 
 struct GamepadState {
     SDL_GameController* controller;
@@ -39,6 +43,7 @@ struct GamepadState {
     short rsX, rsY;
     unsigned char lt, rt;
 };
+
 
 // activeGamepadMask is a short, so we're bounded by the number of mask bits
 #define MAX_GAMEPADS 16
@@ -97,7 +102,7 @@ public:
 
     void setControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b);
 
-    void setAdaptiveTriggers(uint16_t controllerNumber, DualSenseOutputReport* report);
+    void setAdaptiveTriggers(uint16_t controllerNumber, DualSenseOutputReport *report);
 
     void cycleAdaptiveTriggerPreview();
 
@@ -107,17 +112,29 @@ public:
 
     int getAttachedGamepadMask();
 
+    void raiseAllButtons();
+
     void raiseAllKeys();
 
     void notifyMouseLeave();
 
     void notifyFocusLost();
 
+    void notifyFocusGained();
+
     bool isCaptureActive();
 
     bool isSystemKeyCaptureActive();
 
     void setCaptureActive(bool active);
+
+    // Quick menu: drop capture and zero the pads so the game does not keep
+    // seeing the chord that opened the menu. Restore puts capture back.
+    void releaseCaptureForQuickMenu();
+    void restoreCaptureAfterQuickMenu();
+    void cancelQuickMenuRecapture();
+
+    void toggleMouseEmulation(SDL_JoystickID jsid);
 
     bool isMouseInVideoRegion(int mouseX, int mouseY, int windowWidth = -1, int windowHeight = -1);
 
@@ -139,6 +156,9 @@ private:
         KeyComboToggleMinimize,
         KeyComboPasteText,
         KeyComboTogglePointerRegionLock,
+        KeyComboQuitAndExit,
+        KeyComboQuickMenu,
+        KeyComboToggleKeyboardGrab,
         KeyComboTogglePictureInPicture,
         KeyComboToggleGamepadOverlay,
         KeyComboCycleTriggerPreview,
@@ -146,10 +166,27 @@ private:
         KeyComboMax
     };
 
+    bool tryStartCoreHidCapture();
+    bool stopCoreHidCapture();
+    bool coreHidSuppressesRelativeMotion() const;
+    bool coreHidSuppressesButtons() const;
+    bool coreHidSuppressesScroll() const;
+    bool sendDualSenseReport(SDL_GameController* controller, const DualSenseOutputReport& report);
+    void clearAdaptiveTriggers();
+
+#ifdef Q_OS_DARWIN
+    static void coreHidMotionThunk(const CoreHidMouseDelta& delta, void* context);
+    static void coreHidButtonThunk(const CoreHidButtonUpdate& update, void* context);
+    void sendCoreHidMotion(const CoreHidMouseDelta& delta);
+    void sendCoreHidButtons(const CoreHidButtonUpdate& update);
+#endif
+
     GamepadState*
     findStateForGamepad(SDL_JoystickID id);
 
     void sendGamepadState(GamepadState* state);
+
+    void publishQuickMenuGamepad(bool keepAxes);
 
     void sendGamepadBatteryState(GamepadState* state, SDL_JoystickPowerLevel level);
 
@@ -178,24 +215,6 @@ private:
     static
     Uint32 dragTimerCallback(Uint32 interval, void* param);
 
-    bool tryStartCoreHidCapture();
-
-    bool stopCoreHidCapture();
-
-    bool coreHidSuppressesRelativeMotion() const;
-
-    bool coreHidSuppressesScroll() const;
-
-#ifdef Q_OS_DARWIN
-    static void coreHidMotionThunk(const CoreHidMouseDelta& delta, void* context);
-
-    static void coreHidButtonThunk(const CoreHidButtonUpdate& update, void* context);
-
-    void sendCoreHidMotion(const CoreHidMouseDelta& delta);
-
-    void sendCoreHidButtons(const CoreHidButtonUpdate& update);
-#endif
-
     SDL_Window* m_Window;
     bool m_MultiController;
     bool m_GamepadMouse;
@@ -203,15 +222,19 @@ private:
     bool m_ReverseScrollDirection;
     bool m_SwapFaceButtons;
 
+    bool m_NeedsManualCaptureOnLeave;
     bool m_MouseWasInVideoRegion;
     bool m_PendingMouseButtonsAllUpOnVideoRegionLeave;
     bool m_PointerRegionLockActive;
     bool m_PointerRegionLockToggledByUser;
+    bool m_QuickMenuOpen;
+    bool m_RestoreCaptureAfterMenu;
 
     int m_GamepadMask;
     GamepadState m_GamepadState[MAX_GAMEPADS];
-    QSet<short> m_KeysDown;
-    bool m_FakeCaptureActive;
+    QSet<uint32_t> m_KeysDown;
+    bool m_FakeMouseCaptureActive;
+    bool m_KeyboardCaptureActive;
     QString m_OldIgnoreDevices;
     QString m_OldIgnoreDevicesExcept;
     QStringList m_IgnoreDeviceGuids;
@@ -241,6 +264,8 @@ private:
     char m_DragButton;
     int m_NumFingersDown;
 
+    static const int k_ButtonMap[];
+
     DualSenseHidOutput m_DualSenseHid;
     int m_TriggerPreview;
     bool m_SawHostAdaptiveTriggers;
@@ -249,10 +274,6 @@ private:
     uint8_t m_LastHostTypeRight;
     uint32_t m_LastGamepadOverlayTicks;
 
-    void clearAdaptiveTriggers();
-
-    bool sendDualSenseReport(SDL_GameController* controller, const DualSenseOutputReport& report);
-
 #ifdef Q_OS_DARWIN
     bool m_CoreHidRequested;
     bool m_CoreHidActive;
@@ -260,6 +281,4 @@ private:
     CoreHidBackendRequest m_CoreHidBackend;
     CoreHidMouseCapture* m_CoreHid;
 #endif
-
-    static const int k_ButtonMap[];
 };

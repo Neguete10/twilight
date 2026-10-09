@@ -2,7 +2,7 @@
 // libavutil both defining AVMediaType
 #define AVMediaType AVMediaType_FFmpeg
 #include "vt.h"
-#include "pacer/pacer.h"
+#include "framepacing/framepacer.h"
 #undef AVMediaType
 
 #include <SDL_syswm.h>
@@ -10,8 +10,6 @@
 #include <streaming/session.h>
 
 #include <mach/mach_time.h>
-#include <mach/machine.h>
-#include <sys/sysctl.h>
 #import <Cocoa/Cocoa.h>
 #import <VideoToolbox/VideoToolbox.h>
 #import <AVFoundation/AVFoundation.h>
@@ -35,11 +33,10 @@ class VTRenderer : public VTBaseRenderer
 {
 public:
     VTRenderer()
-        : m_HwContext(nullptr),
+        : VTBaseRenderer(RendererType::VTSampleLayer),
+          m_HwContext(nullptr),
           m_DisplayLayer(nullptr),
           m_FormatDesc(nullptr),
-          m_ContentLightLevelInfo(nullptr),
-          m_MasteringDisplayColorVolume(nullptr),
           m_StreamView(nullptr),
           m_DisplayLink(nullptr),
           m_LastColorSpace(-1),
@@ -89,14 +86,6 @@ public:
             CGColorSpaceRelease(m_ColorSpace);
         }
 
-        if (m_MasteringDisplayColorVolume != nullptr) {
-            CFRelease(m_MasteringDisplayColorVolume);
-        }
-
-        if (m_ContentLightLevelInfo != nullptr) {
-            CFRelease(m_ContentLightLevelInfo);
-        }
-
         for (int i = 0; i < Overlay::OverlayMax; i++) {
             if (m_OverlayTextFields[i] != nullptr) {
                 [m_OverlayTextFields[i] removeFromSuperview];
@@ -111,11 +100,11 @@ public:
 
         if (m_DisplayLayer != nullptr) {
             [m_DisplayLayer release];
-        }
 
-        // It appears to be necessary to run the event loop after destroying
-        // the AVSampleBufferDisplayLayer to avoid issue #973.
-        SDL_PumpEvents();
+            // It appears to be necessary to run the event loop after destroying
+            // the AVSampleBufferDisplayLayer to avoid issue #973.
+            SDL_PumpEvents();
+        }
     }}
 
     static
@@ -203,63 +192,6 @@ public:
         }
     }
 
-    virtual void setHdrMode(bool enabled) override
-    {
-        // Free existing HDR metadata
-        if (m_MasteringDisplayColorVolume != nullptr) {
-            CFRelease(m_MasteringDisplayColorVolume);
-            m_MasteringDisplayColorVolume = nullptr;
-        }
-        if (m_ContentLightLevelInfo != nullptr) {
-            CFRelease(m_ContentLightLevelInfo);
-            m_ContentLightLevelInfo = nullptr;
-        }
-
-        // Store new HDR metadata if available
-        SS_HDR_METADATA hdrMetadata;
-        if (enabled && LiGetHdrMetadata(&hdrMetadata)) {
-            if (hdrMetadata.displayPrimaries[0].x != 0 && hdrMetadata.maxDisplayLuminance != 0) {
-                // This data is all in big-endian
-                struct {
-                  vector_ushort2 primaries[3];
-                  vector_ushort2 white_point;
-                  uint32_t luminance_max;
-                  uint32_t luminance_min;
-                } __attribute__((packed, aligned(4))) mdcv;
-
-                // mdcv is in GBR order while SS_HDR_METADATA is in RGB order
-                mdcv.primaries[0].x = __builtin_bswap16(hdrMetadata.displayPrimaries[1].x);
-                mdcv.primaries[0].y = __builtin_bswap16(hdrMetadata.displayPrimaries[1].y);
-                mdcv.primaries[1].x = __builtin_bswap16(hdrMetadata.displayPrimaries[2].x);
-                mdcv.primaries[1].y = __builtin_bswap16(hdrMetadata.displayPrimaries[2].y);
-                mdcv.primaries[2].x = __builtin_bswap16(hdrMetadata.displayPrimaries[0].x);
-                mdcv.primaries[2].y = __builtin_bswap16(hdrMetadata.displayPrimaries[0].y);
-
-                mdcv.white_point.x = __builtin_bswap16(hdrMetadata.whitePoint.x);
-                mdcv.white_point.y = __builtin_bswap16(hdrMetadata.whitePoint.y);
-
-                // These luminance values are in 10000ths of a nit
-                mdcv.luminance_max = __builtin_bswap32((uint32_t)hdrMetadata.maxDisplayLuminance * 10000);
-                mdcv.luminance_min = __builtin_bswap32(hdrMetadata.minDisplayLuminance);
-
-                m_MasteringDisplayColorVolume = CFDataCreate(nullptr, (const UInt8*)&mdcv, sizeof(mdcv));
-            }
-
-            if (hdrMetadata.maxContentLightLevel != 0 && hdrMetadata.maxFrameAverageLightLevel != 0) {
-                // This data is all in big-endian
-                struct {
-                    uint16_t max_content_light_level;
-                    uint16_t max_frame_average_light_level;
-                } __attribute__((packed, aligned(2))) cll;
-
-                cll.max_content_light_level = __builtin_bswap16(hdrMetadata.maxContentLightLevel);
-                cll.max_frame_average_light_level = __builtin_bswap16(hdrMetadata.maxFrameAverageLightLevel);
-
-                m_ContentLightLevelInfo = CFDataCreate(nullptr, (const UInt8*)&cll, sizeof(cll));
-            }
-        }
-    }
-
     // Caller frees frame after we return
     virtual void renderFrame(AVFrame* frame) override
     { @autoreleasepool {
@@ -272,7 +204,7 @@ public:
 
             // Trigger the main thread to recreate the decoder
             SDL_Event event;
-            event.type = SDL_RENDER_TARGETS_RESET;
+            event.type = SDL_RENDER_DEVICE_RESET;
             SDL_PushEvent(&event);
             return;
         }
@@ -387,24 +319,8 @@ public:
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "av_hwdevice_ctx_create() failed for VT decoder: %d",
                         err);
+            m_InitFailureReason = InitFailureReason::NoSoftwareSupport;
             return false;
-        }
-
-        bool isAppleSilicon = false;
-        {
-            uint32_t cpuType;
-            size_t size = sizeof(cpuType);
-
-            err = sysctlbyname("hw.cputype", &cpuType, &size, NULL, 0);
-            if (err == 0) {
-                // Apple Silicon Macs have CPU_ARCH_ABI64 set, so we need to mask that off.
-                // For some reason, 64-bit Intel Macs don't seem to have CPU_ARCH_ABI64 set.
-                isAppleSilicon = (cpuType & ~CPU_ARCH_MASK) == CPU_TYPE_ARM;
-            }
-            else {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "sysctlbyname(hw.cputype) failed: %d", err);
-            }
         }
 
         if (qgetenv("VT_FORCE_INDIRECT") == "1") {
@@ -417,7 +333,7 @@ public:
         }
 
         // If we're using direct rendering, set up the AVSampleBufferDisplayLayer
-        if (m_DirectRendering) {
+        if (m_DirectRendering && !params->testOnly) {
             SDL_SysWMinfo info;
 
             SDL_VERSION(&info.version);
@@ -450,7 +366,7 @@ public:
             //
             // https://github.com/moonlight-stream/moonlight-qt/issues/493
             // https://github.com/moonlight-stream/moonlight-qt/issues/722
-            if (isAppleSilicon && !(params->videoFormat & VIDEO_FORMAT_MASK_10BIT)) {
+            if (isAppleSilicon() && !(params->videoFormat & VIDEO_FORMAT_MASK_10BIT)) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "Using layer rasterization workaround");
                 if (info.info.cocoa.window.screen != nullptr) {
@@ -497,16 +413,8 @@ public:
             case Overlay::OverlayDebug:
                 [m_OverlayTextFields[type] setAlignment:NSTextAlignmentLeft];
                 break;
-            case Overlay::OverlayDebugAudio:
-                [m_OverlayTextFields[type] setAlignment:NSTextAlignmentRight]; // XXX
-                break;
             case Overlay::OverlayStatusUpdate:
                 [m_OverlayTextFields[type] setAlignment:NSTextAlignmentRight];
-                break;
-            case Overlay::OverlayGamepad:
-                [m_OverlayTextFields[type] setAlignment:NSTextAlignmentLeft];
-                [m_OverlayTextFields[type] setUsesSingleLineMode:NO];
-                [m_OverlayTextFields[type] setMaximumNumberOfLines:0];
                 break;
             default:
                 break;
@@ -521,20 +429,6 @@ public:
 
         // Update text contents
         [m_OverlayTextFields[type] setStringValue: [NSString stringWithUTF8String:Session::get()->getOverlayManager().getOverlayText(type)]];
-
-        if (type == Overlay::OverlayGamepad) {
-            // The other overlays are full-frame fields. Keep the pad viz in
-            // the bottom-right of the stream view (AppKit's origin is the bottom).
-            [m_OverlayTextFields[type] sizeToFit];
-            NSRect bounds = m_StreamView.bounds;
-            NSRect frame = m_OverlayTextFields[type].frame;
-            frame.origin.x = NSMaxX(bounds) - frame.size.width - 8;
-            if (frame.origin.x < 8) {
-                frame.origin.x = 8;
-            }
-            frame.origin.y = 8;
-            [m_OverlayTextFields[type] setFrame:frame];
-        }
 
         // Unhide if it's enabled
         [m_OverlayTextFields[type] setHidden: !Session::get()->getOverlayManager().isOverlayEnabled(type)];
@@ -557,19 +451,15 @@ public:
         return true;
     }
 
-    virtual bool needsTestFrame() override
-    {
-        // We used to trust VT to tell us whether decode will work, but
-        // there are cases where it can lie because the hardware technically
-        // can decode the format but VT is unserviceable for some other reason.
-        // Decoding the test frame will tell us for sure whether it will work.
-        return true;
-    }
-
     int getDecoderColorspace() override
     {
         // macOS seems to handle Rec 601 best
         return COLORSPACE_REC_601;
+    }
+
+    int getDecoderColorRange() override
+    {
+        return COLOR_RANGE_LIMITED;
     }
 
     int getDecoderCapabilities() override
@@ -593,8 +483,6 @@ private:
     AVBufferRef* m_HwContext;
     AVSampleBufferDisplayLayer* m_DisplayLayer;
     CMVideoFormatDescriptionRef m_FormatDesc;
-    CFDataRef m_ContentLightLevelInfo;
-    CFDataRef m_MasteringDisplayColorVolume;
     NSView* m_StreamView;
     dispatch_block_t m_OverlayUpdateBlocks[Overlay::OverlayMax];
     NSTextField* m_OverlayTextFields[Overlay::OverlayMax];

@@ -17,6 +17,7 @@
 #include <IOKit/hid/IOHIDManager.h>
 #include <dlfcn.h>
 
+#import <AppKit/AppKit.h>
 #import <GameController/GameController.h>
 
 struct CoreHidMouseCapture {
@@ -29,7 +30,10 @@ struct CoreHidMouseCapture {
     CoreHidMouseDecoder decoder;
     std::atomic<bool> active;
     std::atomic<bool> threadRun;
-    std::atomic<bool> ownsWheel;
+    std::atomic<int64_t> lastMotionMs;
+    std::atomic<int64_t> lastButtonMs;
+    std::atomic<int64_t> lastScrollMs;
+    id eventMonitor;
     std::thread thread;
     // Published by the IOHID thread, stopped from the main thread.
     std::atomic<uintptr_t> threadLoop;
@@ -49,7 +53,10 @@ struct CoreHidMouseCapture {
           activeBackend(CoreHidBackendRequest::Auto),
           active(false),
           threadRun(false),
-          ownsWheel(false),
+          lastMotionMs(-1),
+          lastButtonMs(-1),
+          lastScrollMs(-1),
+          eventMonitor(nil),
           threadLoop(0),
           manager(nullptr),
           hidDeviceCount(0),
@@ -62,7 +69,7 @@ struct CoreHidMouseCapture {
 };
 
 // IOHIDCheckAccess / IOHIDRequestAccess live in IOKit/hidsystem/IOHIDLib.h
-// (macOS 10.15+). Twilight's deployment target is 11.0, but the symbols are
+// (macOS 10.15+). Twilight's deployment target is 13.0, but the symbols are
 // resolved at runtime so a build against headers that omit them still links.
 // Values match that header: listen request = 1, granted = 0, denied = 1,
 // unknown = 2.
@@ -130,6 +137,13 @@ void emitButtonReleases(CoreHidMouseCapture* capture)
     }
 }
 
+int64_t steadyNowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 void deliverDecoded(CoreHidMouseCapture* capture, const CoreHidDecodedUpdate& decoded)
 {
     if (decoded.hasMotion && capture->onMotion != nullptr) {
@@ -139,15 +153,21 @@ void deliverDecoded(CoreHidMouseCapture* capture, const CoreHidDecodedUpdate& de
             delta.dy = coreHidApplyScale(delta.dy, capture->scale);
             delta.motion = delta.dx != 0 || delta.dy != 0;
         }
+        if (delta.motion) {
+            capture->lastMotionMs.store(steadyNowMs());
+        }
+        if (delta.wheelChanged || delta.hWheelChanged) {
+            capture->lastScrollMs.store(steadyNowMs());
+        }
         if (delta.motion || delta.wheelChanged || delta.hWheelChanged) {
             capture->onMotion(delta, capture->context);
         }
     }
-    if (capture->decoder.sawWheel()) {
-        capture->ownsWheel.store(true);
-    }
-    if (decoded.hasButtons && decoded.buttons.changed && capture->onButtons != nullptr) {
-        capture->onButtons(decoded.buttons, capture->context);
+    if (decoded.hasButtons && decoded.buttons.changed) {
+        capture->lastButtonMs.store(steadyNowMs());
+        if (capture->onButtons != nullptr) {
+            capture->onButtons(decoded.buttons, capture->context);
+        }
     }
 }
 
@@ -417,6 +437,7 @@ void attachGcMouse(CoreHidMouseCapture* capture, GCMouse* mouse)
         delta.dy = coreHidApplyScale(coreHidPointerDyForHost(static_cast<int32_t>(std::lround(static_cast<double>(deltaY)))), capture->scale);
         delta.motion = delta.dx != 0 || delta.dy != 0;
         if (delta.motion) {
+            capture->lastMotionMs.store(steadyNowMs());
             capture->onMotion(delta, capture->context);
         }
     };
@@ -523,6 +544,71 @@ void stopGcMouse(CoreHidMouseCapture* capture)
     capture->hidDeviceCount = 0;
 }
 
+void installTrackpadMonitorOnThisThread(CoreHidMouseCapture* capture)
+{
+    if (capture->eventMonitor != nil) {
+        return;
+    }
+    // NSEvent deltaY is already positive downward. Do not negate it, and do
+    // not stamp lastMotionMs: this path is what runs when IOHID has not.
+    const NSEventMask mask = NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
+                             NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged;
+    id monitor = [NSEvent addLocalMonitorForEventsMatchingMask:mask
+                                                        handler:^NSEvent*(NSEvent* event) {
+        if (!capture->active.load() || capture->onMotion == nullptr || event == nil) {
+            return event;
+        }
+        if (coreHidEventIsRecent(capture->lastMotionMs.load(), steadyNowMs(), kCoreHidTrackpadSupersedeWindowMs)) {
+            return event;
+        }
+        CoreHidMouseDelta delta = {};
+        delta.dx = coreHidApplyScale(static_cast<int32_t>(std::lround(static_cast<double>(event.deltaX))), capture->scale);
+        delta.dy = coreHidApplyScale(static_cast<int32_t>(std::lround(static_cast<double>(event.deltaY))), capture->scale);
+        delta.motion = delta.dx != 0 || delta.dy != 0;
+        if (delta.motion) {
+            capture->onMotion(delta, capture->context);
+        }
+        return event;
+    }];
+    if (monitor != nil) {
+        capture->eventMonitor = [monitor retain];
+    }
+}
+
+void installTrackpadMonitor(CoreHidMouseCapture* capture)
+{
+    if ([NSThread isMainThread]) {
+        installTrackpadMonitorOnThisThread(capture);
+    }
+    else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            installTrackpadMonitorOnThisThread(capture);
+        });
+    }
+}
+
+void removeTrackpadMonitorOnThisThread(CoreHidMouseCapture* capture)
+{
+    if (capture->eventMonitor == nil) {
+        return;
+    }
+    [NSEvent removeMonitor:capture->eventMonitor];
+    [capture->eventMonitor release];
+    capture->eventMonitor = nil;
+}
+
+void removeTrackpadMonitor(CoreHidMouseCapture* capture)
+{
+    if ([NSThread isMainThread]) {
+        removeTrackpadMonitorOnThisThread(capture);
+    }
+    else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            removeTrackpadMonitorOnThisThread(capture);
+        });
+    }
+}
+
 }
 
 CoreHidMouseCapture* coreHidMouseCaptureCreate(CoreHidMotionFn onMotion,
@@ -559,7 +645,9 @@ bool coreHidMouseCaptureStart(CoreHidMouseCapture* capture)
     }
 
     capture->lastError[0] = '\0';
-    capture->ownsWheel.store(false);
+    capture->lastMotionMs.store(-1);
+    capture->lastButtonMs.store(-1);
+    capture->lastScrollMs.store(-1);
     // Handlers may run as soon as a backend opens. Mark the capture active
     // first so those events are delivered, and clear it if every backend fails.
     capture->active.store(true);
@@ -599,12 +687,18 @@ bool coreHidMouseCaptureStart(CoreHidMouseCapture* capture)
     }
 
     disassociateCursor(capture);
+    installTrackpadMonitor(capture);
+    if (capture->eventMonitor == nil) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "CoreHID mouse: the trackpad motion monitor was not installed");
+    }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "CoreHID mouse capture started via %s (%d device%s, scale %.2f). SDL cursor-warp relative mode stays off.",
+                "CoreHID mouse capture started via %s (%d device%s, scale %.2f). SDL cursor-warp relative mode stays off. Trackpad motion uses NSEvent unless this backend moved within %lld ms.",
                 capture->activeBackend == CoreHidBackendRequest::Iohid ? "IOHID" : "GCMouse",
                 capture->hidDeviceCount,
                 capture->hidDeviceCount == 1 ? "" : "s",
-                capture->scale);
+                capture->scale,
+                static_cast<long long>(kCoreHidTrackpadSupersedeWindowMs));
     return true;
 }
 
@@ -617,6 +711,7 @@ void coreHidMouseCaptureStop(CoreHidMouseCapture* capture)
     // Stop delivery before releasing buttons so a late report cannot
     // press a button we are about to raise.
     capture->active.store(false);
+    removeTrackpadMonitor(capture);
 
     if (capture->activeBackend == CoreHidBackendRequest::Iohid) {
         stopIohid(capture);
@@ -628,12 +723,34 @@ void coreHidMouseCaptureStop(CoreHidMouseCapture* capture)
     emitButtonReleases(capture);
     reassociateCursor(capture);
     capture->activeBackend = CoreHidBackendRequest::Auto;
-    capture->ownsWheel.store(false);
+    capture->lastMotionMs.store(-1);
+    capture->lastButtonMs.store(-1);
+    capture->lastScrollMs.store(-1);
 }
 
-bool coreHidMouseCaptureOwnsWheel(const CoreHidMouseCapture* capture)
+bool coreHidSystemNaturalScrolling()
 {
-    return capture != nullptr && capture->ownsWheel.load();
+    id value = [[NSUserDefaults standardUserDefaults] objectForKey:@"com.apple.swipescrolldirection"];
+    if (value == nil || ![value respondsToSelector:@selector(boolValue)]) {
+        return true;
+    }
+    return [value boolValue] ? true : false;
+}
+
+bool coreHidMouseCaptureSawRecentButtons(const CoreHidMouseCapture* capture)
+{
+    if (capture == nullptr || !capture->active.load()) {
+        return false;
+    }
+    return coreHidEventIsRecent(capture->lastButtonMs.load(), steadyNowMs(), kCoreHidSdlSuppressWindowMs);
+}
+
+bool coreHidMouseCaptureSawRecentScroll(const CoreHidMouseCapture* capture)
+{
+    if (capture == nullptr || !capture->active.load()) {
+        return false;
+    }
+    return coreHidEventIsRecent(capture->lastScrollMs.load(), steadyNowMs(), kCoreHidSdlSuppressWindowMs);
 }
 
 bool coreHidMouseCaptureIsActive(const CoreHidMouseCapture* capture)

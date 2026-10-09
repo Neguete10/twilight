@@ -16,7 +16,8 @@
 #include <QTextStream>
 
 MmalRenderer::MmalRenderer()
-    : m_Renderer(nullptr),
+    : IFFmpegRenderer(RendererType::MMAL),
+      m_Renderer(nullptr),
       m_InputPort(nullptr),
       m_BackgroundRenderer(nullptr),
       m_Window(nullptr),
@@ -76,17 +77,8 @@ void MmalRenderer::prepareToRender()
     // can get spurious SDL_WINDOWEVENT events that will cause us to (again) recreate our
     // renderer. This can lead to an infinite to renderer recreation, so discard all
     // SDL_WINDOWEVENT events after SDL_CreateRenderer().
-    Session* session = Session::get();
-    if (session != nullptr) {
-        // If we get here during a session, we need to synchronize with the event loop
-        // to ensure we don't drop any important events.
-        session->flushWindowEvents();
-    }
-    else {
-        // If we get here prior to the start of a session, just pump and flush ourselves.
-        SDL_PumpEvents();
-        SDL_FlushEvent(SDL_WINDOWEVENT);
-    }
+    SDL_assert(Session::get());
+    Session::get()->flushWindowEvents();
 
     SDL_SetRenderDrawColor(m_BackgroundRenderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(m_BackgroundRenderer);
@@ -151,6 +143,7 @@ bool MmalRenderer::initialize(PDECODER_PARAMETERS params)
     MMAL_STATUS_T status;
 
     if (!isMmalOverlaySupported()) {
+        m_InitFailureReason = InitFailureReason::NoSoftwareSupport;
         return false;
     }
 
@@ -163,6 +156,7 @@ bool MmalRenderer::initialize(PDECODER_PARAMETERS params)
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "mmal_component_create() failed: %x (%s)",
                      status, mmal_status_to_string(status));
+        m_InitFailureReason = InitFailureReason::NoSoftwareSupport;
         return false;
     }
 
@@ -246,6 +240,12 @@ int MmalRenderer::getDecoderColorspace()
     // MMAL seems to always use Rec. 709 colorspace for rendering
     // even when we try to set something else in the input format.
     return COLORSPACE_REC_709;
+}
+
+int MmalRenderer::getDecoderColorRange()
+{
+    // MMAL_COLOR_SPACE_ITUR_BT709 assumes limited range content
+    return COLOR_RANGE_LIMITED;
 }
 
 void MmalRenderer::InputPortCallback(MMAL_PORT_T*, MMAL_BUFFER_HEADER_T* buffer)
@@ -335,13 +335,6 @@ int MmalRenderer::getRendererAttributes()
 {
     // This renderer maxes out at 1080p
     return RENDERER_ATTRIBUTE_1080P_MAX;
-}
-
-bool MmalRenderer::needsTestFrame()
-{
-    // We won't be able to decode if the GPU memory is 64 MB or lower,
-    // so we must test before allowing the decoder to be used.
-    return true;
 }
 
 void MmalRenderer::renderFrame(AVFrame* frame)

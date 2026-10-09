@@ -36,11 +36,12 @@ def plist_keys(path):
 def test_plist_rewrite():
     module = load_prepare()
     template = (ROOT / "app" / "Info.plist").read_text(encoding="utf-8")
+    bundle_id = "io.github.neguete10.twilight"
     desktop = module.prepare(
-        template, "6.1.1", "com.moonlight-stream.Moonlight", "Twilight", "desktop"
+        template, "6.1.1", bundle_id, "Twilight", "desktop"
     )
     mas = module.prepare(
-        template, "6.1.1", "com.henrique.twilight", "Twilight", "mas"
+        template, "6.1.1", bundle_id, "Twilight", "mas"
     )
     desktop_plist = plistlib.loads(desktop.encode("utf-8"))
     mas_plist = plistlib.loads(mas.encode("utf-8"))
@@ -60,13 +61,13 @@ def test_plist_rewrite():
         "NSAllowsArbitraryLoads" not in mas_plist["NSAppTransportSecurity"],
         "MAS ATS does not set NSAllowsArbitraryLoads",
     )
-    expect(desktop_plist["CFBundleIdentifier"] == "com.moonlight-stream.Moonlight", "desktop bundle id")
-    expect(mas_plist["CFBundleIdentifier"] == "com.henrique.twilight", "MAS bundle id")
+    expect(desktop_plist["CFBundleIdentifier"] == bundle_id, "desktop bundle id")
+    expect(mas_plist["CFBundleIdentifier"] == bundle_id, "MAS bundle id")
     expect(desktop_plist["CFBundleShortVersionString"] == "6.1.1", "plist writes the version qmake passes")
     expect(template.count("<string>VERSION</string>") == 2, "Info.plist keeps the qmake version token")
     tree_version = (ROOT / "app" / "version.txt").read_text(encoding="utf-8").strip()
     wired = module.prepare(
-        template, tree_version, "com.moonlight-stream.Moonlight", "Twilight", "desktop"
+        template, tree_version, bundle_id, "Twilight", "desktop"
     )
     wired_plist = plistlib.loads(wired.encode("utf-8"))
     expect(wired_plist["CFBundleShortVersionString"] == tree_version, "short version follows version.txt")
@@ -74,6 +75,18 @@ def test_plist_rewrite():
     expect("6.1.1" not in template, "Info.plist does not hardcode 6.1.1")
     pro = (ROOT / "app" / "app.pro").read_text(encoding="utf-8")
     expect("$$cat(version.txt)" in pro, "qmake passes version.txt into Info.plist")
+    expect(pro.count("TWILIGHT_BUNDLE_ID = io.github.neguete10.twilight") == 1, "one macOS bundle id")
+    expect("QMAKE_TARGET_BUNDLE_PREFIX = io.github.neguete10" in pro, "qmake bundle prefix")
+    expect("com.henrique.twilight" not in pro, "app.pro has no previous store bundle id")
+    expect("TWILIGHT_BUNDLE_ID = com.moonlight-stream.Moonlight" not in pro, "macOS bundle id is not Moonlight's")
+    main = (ROOT / "app" / "main.cpp").read_text(encoding="utf-8")
+    expect('setOrganizationDomain("moonlight-stream.com")' in main, "QSettings organization domain")
+    expect('setApplicationName("Moonlight")' in main, "QSettings application name")
+    expect("CFBundleGetIdentifier" not in main, "app does not read the bundle id for QSettings")
+    mas_doc = (ROOT / "docs" / "TWILIGHT_MAS.md").read_text(encoding="utf-8")
+    expect(mas_doc.count("io.github.neguete10.twilight") >= 3, "store doc names the bundle id")
+    expect("Desktop stays `com.moonlight-stream.Moonlight`" not in mas_doc, "store doc gives desktop its own bundle id")
+    expect("com.henrique.twilight" not in mas_doc, "store doc has no previous bundle id")
     expect(
         "Twilight uses the microphone" in desktop_plist["NSMicrophoneUsageDescription"],
         "microphone usage string",
@@ -120,55 +133,18 @@ def test_privacy_manifest():
     )
 
 
-def test_notices():
-    notices = (ROOT / "app/licenses/NOTICES.txt").read_text(encoding="utf-8")
+def test_about():
     qml = (ROOT / "app/gui/ui/v2/SettingsSheetV2.qml").read_text(encoding="utf-8")
-    qrc = (ROOT / "app/qml.qrc").read_text(encoding="utf-8")
-    phrases = [
-        "modified version of Moonlight Qt",
-        "Andy Grundman",
-        "ABSOLUTELY NO WARRANTY",
-        "WITHOUT ANY WARRANTY",
-        "https://github.com/Neguete10/twilight",
-        "Nathan Osman",
-        "h264bitstream",
-        "SDL_GameControllerDB",
-        "FFmpeg",
-        "OpenSSL",
-        "Opus",
-        "SDL2",
-        "libplacebo",
-        "qmdnsengine",
-    ]
-    for phrase in phrases:
-        expect(phrase in notices, "NOTICES.txt contains %s" % phrase)
     expect("https://github.com/Neguete10/twilight" in qml, "About UI links the source")
     expect("language" not in qml.lower(), "About UI has no language picker")
-    license_names = [
-        "GPL-3.0.txt",
-        "qmdnsengine-MIT.txt",
-        "h264bitstream-LGPL-2.1.txt",
-        "SDL_GameControllerDB-Zlib.txt",
-        "FFmpeg-LGPL-2.1.txt",
-        "OpenSSL-Apache-2.0.txt",
-        "Opus-BSD.txt",
-        "SDL2-Zlib.txt",
-        "SDL2_ttf-Zlib.txt",
-        "libplacebo-LGPL-2.1.txt",
-        "NOTICES.txt",
-    ]
-    for name in license_names:
-        path = ROOT / "app" / "licenses" / name
-        expect(path.is_file() and path.stat().st_size > 80, "license file %s" % name)
-        expect(name in qrc, "qrc ships %s" % name)
-        expect(name in qml or name == "NOTICES.txt", "About UI can open %s" % name)
-    gpl = (ROOT / "app/licenses/GPL-3.0.txt").read_bytes()
-    expect(gpl == (ROOT / "LICENSE").read_bytes(), "GPL-3.0.txt is the repo LICENSE")
-    expect(b"GNU LESSER GENERAL PUBLIC LICENSE" in (ROOT / "app/licenses/h264bitstream-LGPL-2.1.txt").read_bytes(), "h264bitstream LGPL text")
-    expect(b"Apache License" in (ROOT / "app/licenses/OpenSSL-Apache-2.0.txt").read_bytes(), "OpenSSL Apache text")
-    expect(b"Nathan Osman" in (ROOT / "app/licenses/qmdnsengine-MIT.txt").read_bytes(), "qmdnsengine copyright")
+    expect("Check for Updates" in qml, "About UI can check for updates")
+    expect("Licenses" not in qml, "About UI has no Licenses page")
+    expect("NOTICES.txt" not in qml and "GPL-3.0.txt" not in qml, "About UI does not open license files")
     version = (ROOT / "app/version.txt").read_text(encoding="utf-8").strip()
-    expect(version == "7.0.1", "version is 7.0.1")
+    expect(version == "7.1.0", "version is 7.1.0")
+    entitlements = plistlib.loads((ROOT / "app/deploy/macos/Twilight-DeveloperID.entitlements").read_bytes())
+    expect(entitlements == {"com.apple.security.device.audio-input": True},
+           "Developer ID entitlements hold only the Hardened Runtime audio-input exception")
 
 
 def test_package_script():
@@ -178,7 +154,12 @@ def test_package_script():
     expect("3rd Party Mac Developer Application: Your Name (TEAMID)" in text, "application identity placeholder")
     expect("3rd Party Mac Developer Installer: Your Name (TEAMID)" in text, "installer identity placeholder")
     expect("create-dmg" in text, "desktop path still creates a DMG")
-    expect("spatial-audio.entitlements" in text, "desktop signing still uses the spatial entitlements")
+    expect("Twilight-DeveloperID.entitlements" in text, "Developer ID signing passes the Developer ID entitlements file")
+    expect("spatial-audio.entitlements" not in text, "Developer ID signing does not use the sandbox entitlements")
+    expect("twilight-notary" in text and "TAV97BM6HV" in text, "notarization hook keeps the team profile")
+    expect("io.github.neguete10.twilight" in text, "store profile message names the bundle id")
+    expect("com.henrique.twilight" not in text, "packaging script has no previous bundle id")
+    expect("TWILIGHT_NOTARIZE" in text and "TWILIGHT_SIGN" in text, "signing and notarization stay opt-in")
 
     def run(env, config):
         result = subprocess.run(
@@ -274,7 +255,7 @@ def main():
     test_plist_rewrite()
     test_entitlements()
     test_privacy_manifest()
-    test_notices()
+    test_about()
     test_package_script()
     test_dmg_layout()
     if FAILURES:

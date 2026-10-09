@@ -1,5 +1,6 @@
 #include "streamhudstats.h"
 
+#include "streaming/session.h"
 #include "streamhudparse.h"
 #include "settings/streamingpreferences.h"
 
@@ -68,6 +69,8 @@ StreamHudStats* StreamHudStats::instance()
 StreamHudStats::StreamHudStats(QObject* parent)
     : QObject(parent),
       m_Streaming(false),
+      m_HudShown(true),
+      m_QuickMenuOpen(false),
       m_HasSample(false),
       m_ConfirmArmed(false),
       m_ConfirmDeadline(0)
@@ -139,11 +142,17 @@ void StreamHudStats::noteSessionStarted()
     const bool was = m_Streaming;
     m_Streaming = true;
     m_HasSample = false;
+    m_HudShown = true;
     m_FpsText.clear();
     m_BitrateText.clear();
     m_LatencyText.clear();
     m_CodecText.clear();
     emit statsChanged();
+    emit hudShownChanged();
+    if (m_QuickMenuOpen) {
+        m_QuickMenuOpen = false;
+        emit quickMenuOpenChanged();
+    }
     if (!was) {
         emit streamingChanged();
     }
@@ -157,6 +166,11 @@ void StreamHudStats::noteSessionEnded()
     m_Streaming = false;
     m_HasSample = false;
     m_ConfirmArmed = false;
+    m_HudShown = true;
+    if (m_QuickMenuOpen) {
+        m_QuickMenuOpen = false;
+        emit quickMenuOpenChanged();
+    }
     m_FpsText.clear();
     m_BitrateText.clear();
     m_LatencyText.clear();
@@ -194,7 +208,13 @@ static bool hudShouldSync()
     if (self == nullptr || !self->streaming() || s_HudWindow.isNull()) {
         return false;
     }
-    return StreamingPreferences::hudWantsSamples();
+    // The chips follow the Twilight overlay setting plus the runtime toggle.
+    // The quick menu uses the same child window, including when the chips
+    // themselves are hidden.
+    if (self->quickMenuOpen()) {
+        return true;
+    }
+    return StreamingPreferences::hudWantsSamples() && self->hudShown();
 }
 
 void StreamHudStats::followStream()
@@ -278,6 +298,43 @@ void StreamHudStats::endStreamWindowMutation()
     else if (followPending) {
         followStream();
     }
+}
+
+void StreamHudStats::setHudShown(bool shown)
+{
+    if (m_HudShown == shown) {
+        return;
+    }
+    m_HudShown = shown;
+    emit hudShownChanged();
+}
+
+void StreamHudStats::setQuickMenuOpen(bool open)
+{
+    if (m_QuickMenuOpen == open) {
+        return;
+    }
+    m_QuickMenuOpen = open;
+    emit quickMenuOpenChanged();
+}
+
+void StreamHudStats::closeQuickMenu()
+{
+    if (Session::get() != nullptr) {
+        Session::get()->closeQuickMenu();
+        return;
+    }
+    setQuickMenuOpen(false);
+}
+
+void StreamHudStats::endStreamFromMenu()
+{
+    if (Session::get() != nullptr) {
+        Session::get()->endStreamFromQuickMenu();
+        return;
+    }
+    setQuickMenuOpen(false);
+    requestDisconnect();
 }
 
 void StreamHudStats::requestDisconnect()

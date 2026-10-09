@@ -1,7 +1,7 @@
 #pragma once
 
 #include "renderer.h"
-#include <SDL.h>
+#include "SDL_compat.h"
 
 class SdlAudioRenderer : public IAudioRenderer
 {
@@ -10,21 +10,21 @@ public:
 
     virtual ~SdlAudioRenderer();
 
-    virtual bool prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* opusConfig);
+    virtual bool prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* opusConfig) override;
 
-    virtual void* getAudioBuffer(int* size);
+    virtual void* getAudioBuffer(int* size) override;
 
-    virtual bool submitAudio(int bytesWritten);
+    virtual bool submitAudio(int bytesWritten) override;
 
-    virtual int getCapabilities();
+    virtual AudioFormat getAudioBufferFormat() override;
 
-    virtual AudioFormat getAudioBufferFormat();
-
-    const char * getRendererName() { return m_Name; }
+    virtual void updateMetrics() override;
 
 private:
     SDL_AudioDeviceID m_AudioDevice;
     void* m_AudioBuffer;
-    int m_FrameSize;
-    char m_Name[24];
+    Uint32 m_FrameSize;
+    Uint32 m_FrameDurationMs;
+    Uint32 m_DropCount;
+    std::atomic<int> m_QueuedAudioSize;
 };

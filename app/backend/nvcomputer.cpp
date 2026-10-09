@@ -1,4 +1,5 @@
 #include "nvcomputer.h"
+#include "wake_notice.h"
 #include "nvapp.h"
 #include "settings/compatfetcher.h"
 
@@ -99,7 +100,7 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
         settings.beginWriteArray(SER_APPLIST);
         for (int i = 0; i < appList.count(); i++) {
             settings.setArrayIndex(i);
-            appList[i].serialize(settings);
+            appList.at(i).serialize(settings);
         }
         settings.endArray();
     }
@@ -141,7 +142,7 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     QString newMacString = NvHTTP::getXmlString(serverInfo, "mac");
     if (newMacString != "00:00:00:00:00:00") {
         QStringList macOctets = newMacString.split(':');
-        for (const QString& macOctet : macOctets) {
+        for (const QString& macOctet : std::as_const(macOctets)) {
             this->macAddress.append((char) macOctet.toInt(nullptr, 16));
         }
     }
@@ -254,14 +255,16 @@ WakePacketOutcome NvComputer::wake() const
     // case the host has timed out in ARP entries.
     QMap<QString, quint16> addressMap;
     QSet<quint16> basePortSet;
-    for (const NvAddress& addr : uniqueAddresses()) {
+    const auto uniqueHostAddresses = uniqueAddresses();
+    for (const NvAddress& addr : uniqueHostAddresses) {
         addressMap.insert(addr.address(), addr.port());
         basePortSet.insert(addr.port());
     }
     addressMap.insert("255.255.255.255", 0);
 
     // Try to broadcast on all available NICs
-    for (const QNetworkInterface& nic : QNetworkInterface::allInterfaces()) {
+    const auto allInterfaces = QNetworkInterface::allInterfaces();
+    for (const QNetworkInterface& nic : allInterfaces) {
         // Ensure the interface is up and skip the loopback adapter
         if ((nic.flags() & QNetworkInterface::IsUp) == 0 ||
                 (nic.flags() & QNetworkInterface::IsLoopBack) != 0) {
@@ -269,7 +272,8 @@ WakePacketOutcome NvComputer::wake() const
         }
 
         QHostAddress allNodesMulticast("FF02::1");
-        for (const QNetworkAddressEntry& addr : nic.addressEntries()) {
+        const auto allInterfaceAddresses = nic.addressEntries();
+        for (const QNetworkAddressEntry& addr : allInterfaceAddresses) {
             // Store the scope ID for this NIC if IPv6 is enabled
             if (!addr.ip().scopeId().isEmpty()) {
                 allNodesMulticast.setScopeId(addr.ip().scopeId());
@@ -313,7 +317,7 @@ WakePacketOutcome NvComputer::wake() const
 
             // Send to all static ports
             for (quint16 port : STATIC_WOL_PORTS) {
-                if (sock.writeDatagram(wolPayload, address, port) > 0) {
+                if (sock.writeDatagram(wolPayload, address, port)) {
                     qInfo().nospace().noquote() << "Sent WoL packet to " << name << " via " << address.toString() << ":" << port;
                     success = true;
                 }
@@ -337,7 +341,7 @@ WakePacketOutcome NvComputer::wake() const
                 for (quint16 port : DYNAMIC_WOL_PORTS) {
                     port = (port - 47989) + basePort;
 
-                    if (sock.writeDatagram(wolPayload, address, port) > 0) {
+                    if (sock.writeDatagram(wolPayload, address, port)) {
                         qInfo().nospace().noquote() << "Sent WoL packet to " << name << " via " << address.toString() << ":" << port;
                         success = true;
                     }
@@ -375,13 +379,15 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
         Q_ASSERT(!s.localAddress().isNull());
         Q_ASSERT(!s.peerAddress().isNull());
 
-        for (const QNetworkInterface& nic : QNetworkInterface::allInterfaces()) {
+        const auto allInterfaces = QNetworkInterface::allInterfaces();
+        for (const QNetworkInterface& nic : allInterfaces) {
             // Ensure the interface is up
             if ((nic.flags() & QNetworkInterface::IsUp) == 0) {
                 continue;
             }
 
-            for (const QNetworkAddressEntry& addr : nic.addressEntries()) {
+            const auto allInterfaceAddresses = nic.addressEntries();
+            for (const QNetworkAddressEntry& addr : allInterfaceAddresses) {
                 if (addr.ip() == s.localAddress()) {
                     qInfo() << "Found matching interface:" << nic.humanReadableName() << nic.hardwareAddress() << nic.flags();
 
@@ -463,7 +469,7 @@ bool NvComputer::updateAppList(QVector<NvApp> newAppList) {
     }
 
     // Propagate client-side attributes to the new app list
-    for (const NvApp& existingApp : appList) {
+    for (const NvApp& existingApp : std::as_const(appList)) {
         for (NvApp& newApp : newAppList) {
             if (existingApp.id == newApp.id) {
                 newApp.hidden = existingApp.hidden;
@@ -555,8 +561,8 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED(externalPort);
     ASSIGN_IF_CHANGED(pairState);
     ASSIGN_IF_CHANGED(serverCodecModeSupport);
-    // While a quit is in flight, a serverinfo sample can still list the app
-    // we just cancelled. Adopting that id puts the tile back on Live.
+    // A quit clears the id and leaves pendingQuit set. A stale serverinfo
+    // sample must not put that id back until a sample itself says idle.
     if (!(this->pendingQuit && that.currentGameId != 0)) {
         ASSIGN_IF_CHANGED(currentGameId);
     }

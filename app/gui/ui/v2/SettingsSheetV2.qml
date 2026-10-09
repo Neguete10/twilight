@@ -250,6 +250,49 @@ Item {
         customFpsOpen = false
     }
 
+    function commitBitrateKbps(kbps) {
+        if (kbps > 150000)
+            StreamingPreferences.unlockBitrate = true
+        StreamingPreferences.bitrateKbps = kbps
+        bitrateInput.text = StreamingPreferences.bitrateMbpsText(kbps)
+    }
+
+    function commitBitrateText(raw) {
+        var kbps = StreamingPreferences.bitrateKbpsFromMbpsText(raw)
+        var shown = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
+        if (kbps < 0) {
+            bitrateInput.text = shown
+            if ((raw + "").trim() !== shown) {
+                toastRequested(qsTr("Enter a bitrate from %1 to %2 Mb/s. That number was not applied.")
+                               .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
+                               .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps())))
+            }
+            return
+        }
+        commitBitrateKbps(kbps)
+    }
+
+    function commitSliderBitrate(kbps) {
+        var current = StreamingPreferences.bitrateKbps
+        var floor = StreamingPreferences.minimumBitrateKbps()
+        var cap = StreamingPreferences.maximumBitrateKbps()
+        if (current < floor || current > cap) {
+            toastRequested(qsTr("The slider replaced the saved %1 Mb/s. It only sets values from %2 to %3.")
+                           .arg(StreamingPreferences.bitrateMbpsText(current))
+                           .arg(StreamingPreferences.bitrateMbpsText(floor))
+                           .arg(StreamingPreferences.bitrateMbpsText(cap)))
+        }
+        commitBitrateKbps(kbps)
+    }
+
+    function requestClose() {
+        // Dropping focus commits the field. forceActiveFocus() would break
+        // keySink's focus binding.
+        if (bitrateInput.activeFocus)
+            bitrateInput.focus = false
+        closeRequested()
+    }
+
     function applyYuv(next) {
         if (StreamingPreferences.enableYUV444 === next)
             return
@@ -328,6 +371,7 @@ Item {
             ids.push("mdns")
             ids.push("blocking")
             ids.push("warnings")
+            ids.push("abr")
         }
         else if (section === "advanced") {
             ids.push("codec")
@@ -367,7 +411,7 @@ Item {
         if (id === "aboutSource") return aboutSource
         if (id === "res") return resChoice
         if (id === "fps") return fpsChoice
-        if (id === "bitrate") return bitrateSlider
+        if (id === "bitrate") return bitrateRow
         if (id === "vsync") return vsyncSwitch
         if (id === "pace") return paceSwitch
         if (id === "window") return windowChoice
@@ -392,6 +436,7 @@ Item {
         if (id === "mdns") return mdnsSwitch
         if (id === "blocking") return blockingSwitch
         if (id === "warnings") return warningsSwitch
+        if (id === "abr") return abrSwitch
         if (id === "codec") return codecChoice
         if (id === "pyro") return pyroChoice
         if (id === "decoder") return decoderChoice
@@ -490,6 +535,7 @@ Item {
         mdnsSwitch.keyed = id === "mdns"
         blockingSwitch.keyed = id === "blocking"
         warningsSwitch.keyed = id === "warnings"
+        abrSwitch.keyed = id === "abr"
         optimSwitch.keyed = id === "optim"
         quitAfterSwitch.keyed = id === "quitAfter"
         awakeSwitch.keyed = id === "awake"
@@ -549,7 +595,7 @@ Item {
             }
         }
         else if (id === "close")
-            closeRequested()
+            requestClose()
         else if (id === "checkUpdate")
             AutoUpdateChecker.checkNow()
         else if (id === "aboutSource" && SystemProperties.hasBrowser)
@@ -586,6 +632,7 @@ Item {
         else if (id === "mdns") mdnsSwitch.activate()
         else if (id === "blocking") blockingSwitch.activate()
         else if (id === "warnings") warningsSwitch.activate()
+        else if (id === "abr") abrSwitch.activate()
         else if (id === "optim") optimSwitch.activate()
         else if (id === "quitAfter") quitAfterSwitch.activate()
         else if (id === "awake") awakeSwitch.activate()
@@ -601,13 +648,18 @@ Item {
 
     Connections {
         target: StreamingPreferences
-        onMicrophoneAccessFinished: sheet.micWanted = granted
+        function onMicrophoneAccessFinished(granted) {
+            sheet.micWanted = granted
+            if (!granted && StreamingPreferences.microphoneStatusText !== "") {
+                sheet.toastRequested(StreamingPreferences.microphoneStatusText)
+            }
+        }
     }
 
     Rectangle {
         anchors.fill: parent
         color: sheet.theme.scrim
-        MouseArea { anchors.fill: parent; onClicked: sheet.closeRequested() }
+        MouseArea { anchors.fill: parent; onClicked: sheet.requestClose() }
     }
 
     Rectangle {
@@ -788,19 +840,107 @@ Item {
 
                         TwTextV2 {
                             theme: sheet.theme
-                            text: qsTr("Bitrate · %1 Mb/s").arg((StreamingPreferences.bitrateKbps / 1000).toFixed(1))
+                            text: qsTr("Bitrate · %1 Mb/s").arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
                             color: sheet.theme.secondary
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
                         }
-                        SliderV2 {
-                            id: bitrateSlider
+                        Item {
+                            id: bitrateRow
+                            width: parent.width
+                            height: 36
+
+                            Rectangle {
+                                id: bitrateField
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 124
+                                height: 32
+                                radius: 10
+                                color: sheet.theme.field
+                                border.width: bitrateInput.activeFocus ? 2 : 1
+                                border.color: bitrateInput.activeFocus ? sheet.theme.accent : sheet.theme.stroke
+
+                                TextInput {
+                                    id: bitrateInput
+                                    anchors.left: parent.left
+                                    anchors.right: bitrateUnit.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 4
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    horizontalAlignment: TextInput.AlignRight
+                                    clip: true
+                                    selectByMouse: true
+                                    color: sheet.theme.ink
+                                    font.family: sheet.theme.fontFamily
+                                    font.pixelSize: 14
+                                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                    Component.onCompleted: text = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
+                                    onEditingFinished: sheet.commitBitrateText(text)
+                                    Keys.onReturnPressed: {
+                                        focus = false
+                                        event.accepted = true
+                                    }
+                                    Keys.onEnterPressed: {
+                                        focus = false
+                                        event.accepted = true
+                                    }
+                                    Keys.onEscapePressed: {
+                                        text = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
+                                        focus = false
+                                        event.accepted = true
+                                    }
+                                }
+
+                                TwTextV2 {
+                                    id: bitrateUnit
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    theme: sheet.theme
+                                    text: qsTr("Mb/s")
+                                    color: sheet.theme.secondary
+                                    font.pixelSize: 12
+                                }
+                            }
+
+                            SliderV2 {
+                                id: bitrateSlider
+                                anchors.left: parent.left
+                                anchors.right: bitrateField.left
+                                anchors.rightMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                theme: sheet.theme
+                                from: StreamingPreferences.minimumBitrateKbps()
+                                to: StreamingPreferences.maximumBitrateKbps()
+                                value: Math.max(from, Math.min(to, StreamingPreferences.bitrateKbps))
+                                onMoved: sheet.commitSliderBitrate(value)
+                            }
+
+                            Connections {
+                                target: StreamingPreferences
+                                onBitrateChanged: bitrateInput.text = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
+                            }
+                        }
+                        TwTextV2 {
                             width: parent.width
                             theme: sheet.theme
-                            from: 500
-                            to: 500000
-                            value: Math.min(StreamingPreferences.bitrateKbps, 500000)
-                            onMoved: StreamingPreferences.bitrateKbps = value
+                            color: sheet.theme.secondary
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            text: (StreamingPreferences.bitrateKbps < StreamingPreferences.minimumBitrateKbps()
+                                   || StreamingPreferences.bitrateKbps > StreamingPreferences.maximumBitrateKbps())
+                                  ? qsTr("Saved %1 Mb/s is outside %2–%3. It is still sent until you change it. The slider stops at %4 Mb/s. On a wired gigabit link the real-world ceiling is about 800 Mb/s.")
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
+                                  : qsTr("%1–%2 Mb/s. On a wired gigabit link the real-world ceiling is about 800 Mb/s. GeForce Experience will not encode above %3 Mb/s.")
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
+                                    .arg(StreamingPreferences.gfeBitrateCapKbps() / 1000)
                         }
 
                         SettingRowV2 {
@@ -898,12 +1038,21 @@ Item {
                             width: parent.width
                             theme: sheet.theme
                             enabled: StreamingPreferences.audioConfig !== StreamingPreferences.AC_STEREO
-                            current: StreamingPreferences.spatialAudioConfig
+                            current: StreamingPreferences.spatialAudioConfig === StreamingPreferences.SAC_DISABLED
+                                     ? StreamingPreferences.SAC_DISABLED
+                                     : StreamingPreferences.SAC_FIXED
                             options: [
-                                { text: qsTr("Enabled"), value: StreamingPreferences.SAC_AUTO },
+                                { text: qsTr("Enabled"), value: StreamingPreferences.SAC_FIXED },
                                 { text: qsTr("Disabled"), value: StreamingPreferences.SAC_DISABLED }
                             ]
-                            onPicked: StreamingPreferences.spatialAudioConfig = value
+                            onPicked: {
+                                if (value === StreamingPreferences.SAC_DISABLED)
+                                    StreamingPreferences.spatialAudioConfig = StreamingPreferences.SAC_DISABLED
+                                else if (StreamingPreferences.spatialHeadTracking)
+                                    StreamingPreferences.spatialAudioConfig = StreamingPreferences.SAC_HEAD_TRACKED
+                                else
+                                    StreamingPreferences.spatialAudioConfig = StreamingPreferences.SAC_FIXED
+                            }
                         }
                         TwTextV2 {
                             width: parent.width
@@ -970,13 +1119,24 @@ Item {
                             }
                         }
                         TwTextV2 {
+                            id: micStatusText
+                            // Re-evaluated whenever the status text changes.
+                            readonly property bool opensSettings: StreamingPreferences.microphoneStatusText !== ""
+                                                                  && StreamingPreferences.microphoneNeedsSystemSettings()
                             width: parent.width
                             visible: Qt.platform.os == "osx" && StreamingPreferences.microphoneStatusText !== ""
                             theme: sheet.theme
                             color: sheet.theme.tertiary
                             font.pixelSize: 12
+                            font.underline: opensSettings
                             wrapMode: Text.WordWrap
                             text: StreamingPreferences.microphoneStatusText
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: micStatusText.opensSettings
+                                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: StreamingPreferences.openMicrophoneSettings()
+                            }
                         }
                     }
 
@@ -1140,7 +1300,6 @@ Item {
                         SettingRowV2 {
                             width: parent.width
                             theme: sheet.theme
-                            divider: false
                             title: qsTr("Connection quality warnings")
                             subtitle: qsTr("Tells you when the link is too weak for the current settings.")
                             SwitchV2 {
@@ -1148,6 +1307,19 @@ Item {
                                 theme: sheet.theme
                                 checked: StreamingPreferences.connectionWarnings
                                 onToggled: StreamingPreferences.connectionWarnings = next
+                            }
+                        }
+                        SettingRowV2 {
+                            width: parent.width
+                            theme: sheet.theme
+                            divider: false
+                            title: qsTr("Adaptive bitrate")
+                            subtitle: qsTr("Lowers the bitrate when the link drops frames, and raises it slowly when the link stays clean. Off unless the host allows live changes. The ceiling is the bitrate you chose, and at most 500 Mb/s.")
+                            SwitchV2 {
+                                id: abrSwitch
+                                theme: sheet.theme
+                                checked: StreamingPreferences.enableAdaptiveBitrate
+                                onToggled: StreamingPreferences.enableAdaptiveBitrate = next
                             }
                         }
                     }
@@ -1194,7 +1366,7 @@ Item {
                             color: sheet.theme.tertiary
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
-                            text: qsTr("Used only when the codec is PyroWave. Automatic prefers Metal on Apple7 GPUs and otherwise uses Vulkan. H.264, HEVC, and AV1 stay on VideoToolbox.")
+                            text: qsTr("Used only when the codec is PyroWave. Automatic uses Metal, and falls back to Vulkan only if Metal does not initialize. An explicit Metal or Vulkan choice stays on that decoder. H.264, HEVC, and AV1 stay on VideoToolbox.")
                         }
                         TwTextV2 { theme: sheet.theme; text: qsTr("Decoder"); color: sheet.theme.secondary; font.pixelSize: 12; font.weight: Font.DemiBold }
                         ChoiceV2 {
@@ -1428,7 +1600,7 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
-                onClicked: sheet.closeRequested()
+                onClicked: sheet.requestClose()
             }
         }
     }
@@ -1473,18 +1645,18 @@ Item {
 
     Shortcut {
         sequence: "Escape"
-        enabled: sheet.open && sheet.escapeEnabled && !sheet.customResOpen && !sheet.customFpsOpen
-        onActivated: sheet.closeRequested()
+        enabled: sheet.open && sheet.escapeEnabled && !sheet.customResOpen && !sheet.customFpsOpen && !bitrateInput.activeFocus
+        onActivated: sheet.requestClose()
     }
 
     Item {
         id: keySink
-        focus: sheet.open && !sheet.customResOpen && !sheet.customFpsOpen
+        focus: sheet.open && !sheet.customResOpen && !sheet.customFpsOpen && !bitrateInput.activeFocus
         Keys.onPressed: {
-            if (!sheet.open || sheet.customResOpen || sheet.customFpsOpen)
+            if (!sheet.open || sheet.customResOpen || sheet.customFpsOpen || bitrateInput.activeFocus)
                 return
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back) {
-                sheet.closeRequested()
+                sheet.requestClose()
                 event.accepted = true
             }
             else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab

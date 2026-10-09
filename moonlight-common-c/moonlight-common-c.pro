@@ -6,17 +6,6 @@
 
 QT -= core gui
 
-# Same patch as app/app.pro. Either qmake pass may run first.
-!system(python3 $$PWD/../scripts/apply_pyrowave_protocol.py) {
-    error("Failed to apply the PyroWave protocol patch to moonlight-common-c")
-}
-!system(python3 $$PWD/../scripts/apply_adaptive_triggers_protocol.py) {
-    error("Failed to apply the adaptive-trigger protocol patch to moonlight-common-c")
-}
-!system(python3 $$PWD/../scripts/apply_mic_control_packet.py) {
-    error("Failed to apply the microphone control-stream patch to moonlight-common-c")
-}
-
 TARGET = moonlight-common-c
 TEMPLATE = lib
 
@@ -25,6 +14,14 @@ CONFIG += staticlib
 
 # Include global qmake defs
 include(../globaldefs.pri)
+
+# 7feb0a6 reads packetTypes[IDX_DS_ADAPTIVE_TRIGGERS] (index 12) on every
+# async callback check. The four pre-Sunshine tables are one entry short,
+# so a GFE host reads past the array. The script is idempotent. This repo
+# cannot publish a commit on the submodule remote.
+!system(python3 $$PWD/../scripts/apply_control_packet_bounds.py) {
+    error("Failed to apply the control-stream packet table bounds patch")
+}
 
 win32 {
     contains(QT_ARCH, i386) {
@@ -42,6 +39,16 @@ win32 {
 }
 macx {
     INCLUDEPATH += $$PWD/../libs/mac/include
+
+    # 7feb0a6 (andygrundman/moonlight-common-c) has no LiSendRawControlStreamPacket
+    # or LiIsControlStreamEncrypted. This static library is compiled before
+    # app.pro, so the patch has to run here or the app links undefined
+    # _LiSendRawControlStreamPacket / _LiIsControlStreamEncrypted. The script
+    # is idempotent. The functions use file-scope state in ControlStream.c, and
+    # this repo cannot publish a commit on that submodule remote.
+    !system(python3 $$PWD/../scripts/apply_mic_control_packet.py) {
+        error("Failed to apply the microphone control-stream patch")
+    }
 }
 unix:!macx {
     CONFIG += link_pkgconfig
@@ -51,9 +58,7 @@ unix:!macx {
 
 COMMON_C_DIR = $$PWD/moonlight-common-c
 ENET_DIR = $$COMMON_C_DIR/enet
-RS_DIR = $$COMMON_C_DIR/reedsolomon
 SOURCES += \
-    $$RS_DIR/rs.c \
     $$ENET_DIR/callbacks.c \
     $$ENET_DIR/compress.c \
     $$ENET_DIR/host.c \
@@ -63,6 +68,9 @@ SOURCES += \
     $$ENET_DIR/protocol.c \
     $$ENET_DIR/unix.c \
     $$ENET_DIR/win32.c \
+    $$COMMON_C_DIR/nanors/deps/obl/oblas_common.c \
+    $$COMMON_C_DIR/nanors/deps/obl/oblas_lite.c \
+    $$COMMON_C_DIR/nanors/rs.c \
     $$COMMON_C_DIR/src/AudioStream.c \
     $$COMMON_C_DIR/src/ByteBuffer.c \
     $$COMMON_C_DIR/src/Connection.c \
@@ -84,11 +92,14 @@ SOURCES += \
     $$COMMON_C_DIR/src/VideoDepacketizer.c \
     $$COMMON_C_DIR/src/VideoStream.c
 HEADERS += \
-    $$COMMON_C_DIR/src/Limelight.h
+    $$COMMON_C_DIR/src/Limelight.h \
+    $$COMMON_C_DIR/src/PyroWaveProtocol.h
 INCLUDEPATH += \
-    $$RS_DIR \
     $$ENET_DIR/include \
-    $$COMMON_C_DIR/src
+    $$COMMON_C_DIR/src \
+    $$COMMON_C_DIR/nanors \
+    $$COMMON_C_DIR/nanors/deps \
+    $$COMMON_C_DIR/nanors/deps/obl
 DEFINES += HAS_SOCKLEN_T
 
 CONFIG(debug, debug|release) {

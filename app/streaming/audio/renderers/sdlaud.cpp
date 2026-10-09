@@ -1,12 +1,13 @@
 #include "sdl.h"
+#include "imgui/devui.h"
 
 #include <Limelight.h>
-#include <SDL.h>
 
 SdlAudioRenderer::SdlAudioRenderer()
     : m_AudioDevice(0),
       m_AudioBuffer(nullptr),
-      m_Name("SDL")
+      m_DropCount(0),
+      m_QueuedAudioSize{0}
 {
     SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
 
@@ -32,15 +33,9 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
     // to mitigate this issue. Otherwise, we will buffer up to 3 frames of audio which
     // is 15 ms at regular 5 ms frames and 30 ms at 10 ms frames for slow connections.
     // The buffering helps avoid audio underruns due to network jitter.
-#ifndef Q_OS_DARWIN
     want.samples = SDL_max(480, opusConfig->samplesPerFrame * 3);
-#else
-    // HACK: Changing the buffer size can lead to Bluetooth HFP
-    // audio issues on macOS, so we're leaving this alone.
-    // https://github.com/moonlight-stream/moonlight-qt/issues/1071
-    want.samples = SDL_max(480, opusConfig->samplesPerFrame);
-#endif
 
+    m_FrameDurationMs = opusConfig->samplesPerFrame / (opusConfig->sampleRate / 1000);
     m_FrameSize = opusConfig->samplesPerFrame *
                   opusConfig->channelCount *
                   getAudioBufferSampleSize();
@@ -60,8 +55,6 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
         return false;
     }
 
-    setOpusConfig(opusConfig);
-
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Desired audio buffer: %u samples (%u bytes)",
                 want.samples,
@@ -72,13 +65,19 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
                 have.samples,
                 have.size);
 
-    const char *driver = SDL_GetCurrentAudioDriver();
-    snprintf(m_Name, 5 + strlen(driver), "SDL/%s", driver);
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "SDL audio driver: %s", driver);
+                "SDL audio driver: %s",
+                SDL_GetCurrentAudioDriver());
 
     // Start playback
     SDL_PauseAudioDevice(m_AudioDevice, 0);
+
+    DevUISettings::instance().UpdateMetrics([&](DevUIMetrics& metrics) {
+        metrics.opusChannelCount = have.channels;
+        metrics.audioSampleRate = opusConfig->sampleRate;
+        metrics.audioFrameDurationMs = m_FrameDurationMs;
+
+    });
 
     return true;
 }
@@ -114,8 +113,7 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
     // Don't queue if there's already more than 30 ms of audio data waiting
     // in Moonlight's audio queue.
     if (LiGetPendingAudioDuration() > 30) {
-        m_ActiveWndAudioStats.totalGlitches++;
-        m_ActiveWndAudioStats.droppedOverload++;
+        ++m_DropCount;
         return true;
     }
 
@@ -129,8 +127,10 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
             return false;
         }
 
-        // Only queue more samples where there are 10 frames or less in SDL's queue
-        if (SDL_GetQueuedAudioSize(m_AudioDevice) / m_FrameSize <= 10) {
+        // Only queue more samples where there is 50 ms or less in SDL's queue
+        int queueSize = SDL_GetQueuedAudioSize(m_AudioDevice);
+        if (queueSize / m_FrameSize * m_FrameDurationMs <= 50) {
+            m_QueuedAudioSize.store(queueSize + bytesWritten);
             break;
         }
 
@@ -146,13 +146,15 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
     return true;
 }
 
-int SdlAudioRenderer::getCapabilities()
-{
-    // Direct submit can't be used because we use LiGetPendingAudioDuration()
-    return CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
-}
-
 IAudioRenderer::AudioFormat SdlAudioRenderer::getAudioBufferFormat()
 {
     return AudioFormat::Float32NE;
+}
+
+void SdlAudioRenderer::updateMetrics()
+{
+    DevUISettings::instance().UpdateMetrics([&](DevUIMetrics& metrics) {
+        metrics.audioDropCount = m_DropCount;
+        metrics.audioInBufferMs = (float)m_QueuedAudioSize.load() / m_FrameSize * m_FrameDurationMs;
+    });
 }

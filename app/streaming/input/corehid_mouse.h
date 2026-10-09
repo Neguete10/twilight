@@ -9,11 +9,11 @@
 // backend uses IOHIDManager, the C API CoreHID's HIDDeviceClient reads, and
 // can fall back to GCMouse from Game Controller. See docs/COREHID_MAC.md.
 //
-// Relative HID counts are forwarded as LiSendMouseMoveEvent deltas. Pointer Y
-// is negated once (coreHidPointerDyForHost) so it matches SDL yrel, which is
-// positive downward. This path does not use LiSendMouseMoveAsMousePositionEvent,
-// which keeps a virtual client cursor and exists for platforms that cannot
-// read raw motion.
+// Relative HID counts are forwarded as LiSendMouseMoveEvent deltas. IOHID
+// Desktop Y (0x31) is already positive downward, matching SDL yrel. GCMouse
+// deltaY is positive upward and is flipped with coreHidPointerDyForHost.
+// This path does not use LiSendMouseMoveAsMousePositionEvent, which keeps a
+// virtual client cursor and exists for platforms that cannot read raw motion.
 
 namespace CoreHidUsage {
 
@@ -106,13 +106,27 @@ float coreHidResolveScale(const char* env);
 // Rounds raw * scale into the int16 range LiSendMouseMoveEvent accepts.
 int16_t coreHidApplyScale(int32_t raw, float scale);
 
-// IOHID Desktop Y and GCMouse deltaY are positive upward. SDL yrel and
-// LiSendMouseMoveEvent are positive downward. Negate pointer Y once, before
-// scale. Do not apply this to the wheel.
+// GCMouse deltaY is positive upward. SDL yrel and LiSendMouseMoveEvent are
+// positive downward. Negate that fallback once, before scale. IOHID Desktop
+// Y is already downward; do not pass it through this helper. Do not apply
+// this to the wheel.
 int32_t coreHidPointerDyForHost(int32_t dy);
 
+// SDL clicks and scrolls are dropped only when the native backend sent that
+// same kind this recently. Trackpad motion is dropped when native pointer
+// motion arrived this recently.
+constexpr int64_t kCoreHidSdlSuppressWindowMs = 250;
+constexpr int64_t kCoreHidTrackpadSupersedeWindowMs = 100;
+
+// True when lastMs is set and nowMs is within windowMs of it, inclusive.
+// lastMs < 0 means that event has not happened. A backwards clock step is
+// not recent.
+bool coreHidEventIsRecent(int64_t lastMs, int64_t nowMs, int64_t windowMs);
+
 // One HID wheel notch is 120, matching the SDL high-res scroll path (WHEEL_DELTA).
-int16_t coreHidScrollToHighRes(int32_t notches, bool reverse);
+// Natural scrolling (the macOS default) negates the notch. The reverse-scroll
+// preference negates it again, so the two cancel.
+int16_t coreHidScrollToHighRes(int32_t notches, bool naturalScrolling, bool reverse);
 
 // HID button usage -> Limelight BUTTON_* value. 0 if this client does not send it.
 // 1 left, 2 right, 3 middle, 4 X1, 5 X2. Values match moonlight-common-c Limelight.h.
@@ -165,8 +179,14 @@ CoreHidMouseCapture* coreHidMouseCaptureCreate(CoreHidMotionFn onMotion,
 void coreHidMouseCaptureDestroy(CoreHidMouseCapture* capture);
 bool coreHidMouseCaptureStart(CoreHidMouseCapture* capture);
 void coreHidMouseCaptureStop(CoreHidMouseCapture* capture);
-bool coreHidMouseCaptureOwnsWheel(const CoreHidMouseCapture* capture);
 bool coreHidMouseCaptureIsActive(const CoreHidMouseCapture* capture);
 const char* coreHidMouseCaptureLastError(const CoreHidMouseCapture* capture);
+
+// com.apple.swipescrolldirection. A missing key is the macOS default, on.
+bool coreHidSystemNaturalScrolling();
+
+// True when this capture sent that kind of event within kCoreHidSdlSuppressWindowMs.
+bool coreHidMouseCaptureSawRecentButtons(const CoreHidMouseCapture* capture);
+bool coreHidMouseCaptureSawRecentScroll(const CoreHidMouseCapture* capture);
 
 #endif

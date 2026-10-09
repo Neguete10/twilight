@@ -15,6 +15,9 @@ void ComputerModel::initialize(ComputerManager* computerManager)
     connect(m_ComputerManager, &ComputerManager::pairingCompleted,
             this, &ComputerModel::handlePairingCompleted);
 
+    // The shell's host list is already bound when saved hosts are copied in.
+    // Filling m_Computers without a reset leaves that view at zero rows even
+    // after a later poll reports the host online.
     beginResetModel();
     m_Computers = m_ComputerManager->getComputers();
     endResetModel();
@@ -229,13 +232,11 @@ public:
     void run() override
     {
         int outcome = static_cast<int>(m_Computer->wake());
-        int index = m_Index;
-        int generation = m_Generation;
         QMetaObject::invokeMethod(m_Model, "deliverWakeResult",
                                   Qt::QueuedConnection,
-                                  Q_ARG(int, index),
+                                  Q_ARG(int, m_Index),
                                   Q_ARG(int, outcome),
-                                  Q_ARG(int, generation));
+                                  Q_ARG(int, m_Generation));
     }
 
 private:
@@ -259,14 +260,17 @@ void ComputerModel::wakeComputer(int computerIndex)
 
 void ComputerModel::deliverWakeResult(int computerIndex, int outcome, int generation)
 {
-    if (generation != m_WakeGeneration)
+    if (generation != m_WakeGeneration) {
         return;
-    if (computerIndex < 0 || computerIndex >= m_Computers.count())
+    }
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
         return;
+    }
 
     const char* notice = wakePacketNotice(outcome);
-    if (notice == nullptr || notice[0] == '\0')
+    if (notice == nullptr || notice[0] == '\0') {
         return;
+    }
 
     emit wakeCompleted(computerIndex,
                        QString::fromUtf8(notice),

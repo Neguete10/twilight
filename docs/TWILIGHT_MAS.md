@@ -13,7 +13,7 @@ The version in `app/version.txt` is `7.0.1`. The store build is English only. Th
 | Piece | Where |
 | --- | --- |
 | Opt-in store config | `CONFIG+=twilight-mas` / `TWILIGHT_MAS=1`. Desktop builds do not pass it. |
-| Bundle id and name | Placeholder `com.henrique.twilight` and display name Twilight, only when that flag is on. Desktop stays `com.moonlight-stream.Moonlight`. |
+| Bundle id and name | `io.github.neguete10.twilight` and display name Twilight, for the Developer ID desktop build and the store build. Settings stay in the `com.moonlight-stream.Moonlight` preferences domain. |
 | Sandbox entitlements | `app/deploy/macos/Twilight-MAS.entitlements`. |
 | Multicast, gated | `TWILIGHT_MAS_MULTICAST=1` selects `app/deploy/macos/Twilight-MAS-multicast.entitlements`. The default store entitlements omit it. |
 | ATS | Desktop keeps `NSAllowsArbitraryLoads`. The store plist sets `NSAllowsLocalNetworking` and does not set the blanket key. `scripts/prepare-macos-infoplist.py`. |
@@ -22,7 +22,7 @@ The version in `app/version.txt` is `7.0.1`. The store build is English only. Th
 | Store package | `TWILIGHT_MAS=1 scripts/generate-dmg.sh Release` writes a `productbuild` `.pkg`. It does not write a DMG and does not call `notarytool`. |
 | Privacy manifest | `app/deploy/macos/PrivacyInfo.xcprivacy`, copied to `Contents/Resources`. |
 
-`TARGET` and `CFBundleExecutable` stay `Moonlight`, so the binary is `Twilight.app/Contents/MacOS/Moonlight`. `QCoreApplication::applicationName` stays `Moonlight` so QSettings do not move.
+`CFBundleExecutable` is `Twilight`, so the binary is `Twilight.app/Contents/MacOS/Twilight`. `QCoreApplication::organizationDomain` stays `moonlight-stream.com` and `applicationName` stays `Moonlight`. Qt 6 builds the preferences domain from those two (`~/Library/Preferences/com.moonlight-stream.Moonlight.plist`). Pairing and settings stay there when the bundle id changes.
 
 CoreAudio spatial audio, the stream-stop audio path, picture-in-picture, and the Metal video renderer are already in this tree. The store script compiles the same qmake sources as the desktop script, plus `CONFIG+=twilight-mas`. PyroWave stays opt-in (`CONFIG+=pyrowave`), the same as a desktop `generate-dmg.sh` run. This checklist does not change those features.
 
@@ -143,7 +143,7 @@ The client's other HTTPS calls go to moonlight-stream.org over the public web an
 Confirmed from this tree, not from a sandboxed launch (no Apple SDK here):
 
 - `NSMicrophoneUsageDescription` in `app/Info.plist` says Twilight uses the microphone to send voice to the host PC while streaming. The string is already Twilight for every Mac build.
-- `com.apple.security.device.audio-input` is in `Twilight-MAS.entitlements` and in the multicast variant. It is a standard sandbox entitlement, not a restricted capability.
+- `com.apple.security.device.audio-input` is in `Twilight-MAS.entitlements` and in the multicast variant. It is not a restricted capability. The same key is the only entry in `Twilight-DeveloperID.entitlements`: a Hardened Runtime build that is not sandboxed still needs it, or macOS denies the microphone with no prompt.
 - The settings checkbox calls `StreamingPreferences::setMicrophoneEnabled`. Turning it on calls `MacMicrophonePermission::request`, which calls `[AVCaptureDevice requestAccessForMediaType:AVMediaTypeAudio]` while the status is `NotDetermined`. That is the system prompt. Denied and restricted states do not prompt again; the label tells the user to open System Settings.
 - Without the sandbox entitlement, the App Sandbox denies the input device and capture fails instead of prompting. With the usage string and the entitlement, the sandbox allows TCC to show the prompt.
 
@@ -194,13 +194,13 @@ FFmpeg's own license for those libraries is LGPL 2.1 or later unless the prebuil
 
 Head tracking needs `com.apple.developer.coremotion.head-pose`. Personalized HRTF needs `com.apple.developer.spatial-audio.profile-access`. The property writes are gated on macOS 13 and headphones. Apple documents the capabilities for personalized Spatial Audio on macOS 15 and later. The entitlements are in the store file so the profile can carry them. They do nothing useful until the App ID has the capabilities and the profile is regenerated.
 
-Signed desktop DMGs still use `spatial-audio.entitlements`, which includes the sandbox, the microphone entitlement, the two restricted keys, and `com.apple.security.device.input-monitoring`. That is the existing desktop signing file. `TWILIGHT_MAS` does not change it.
+Signed desktop DMGs use `Twilight-DeveloperID.entitlements`: the Hardened Runtime microphone exception only, with no App Sandbox. `scripts/generate-dmg.sh` does not pass `spatial-audio.entitlements`. `TWILIGHT_MAS=1` signs with the store entitlements file instead.
 
 ## Apple Developer account
 
 Nothing in this workspace can register an App ID, download a profile, or create the App Store Connect record. Those steps need the paid team.
 
-1. Register an explicit App ID `com.henrique.twilight`.
+1. Register an explicit App ID `io.github.neguete10.twilight`.
 2. Enable **Spatial Audio Profile** and **Head Pose** on that App ID. If either row is a request, wait until Apple enables it before generating a profile.
 3. Request the multicast entitlement at <https://developer.apple.com/contact/request/networking-multicast> if LAN discovery should work inside the sandbox. Until the grant is on the profile, build without `TWILIGHT_MAS_MULTICAST`.
 4. Create a Mac App Store Connect distribution profile for that App ID and the Apple Distribution certificate. Decode it with `security cms -D -i Twilight_MAS.provisionprofile` and confirm the keys you actually sign with. Pass that file as `PROVISIONING_PROFILE`.
@@ -211,7 +211,7 @@ App Store Connect, record only, left in **Prepare for Submission**:
 - Platform: macOS.
 - Name: `Twilight`, or another free name if that one is taken.
 - Primary language: English (U.S.).
-- Bundle ID: `com.henrique.twilight`.
+- Bundle ID: `io.github.neguete10.twilight`.
 - SKU: `twilight-macos`.
 - Price: leave it empty, or **Free** if the page will not save otherwise.
 

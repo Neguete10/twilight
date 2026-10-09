@@ -25,7 +25,8 @@ const VdpRGBAFormat VDPAURenderer::k_OutputFormats10Bit[] = {
 };
 
 VDPAURenderer::VDPAURenderer(int decoderSelectionPass)
-    : m_DecoderSelectionPass(decoderSelectionPass),
+    : IFFmpegRenderer(RendererType::VDPAU),
+      m_DecoderSelectionPass(decoderSelectionPass),
       m_HwContext(nullptr),
       m_PresentationQueueTarget(0),
       m_PresentationQueue(0),
@@ -103,18 +104,21 @@ bool VDPAURenderer::initialize(PDECODER_PARAMETERS params)
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_GetWindowWMInfo() failed: %s",
                      SDL_GetError());
+        m_InitFailureReason = InitFailureReason::NoSoftwareSupport;
         return false;
     }
 
     if (info.subsystem == SDL_SYSWM_WAYLAND) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "VDPAU is not supported on Wayland");
+        m_InitFailureReason = InitFailureReason::NoSoftwareSupport;
         return false;
     }
     else if (info.subsystem != SDL_SYSWM_X11) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "VDPAU is not supported on the current subsystem: %d",
                      info.subsystem);
+        m_InitFailureReason = InitFailureReason::NoSoftwareSupport;
         return false;
     }
     else if (qgetenv("VDPAU_XWAYLAND") != "1" && WMUtils::isRunningWayland()) {
@@ -124,15 +128,22 @@ bool VDPAURenderer::initialize(PDECODER_PARAMETERS params)
         // https://gitlab.freedesktop.org/vdpau/libvdpau/-/issues/2
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "VDPAU is disabled on XWayland. Set VDPAU_XWAYLAND=1 to try your luck.");
+        m_InitFailureReason = InitFailureReason::NoSoftwareSupport;
         return false;
     }
 
     m_VideoWidth = params->width;
     m_VideoHeight = params->height;
 
+    char* displayName = nullptr;
+#ifdef HAS_X11
+    SDL_assert(info.subsystem == SDL_SYSWM_X11);
+    displayName = XDisplayString(info.info.x11.display);
+#endif
+
     err = av_hwdevice_ctx_create(&m_HwContext,
                                  AV_HWDEVICE_TYPE_VDPAU,
-                                 nullptr, nullptr, 0);
+                                 displayName, nullptr, 0);
 
 #if defined(APP_IMAGE) || defined(USE_FALLBACK_DRIVER_PATHS)
     // AppImages will be running with our libvdpau.so which means they don't know about
@@ -187,6 +198,7 @@ bool VDPAURenderer::initialize(PDECODER_PARAMETERS params)
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to create VDPAU context: %d",
                      err);
+        m_InitFailureReason = InitFailureReason::NoSoftwareSupport;
         return false;
     }
 
@@ -264,7 +276,7 @@ bool VDPAURenderer::initialize(PDECODER_PARAMETERS params)
             else  {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Display size not within capabilities %dx%d vs %dx%d",
-                            m_DisplayWidth, m_DisplayWidth,
+                            m_DisplayWidth, m_DisplayHeight,
                             maxWidth, maxHeight);
             }
         }
@@ -435,16 +447,6 @@ void VDPAURenderer::notifyOverlayUpdated(Overlay::OverlayType type)
             overlayRect.x0 = 0;
             overlayRect.y0 = 0;
         }
-        else if (type == Overlay::OverlayDebugAudio) {
-            // Top right
-            overlayRect.x0 = m_DisplayWidth - newSurface->w;
-            overlayRect.y0 = 0;
-        }
-        else if (type == Overlay::OverlayGamepad) {
-            // Bottom right
-            overlayRect.x0 = SDL_max(0, m_DisplayWidth - newSurface->w);
-            overlayRect.y0 = SDL_max(0, m_DisplayHeight - newSurface->h);
-        }
 
         overlayRect.x1 = overlayRect.x0 + newSurface->w;
         overlayRect.y1 = overlayRect.y0 + newSurface->h;
@@ -459,13 +461,6 @@ void VDPAURenderer::notifyOverlayUpdated(Overlay::OverlayType type)
     }
 }
 
-bool VDPAURenderer::needsTestFrame()
-{
-    // We need a test frame to see if this VDPAU driver
-    // supports the profile used for streaming
-    return true;
-}
-
 int VDPAURenderer::getDecoderColorspace()
 {
     // VDPAU defaults to Rec 601.
@@ -473,6 +468,12 @@ int VDPAURenderer::getDecoderColorspace()
     //
     // AMD and Nvidia GPUs both correctly process Rec 601, so let's not try our luck using a non-default colorspace.
     return COLORSPACE_REC_601;
+}
+
+int VDPAURenderer::getDecoderColorRange()
+{
+    // The default VdpVideoMixer CSC matrix assumes limited range
+    return COLOR_RANGE_LIMITED;
 }
 
 int VDPAURenderer::getDecoderCapabilities()
@@ -538,8 +539,13 @@ void VDPAURenderer::renderFrame(AVFrame* frame)
     m_NextSurfaceIndex = (m_NextSurfaceIndex + 1) % OUTPUT_SURFACE_COUNT;
 
     // We need to create the mixer on the fly, because we don't know the dimensions
-    // of our video surfaces in advance of decoding
-    if (m_VideoMixer == 0) {
+    // of our video surfaces in advance of decoding. We also need to recreate it when
+    // the frame format or size changes.
+    if (hasFrameFormatChanged(frame)) {
+        if (m_VideoMixer != 0) {
+            m_VdpVideoMixerDestroy(m_VideoMixer);
+        }
+
         VdpChromaType videoSurfaceChroma;
         uint32_t videoSurfaceWidth, videoSurfaceHeight;
         status = m_VdpVideoSurfaceGetParameters(videoSurface, &videoSurfaceChroma,

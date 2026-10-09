@@ -1,4 +1,5 @@
 #include "commandlineparser.h"
+#include "settings/bitrate_choice.h"
 
 #include <QCommandLineParser>
 #include <QRegularExpression>
@@ -59,13 +60,6 @@ public:
 
     void showMessage(QString message, MessageType type) const
     {
-    #if defined(Q_OS_WIN32)
-        UINT flags = MB_OK | MB_TOPMOST | MB_SETFOREGROUND;
-        flags |= (type == Info ? MB_ICONINFORMATION : MB_ICONERROR);
-        QString title = "Moonlight";
-        MessageBoxW(nullptr, reinterpret_cast<const wchar_t *>(message.utf16()),
-                    reinterpret_cast<const wchar_t *>(title.utf16()), flags);
-    #endif
         message = message.endsWith('\n') ? message : message + '\n';
         fputs(qPrintable(message), type == Info ? stdout : stderr);
     }
@@ -113,7 +107,7 @@ public:
 
     QPair<int,int> getResolutionOptionValue(QString name) const
     {
-        QRegularExpression re("^(\\d+)x(\\d+)$", QRegularExpression::CaseInsensitiveOption);
+        static QRegularExpression re("^(\\d+)x(\\d+)$", QRegularExpression::CaseInsensitiveOption);
         auto match = re.match(value(name));
         if (!match.hasMatch()) {
             showError(QString("Invalid %1 format: %2").arg(name, value(name)));
@@ -202,7 +196,7 @@ GlobalCommandLineParser::ParseResult GlobalCommandLineParser::parse(const QStrin
             }
         }
 
-        parser.showError(QString("Invalid action"));
+        parser.showError("Invalid action");
     }
 }
 
@@ -317,7 +311,9 @@ StreamCommandLineParser::StreamCommandLineParser()
         {"H.264", StreamingPreferences::VCC_FORCE_H264},
         {"HEVC",  StreamingPreferences::VCC_FORCE_HEVC},
         {"AV1", StreamingPreferences::VCC_FORCE_AV1},
+#ifdef HAVE_PYROWAVE
         {"PyroWave", StreamingPreferences::VCC_FORCE_PYROWAVE},
+#endif
     };
     m_VideoDecoderMap = {
         {"auto",     StreamingPreferences::VDS_AUTO},
@@ -368,7 +364,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addToggleOption("multi-controller", "multiple controller support");
     parser.addToggleOption("quit-after", "quit app after session");
     parser.addToggleOption("absolute-mouse", "remote desktop optimized mouse control");
-    parser.addToggleOption("corehid-mouse", "macOS CoreHID raw mouse instead of SDL cursor warping");
     parser.addToggleOption("mouse-buttons-swap", "left and right mouse buttons swap");
     parser.addToggleOption("touchscreen-trackpad", "touchscreen in trackpad mode");
     parser.addToggleOption("game-optimization", "game optimizations");
@@ -394,7 +389,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.handleUnknownOptions();
 
     // Resolve display's width and height
-    QRegularExpression resolutionRexExp("^(720|1080|1440|4K|resolution)$");
+    static QRegularExpression resolutionRexExp("^(720|1080|1440|4K|resolution)$");
     QStringList resoOptions = parser.optionNames().filter(resolutionRexExp);
     bool displaySet = !resoOptions.isEmpty();
     if (displaySet) {
@@ -429,8 +424,9 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     // Resolve --bitrate option
     if (parser.isSet("bitrate")) {
         preferences->bitrateKbps = parser.getIntOption("bitrate");
-        if (!inRange(preferences->bitrateKbps, 500, 500000)) {
-            fprintf(stderr, "Warning: Bitrate is out of the supported range (500 - 500000 Kbps). Performance may suffer!\n");
+        if (!inRange(preferences->bitrateKbps, BitrateChoice::kMinKbps, BitrateChoice::kMaxKbps)) {
+            fprintf(stderr, "Warning: Bitrate is out of the supported range (%d - %d Kbps). Performance may suffer!\n",
+                    BitrateChoice::kMinKbps, BitrateChoice::kMaxKbps);
         }
     } else if (displaySet || parser.isSet("fps")) {
         preferences->bitrateKbps = preferences->getDefaultBitrate(
@@ -466,9 +462,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     // Resolve --absolute-mouse and --no-absolute-mouse options
     preferences->absoluteMouseMode = parser.getToggleOptionValue("absolute-mouse", preferences->absoluteMouseMode);
-
-    // Resolve --corehid-mouse and --no-corehid-mouse. No effect outside macOS.
-    preferences->coreHidMouse = parser.getToggleOptionValue("corehid-mouse", preferences->coreHidMouse);
 
     // Resolve --mouse-buttons-swap and --no-mouse-buttons-swap options
     preferences->swapMouseButtons = parser.getToggleOptionValue("mouse-buttons-swap", preferences->swapMouseButtons);
@@ -524,7 +517,8 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
         preferences->videoDecoderSelection = mapValue(m_VideoDecoderMap, parser.getChoiceOptionValue("video-decoder"));
     }
 
-    // Resolve --pyrowave-backend option (auto, metal, vulkan)
+    // Resolve --pyrowave-backend (auto, metal, vulkan). Written onto the
+    // shared preferences object, which the static decoder chooser reads.
     if (parser.isSet("pyrowave-backend")) {
         preferences->pyroWaveBackend = mapValue(m_PyroWaveBackendMap, parser.getChoiceOptionValue("pyrowave-backend"));
     }

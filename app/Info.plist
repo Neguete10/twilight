@@ -2,20 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>GCSupportsGameMode</key>
+	<true/>
 	<key>CFBundleExecutable</key>
 	<string>Twilight</string>
-	<key>CFBundleName</key>
-	<string>Twilight</string>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
-	<key>LSHasLocalizedDisplayName</key>
+	<key>LSSupportsGameMode</key>
 	<true/>
-	<key>CFBundleSpokenName</key>
-	<string>Twilight</string>
 	<key>CFBundleGetInfoString</key>
 	<string>Stream games and other applications from another PC</string>
 	<key>CFBundleIconFile</key>
 	<string>twilight</string>
+	<!-- prepare-macos-infoplist.py writes TWILIGHT_BUNDLE_ID here. -->
 	<key>CFBundleIdentifier</key>
 	<string>BUNDLE_ID</string>
 	<key>NSHighResolutionCapable</key>
@@ -25,7 +22,7 @@
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>11.0.0</string>
+	<string>13.0.0</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
@@ -41,29 +38,26 @@
 	<true/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
-	<!-- prepare-macos-infoplist.py keeps this dictionary for desktop builds.
-	     CONFIG+=twilight-mas replaces the key element below with
-	     NSAllowsLocalNetworking. macOS 11 and later ignore
-	     NSAllowsArbitraryLoads when NSAllowsLocalNetworking is also
-	     present, so the script never emits both. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Twilight uses the microphone to send voice to the host PC while streaming.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Twilight uses the local network to connect to your gaming PC for streaming.</string>
-	<key>NSLocationUsageDescription</key>
-	<string>This app reads the Wi-Fi network name so a saved stream profile can match this network. macOS requires Location permission to reveal that name. Your location is not stored.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>This app reads the Wi-Fi network name so a saved stream profile can match this network. macOS requires Location permission to reveal that name. Your location is not stored.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Twilight uses the microphone to send your voice to the host PC while streaming.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_nvstream._tcp</string>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>VERSION</string>
 	<key>CFBundleShortVersionString</key>
 	<string>VERSION</string>
 	<key>CFBundleDisplayName</key>
 	<string>DISPLAY_NAME</string>
+	<key>CFBundleName</key>
+	<string>Twilight</string>
 </dict>
 </plist>

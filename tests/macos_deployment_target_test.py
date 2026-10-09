@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """The macOS deployment target is explicit and matches Info.plist.
 
-Does not compile and does not need an Apple SDK. 7.0.0 shipped with
-minos equal to the build Mac's SDK (27.0) because qmake and the PyroWave
-cmake lines never set a deployment target.
+Does not compile and does not need an Apple SDK. An empty qmake
+deployment target lets clang stamp the build Mac's SDK version onto
+every Mach-O, which is how a bundle ended up requiring a newer macOS
+than this client supports.
 """
 
 import plistlib
@@ -60,12 +61,12 @@ def test_floor_matches_plist():
     target = result.stdout.strip()
     expect(result.returncode == 0, "macos-deployment-target.sh exits 0")
     expect(result.stderr == "", "macos-deployment-target.sh is silent on success")
-    expect(target == "11.0", "deployment target is 11.0, got %r" % target)
-    expect(minimum == "11.0.0", "Info.plist minimum stays 11.0.0, got %r" % minimum)
+    expect(target == "13.0", "deployment target is 13.0, got %r" % target)
+    expect(minimum == "13.0.0", "Info.plist minimum stays 13.0.0, got %r" % minimum)
     expect(same_floor(minimum, target), "deployment target matches LSMinimumSystemVersion")
 
     pri = (ROOT / "globaldefs.pri").read_text(encoding="utf-8")
-    expect("QMAKE_MACOSX_DEPLOYMENT_TARGET = 11.0" in pri, "globaldefs.pri sets the deployment target")
+    expect("QMAKE_MACOSX_DEPLOYMENT_TARGET = 13.0" in pri, "globaldefs.pri sets the deployment target")
     expect("SDK minos" in pri, "globaldefs.pri refuses an empty deployment target")
 
     app_pro = (ROOT / "app" / "app.pro").read_text(encoding="utf-8")
@@ -86,22 +87,14 @@ def test_qmake_projects_include_globaldefs():
 
 
 def test_pyrowave_and_dmg_scripts():
-    metal = (ROOT / "scripts" / "build-pyrowave-metal.sh").read_text(encoding="utf-8")
-    shared = (ROOT / "scripts" / "build-pyrowave-shared.sh").read_text(encoding="utf-8")
     dmg = (ROOT / "scripts" / "generate-dmg.sh").read_text(encoding="utf-8")
-    for label, text in (
-        ("metal", metal),
-        ("shared", shared),
-        ("dmg", dmg),
-    ):
-        expect("macos-deployment-target.sh" in text, "%s reads the deployment target" % label)
-    expect('-DCMAKE_OSX_DEPLOYMENT_TARGET="$deployment_target"' in metal, "metal cmake sets minos")
-    expect('-DCMAKE_OSX_DEPLOYMENT_TARGET="$deployment_target"' in shared, "shared cmake sets minos")
-    expect('uname -s' in shared and "Darwin" in shared, "shared cmake minos is macOS-only")
+    pri = (ROOT / "pyrowave" / "build-config.pri").read_text(encoding="utf-8")
+    expect("macos-deployment-target.sh" in dmg, "dmg reads the deployment target")
     expect('export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"' in dmg, "dmg exports the deployment target")
     expect('QMAKE_MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"' in dmg, "dmg passes the deployment target to qmake")
-    for label, text in (("metal", metal), ("shared", shared)):
-        expect("CMakeCache.txt" in text and "rm -rf" in text, "%s drops a stale SDK-default cmake cache" % label)
+    expect("QMAKE_APPLE_DEVICE_ARCHS=\"arm64\"" in dmg or 'DEVICE_ARCHS="arm64"' in dmg, "dmg is arm64 only")
+    expect("contains(CONFIG, pyrowave)" in pri, "PyroWave Metal is gated on CONFIG+=pyrowave")
+    expect("check-macos-minos.py" in dmg, "dmg rejects a Mach-O above the deployment floor")
 
 
 def main():

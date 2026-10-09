@@ -1,0 +1,73 @@
+---
+name: Build
+permissions:
+  contents: read
+
+on:
+  push:
+  pull_request:
+    branches:
+      - master
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      ci_version: ${{ steps.set-ci-version.outputs.ci_version }}
+    steps:
+      - name: Set CI version
+        id: set-ci-version
+        shell: bash
+        run: |
+          CI_VERSION=`echo ${GITHUB_SHA} | cut -c1-6`
+          echo "ci_version=${CI_VERSION}" >> "${GITHUB_OUTPUT}"
+
+  build-appimage:
+    needs: setup
+    uses: ./.github/workflows/build-appimage.yml
+    with:
+      ci_version: ${{ needs.setup.outputs.ci_version }}
+
+  build-steamlink:
+    needs: setup
+    uses: ./.github/workflows/build-steamlink.yml
+    with:
+      ci_version: ${{ needs.setup.outputs.ci_version }}
+
+  build-windows-macos:
+    needs: setup
+    uses: ./.github/workflows/build-win-mac.yml
+    with:
+      ci_version: ${{ needs.setup.outputs.ci_version }}
+
+  macos-13-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+      - name: macOS 13 Mach-O, availability, and CoreHID checks
+        run: |
+          python3 tests/macos_minos_test.py
+          python3 tests/macos_availability_test.py
+          python3 tests/macos_deployment_target_test.py
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            tests/corehid_mouse_test.cpp \
+            app/streaming/input/corehid_mouse_decoder.cpp \
+            -Iapp/streaming/input \
+            -o /tmp/corehid_mouse_test
+          /tmp/corehid_mouse_test
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            tests/bitrate_choice_test.cpp -Iapp/settings -o /tmp/bitrate_choice_test
+          /tmp/bitrate_choice_test
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            tests/adaptive_bitrate_test.cpp -Iapp/streaming -o /tmp/adaptive_bitrate_test
+          /tmp/adaptive_bitrate_test
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            tests/twilight_hud_parse_test.cpp app/gui/streamhudparse.cpp \
+            -Iapp/gui -o /tmp/hud_parse_test
+          /tmp/hud_parse_test
+          python3 tests/stream_quit_teardown_test.py

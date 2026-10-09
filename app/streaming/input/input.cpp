@@ -1,12 +1,11 @@
 #include <Limelight.h>
-#include <SDL.h>
+#include "SDL_compat.h"
 #include "streaming/session.h"
 #include "settings/mappingmanager.h"
 #include "path.h"
 #include "utils.h"
 
 #include <QtGlobal>
-#include <QByteArray>
 #include <QDir>
 #include <QGuiApplication>
 
@@ -20,7 +19,10 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_PendingMouseButtonsAllUpOnVideoRegionLeave(false),
       m_PointerRegionLockActive(false),
       m_PointerRegionLockToggledByUser(false),
-      m_FakeCaptureActive(false),
+      m_QuickMenuOpen(false),
+      m_RestoreCaptureAfterMenu(false),
+      m_FakeMouseCaptureActive(false),
+      m_KeyboardCaptureActive(false),
       m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
       m_MouseCursorCapturedVisibilityState(SDL_DISABLE),
       m_LongPressTimer(0),
@@ -34,7 +36,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_DragTimer(0),
       m_DragButton(0),
       m_NumFingersDown(0),
-      m_DualSenseHid(),
       m_TriggerPreview(DualSensePreviewFollowHost),
       m_SawHostAdaptiveTriggers(false),
       m_LoggedAdaptiveSendFailure(false),
@@ -50,7 +51,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
 #endif
 {
 #ifdef Q_OS_DARWIN
-    // Opt-in. Unset env leaves the checkbox alone. See docs/COREHID_MAC.md.
     const QByteArray coreHidEnv = qgetenv("TWILIGHT_COREHID");
     const QByteArray coreHidScaleEnv = qgetenv("TWILIGHT_COREHID_SCALE");
     const QByteArray coreHidBackendEnv = qgetenv("TWILIGHT_COREHID_BACKEND");
@@ -59,7 +59,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_CoreHidBackend = coreHidResolveBackend(coreHidBackendEnv.constData());
     if (m_CoreHidRequested && !m_AbsoluteMouseMode) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "CoreHID raw mouse requested (backend %s, scale %.2f). It starts when the cursor is captured.",
+                    "CoreHID mouse requested (backend %s, scale %.2f)",
                     coreHidBackendName(m_CoreHidBackend),
                     m_CoreHidScale);
     }
@@ -68,6 +68,19 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
         m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
+    }
+
+    // SDL3 breaks our auto-capture-on-leave logic because the mouse focus has already
+    // been lost by the time we attempt to call SDL_CaptureMouse(). Fortunately, SDL3's
+    // own auto-capture logic seems to be stable now (unlike SDL2), so we can rely on
+    // that instead of our own hack when running on sdl2-compat.
+    // https://github.com/libsdl-org/SDL/commit/e54001b02809dcebbb822bd0297919c8c76976a1
+    SDL_version ver;
+    SDL_GetVersion(&ver);
+    m_NeedsManualCaptureOnLeave = !(ver.major == 2 && ver.minor >= 30 && ver.patch >= 50) && !SDL_GetHint("SDL3_VERSION");
+    if (m_NeedsManualCaptureOnLeave) {
+        // Disable the buggy auto-capture on earlier SDL2 builds
+        SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "0");
     }
 
     // Allow gamepad input when the app doesn't have focus if requested
@@ -81,7 +94,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
 #endif
 
     // Opt-out of SDL's built-in Alt+Tab handling while keyboard grab is enabled
-    SDL_SetHint("SDL_ALLOW_ALT_TAB_WHILE_GRABBED", "0");
+    SDL_SetHint(SDL_HINT_ALLOW_ALT_TAB_WHILE_GRABBED, "0");
 
     // Allow clicks to pass through to us when focusing the window. If we're in
     // absolute mouse mode, this will avoid the user having to click twice to
@@ -93,13 +106,8 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     // controllers, but breaks DirectInput applications. We will enable it because
     // it's likely that working rumble is what the user is expecting. If they don't
     // want this behavior, they can override it with the environment variable.
-    SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS4_RUMBLE", "1");
-    SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS5_RUMBLE", "1");
-
-    // Adaptive trigger effects are written through SDL's HIDAPI PS5 driver
-    // (SDL_GameControllerSendEffect). The Game Controller framework path on
-    // macOS can read a paired DualSense but cannot program trigger resistance.
-    SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS5", "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS4_RUMBLE, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
 
     // Populate special key combo configuration
     m_SpecialKeyCombos[KeyComboQuit].keyCombo = KeyComboQuit;
@@ -110,12 +118,12 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboUngrabInput].keyCombo = KeyComboUngrabInput;
     m_SpecialKeyCombos[KeyComboUngrabInput].keyCode = SDLK_z;
     m_SpecialKeyCombos[KeyComboUngrabInput].scanCode = SDL_SCANCODE_Z;
-    m_SpecialKeyCombos[KeyComboUngrabInput].enabled = QGuiApplication::platformName() != "eglfs";
+    m_SpecialKeyCombos[KeyComboUngrabInput].enabled = WMUtils::isRunningDesktopEnvironment();
 
     m_SpecialKeyCombos[KeyComboToggleFullScreen].keyCombo = KeyComboToggleFullScreen;
     m_SpecialKeyCombos[KeyComboToggleFullScreen].keyCode = SDLK_x;
     m_SpecialKeyCombos[KeyComboToggleFullScreen].scanCode = SDL_SCANCODE_X;
-    m_SpecialKeyCombos[KeyComboToggleFullScreen].enabled = QGuiApplication::platformName() != "eglfs";
+    m_SpecialKeyCombos[KeyComboToggleFullScreen].enabled = WMUtils::isRunningDesktopEnvironment();
 
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].keyCombo = KeyComboToggleStatsOverlay;
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].keyCode = SDLK_s;
@@ -135,7 +143,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboToggleMinimize].keyCombo = KeyComboToggleMinimize;
     m_SpecialKeyCombos[KeyComboToggleMinimize].keyCode = SDLK_d;
     m_SpecialKeyCombos[KeyComboToggleMinimize].scanCode = SDL_SCANCODE_D;
-    m_SpecialKeyCombos[KeyComboToggleMinimize].enabled = QGuiApplication::platformName() != "eglfs";
+    m_SpecialKeyCombos[KeyComboToggleMinimize].enabled = WMUtils::isRunningDesktopEnvironment();
 
     m_SpecialKeyCombos[KeyComboPasteText].keyCombo = KeyComboPasteText;
     m_SpecialKeyCombos[KeyComboPasteText].keyCode = SDLK_v;
@@ -147,15 +155,34 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].scanCode = SDL_SCANCODE_L;
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].enabled = true;
 
-    // macOS stream picture-in-picture. Disabled elsewhere so the combo
-    // cannot match. P is not used by the other Ctrl+Alt+Shift shortcuts.
+    m_SpecialKeyCombos[KeyComboQuitAndExit].keyCombo = KeyComboQuitAndExit;
+    m_SpecialKeyCombos[KeyComboQuitAndExit].keyCode = 0;
+    m_SpecialKeyCombos[KeyComboQuitAndExit].scanCode = SDL_SCANCODE_UNKNOWN;
+    m_SpecialKeyCombos[KeyComboQuitAndExit].enabled = false;
+
+    m_SpecialKeyCombos[KeyComboQuickMenu].keyCombo = KeyComboQuickMenu;
+    m_SpecialKeyCombos[KeyComboQuickMenu].keyCode = SDLK_e;
+    m_SpecialKeyCombos[KeyComboQuickMenu].scanCode = SDL_SCANCODE_E;
+    m_SpecialKeyCombos[KeyComboQuickMenu].enabled = true;
+
+    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCombo = KeyComboToggleKeyboardGrab;
+    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCode = SDLK_k;
+    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].scanCode = SDL_SCANCODE_K;
+    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled = WMUtils::isRunningDesktopEnvironment();
+
+#ifdef Q_OS_DARWIN
     m_SpecialKeyCombos[KeyComboTogglePictureInPicture].keyCombo = KeyComboTogglePictureInPicture;
     m_SpecialKeyCombos[KeyComboTogglePictureInPicture].keyCode = SDLK_p;
     m_SpecialKeyCombos[KeyComboTogglePictureInPicture].scanCode = SDL_SCANCODE_P;
-#ifdef Q_OS_DARWIN
     m_SpecialKeyCombos[KeyComboTogglePictureInPicture].enabled = true;
+
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].keyCombo = KeyComboToggleMicrophoneMute;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].keyCode = SDLK_n;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].scanCode = SDL_SCANCODE_N;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].enabled = true;
 #else
     m_SpecialKeyCombos[KeyComboTogglePictureInPicture].enabled = false;
+    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].enabled = false;
 #endif
 
     m_SpecialKeyCombos[KeyComboToggleGamepadOverlay].keyCombo = KeyComboToggleGamepadOverlay;
@@ -167,15 +194,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboCycleTriggerPreview].keyCode = SDLK_t;
     m_SpecialKeyCombos[KeyComboCycleTriggerPreview].scanCode = SDL_SCANCODE_T;
     m_SpecialKeyCombos[KeyComboCycleTriggerPreview].enabled = true;
-
-    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].keyCombo = KeyComboToggleMicrophoneMute;
-    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].keyCode = SDLK_n;
-    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].scanCode = SDL_SCANCODE_N;
-#ifdef Q_OS_DARWIN
-    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].enabled = true;
-#else
-    m_SpecialKeyCombos[KeyComboToggleMicrophoneMute].enabled = false;
-#endif
 
     m_OldIgnoreDevices = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES);
     m_OldIgnoreDevicesExcept = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT);
@@ -260,16 +278,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
 
 SdlInputHandler::~SdlInputHandler()
 {
-    // Release any resistance we programmed before the HID device goes away.
     clearAdaptiveTriggers();
-
-#ifdef Q_OS_DARWIN
-    if (m_CoreHidActive) {
-        stopCoreHidCapture();
-    }
-    coreHidMouseCaptureDestroy(m_CoreHid);
-    m_CoreHid = nullptr;
-#endif
 
     for (int i = 0; i < MAX_GAMEPADS; i++) {
         if (m_GamepadState[i].mouseEmulationTimer != 0) {
@@ -316,51 +325,19 @@ SdlInputHandler::~SdlInputHandler()
     // video backends.
     SDL_ShowCursor(SDL_DISABLE);
 #endif
+
+#ifdef Q_OS_DARWIN
+    if (m_CoreHidActive) {
+        stopCoreHidCapture();
+    }
+    coreHidMouseCaptureDestroy(m_CoreHid);
+    m_CoreHid = nullptr;
+#endif
 }
 
 void SdlInputHandler::setWindow(SDL_Window *window)
 {
     m_Window = window;
-}
-
-void SdlInputHandler::raiseAllKeys()
-{
-    if (m_KeysDown.isEmpty()) {
-        return;
-    }
-
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Raising %d keys",
-                (int)m_KeysDown.count());
-
-    for (auto keyDown : m_KeysDown) {
-        // Same code handleKeyEvent sends on the press: the low byte is the
-        // Windows VK and 0x8000 marks it already mapped. A focus-loss release
-        // has to use that code too.
-        LiSendKeyboardEvent(static_cast<short>(0x8000 | keyDown), KEY_ACTION_UP, 0);
-    }
-
-    m_KeysDown.clear();
-}
-
-void SdlInputHandler::notifyMouseLeave()
-{
-    // SDL on Windows doesn't send the mouse button up until the mouse re-enters the window
-    // after leaving it. This breaks some of the Aero snap gestures, so we'll capture it to
-    // allow us to receive the mouse button up events later.
-    //
-    // On macOS and X11, capturing the mouse allows us to receive mouse motion outside the
-    // window (button up already worked without capture).
-    if (m_AbsoluteMouseMode && isCaptureActive()) {
-        // NB: Not using SDL_GetGlobalMouseState() because we want our state not the system's
-        Uint32 mouseState = SDL_GetMouseState(nullptr, nullptr);
-        for (Uint32 button = SDL_BUTTON_LEFT; button <= SDL_BUTTON_X2; button++) {
-            if (mouseState & SDL_BUTTON(button)) {
-                SDL_CaptureMouse(SDL_TRUE);
-                break;
-            }
-        }
-    }
 }
 
 void SdlInputHandler::notifyFocusLost()
@@ -378,6 +355,10 @@ void SdlInputHandler::notifyFocusLost()
     raiseAllKeys();
 }
 
+void SdlInputHandler::notifyFocusGained()
+{
+}
+
 bool SdlInputHandler::isCaptureActive()
 {
     if (SDL_GetRelativeMouseMode()) {
@@ -385,21 +366,19 @@ bool SdlInputHandler::isCaptureActive()
     }
 
     // Some platforms don't support SDL_SetRelativeMouseMode
-    return m_FakeCaptureActive;
+    return m_FakeMouseCaptureActive;
 }
 
 void SdlInputHandler::updateKeyboardGrabState()
 {
-    if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_OFF) {
-        return;
-    }
-
-    bool shouldGrab = isCaptureActive();
-    Uint32 windowFlags = SDL_GetWindowFlags(m_Window);
-    if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_FULLSCREEN &&
+    bool shouldGrab = m_CaptureSystemKeysMode != StreamingPreferences::CSK_OFF && isCaptureActive();
+    if (shouldGrab) {
+        Uint32 windowFlags = SDL_GetWindowFlags(m_Window);
+        if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_FULLSCREEN &&
             !(windowFlags & SDL_WINDOW_FULLSCREEN)) {
-        // Ungrab if it's fullscreen only and we left fullscreen
-        shouldGrab = false;
+            // Ungrab if it's fullscreen only and we left fullscreen
+            shouldGrab = false;
+        }
     }
 
     // Don't close the window on Alt+F4 when keyboard grab is enabled
@@ -410,6 +389,8 @@ void SdlInputHandler::updateKeyboardGrabState()
     // SDL 2.0.18 adds keyboard grab on macOS (if built with non-AppStore APIs).
     SDL_SetWindowKeyboardGrab(m_Window, shouldGrab ? SDL_TRUE : SDL_FALSE);
 #endif
+
+    m_KeyboardCaptureActive = shouldGrab;
 }
 
 bool SdlInputHandler::isSystemKeyCaptureActive()
@@ -422,15 +403,12 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
         return false;
     }
 
+    // NB: We used to check SDL_WINDOW_KEYBOARD_GRABBED here, but this isn't
+    // always set when capture "fails" on SDL3, even though the user may have
+    // configured the compositor to pass through system keys to us anyway.
+    // See issues #1776 and #1900 for details.
     Uint32 windowFlags = SDL_GetWindowFlags(m_Window);
-    if (!(windowFlags & SDL_WINDOW_INPUT_FOCUS)
-#if SDL_VERSION_ATLEAST(2, 0, 15)
-            || !(windowFlags & SDL_WINDOW_KEYBOARD_GRABBED)
-#else
-            || !(windowFlags & SDL_WINDOW_INPUT_GRABBED)
-#endif
-            )
-    {
+    if (!(windowFlags & SDL_WINDOW_INPUT_FOCUS) || !m_KeyboardCaptureActive) {
         return false;
     }
 
@@ -445,16 +423,16 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
 void SdlInputHandler::setCaptureActive(bool active)
 {
     if (active) {
-        // Mac CoreHID capture replaces SDL relative mode, which warps the
-        // cursor and reports accelerated deltas. Other platforms, absolute
-        // mouse mode, and a failed native open keep the SDL path below.
-        if (!tryStartCoreHidCapture()) {
-            // If we're in relative mode, try to activate SDL's relative mouse mode
-            if (m_AbsoluteMouseMode || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
-                // Relative mouse mode didn't work or was disabled, so we'll just hide the cursor
-                SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
-                m_FakeCaptureActive = true;
-            }
+        // CoreHID replaces SDL relative mouse when the user opted in.
+        if (tryStartCoreHidCapture()) {
+            // Relative motion and, when the capture owns the wheel, scroll
+            // are delivered from the HID callback.
+        }
+        // If we're in relative mode, try to activate SDL's relative mouse mode
+        else if (m_AbsoluteMouseMode || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
+            // Relative mouse mode didn't work or was disabled, so we'll just hide the cursor
+            SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
+            m_FakeMouseCaptureActive = true;
         }
 
         // Synchronize the client and host cursor when activating absolute capture
@@ -485,10 +463,10 @@ void SdlInputHandler::setCaptureActive(bool active)
     }
     else {
         if (!stopCoreHidCapture()) {
-            if (m_FakeCaptureActive) {
+            if (m_FakeMouseCaptureActive) {
                 // Display the cursor again
                 SDL_ShowCursor(SDL_ENABLE);
-                m_FakeCaptureActive = false;
+                m_FakeMouseCaptureActive = false;
             }
             else {
                 SDL_SetRelativeMouseMode(SDL_FALSE);
@@ -501,6 +479,67 @@ void SdlInputHandler::setCaptureActive(bool active)
 
     // Now update the keyboard grab
     updateKeyboardGrabState();
+}
+
+void SdlInputHandler::publishQuickMenuGamepad(bool keepAxes)
+{
+    for (int i = 0; i < MAX_GAMEPADS; i++) {
+        GamepadState* state = &m_GamepadState[i];
+        if (state->controller == nullptr) {
+            continue;
+        }
+        state->buttons = 0;
+        if (!keepAxes) {
+            state->lsX = 0;
+            state->lsY = 0;
+            state->rsX = 0;
+            state->rsY = 0;
+            state->lt = 0;
+            state->rt = 0;
+        }
+    }
+    // Zero every pad before sending. Single-controller mode merges pads,
+    // so sending midway would republish a pad that has not been cleared yet.
+    for (int i = 0; i < MAX_GAMEPADS; i++) {
+        GamepadState* state = &m_GamepadState[i];
+        if (state->controller == nullptr || state->mouseEmulationTimer != 0) {
+            continue;
+        }
+        sendGamepadState(state);
+    }
+}
+
+void SdlInputHandler::releaseCaptureForQuickMenu()
+{
+    m_QuickMenuOpen = true;
+    m_RestoreCaptureAfterMenu = isCaptureActive();
+    if (m_RestoreCaptureAfterMenu) {
+        setCaptureActive(false);
+    }
+    raiseAllKeys();
+    publishQuickMenuGamepad(false);
+}
+
+void SdlInputHandler::restoreCaptureAfterQuickMenu()
+{
+    m_QuickMenuOpen = false;
+    publishQuickMenuGamepad(true);
+    const bool restore = m_RestoreCaptureAfterMenu;
+    m_RestoreCaptureAfterMenu = false;
+#ifdef Q_OS_DARWIN
+    if (Session::s_ActiveSession != nullptr && Session::s_ActiveSession->m_PipActive) {
+        return;
+    }
+#endif
+    if (restore) {
+        setCaptureActive(true);
+    }
+}
+
+void SdlInputHandler::cancelQuickMenuRecapture()
+{
+    m_QuickMenuOpen = false;
+    m_RestoreCaptureAfterMenu = false;
 }
 
 void SdlInputHandler::handleTouchFingerEvent(SDL_TouchFingerEvent* event)
@@ -551,7 +590,7 @@ bool SdlInputHandler::tryStartCoreHidCapture()
 
     m_CoreHidActive = true;
     SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
-    m_FakeCaptureActive = true;
+    m_FakeMouseCaptureActive = true;
     return true;
 #else
     return false;
@@ -568,7 +607,7 @@ bool SdlInputHandler::stopCoreHidCapture()
     coreHidMouseCaptureStop(m_CoreHid);
     m_CoreHidActive = false;
     SDL_ShowCursor(SDL_ENABLE);
-    m_FakeCaptureActive = false;
+    m_FakeMouseCaptureActive = false;
     return true;
 #else
     return false;
@@ -584,10 +623,19 @@ bool SdlInputHandler::coreHidSuppressesRelativeMotion() const
 #endif
 }
 
+bool SdlInputHandler::coreHidSuppressesButtons() const
+{
+#ifdef Q_OS_DARWIN
+    return m_CoreHidActive && m_CoreHid != nullptr && coreHidMouseCaptureSawRecentButtons(m_CoreHid);
+#else
+    return false;
+#endif
+}
+
 bool SdlInputHandler::coreHidSuppressesScroll() const
 {
 #ifdef Q_OS_DARWIN
-    return m_CoreHidActive && m_CoreHid != nullptr && coreHidMouseCaptureOwnsWheel(m_CoreHid);
+    return m_CoreHidActive && m_CoreHid != nullptr && coreHidMouseCaptureSawRecentScroll(m_CoreHid);
 #else
     return false;
 #endif
@@ -607,23 +655,20 @@ void SdlInputHandler::coreHidButtonThunk(const CoreHidButtonUpdate& update, void
 
 void SdlInputHandler::sendCoreHidMotion(const CoreHidMouseDelta& delta)
 {
-    // dx/dy are already host-oriented. Pointer Y was negated once in the
-    // IOHID decoder or the GCMouse handler. Do not negate again.
-    // Not LiSendMouseMoveAsMousePositionEvent: that API keeps a virtual
-    // client cursor for platforms that cannot read HID deltas.
     if (delta.motion) {
         LiSendMouseMoveEvent(static_cast<short>(delta.dx), static_cast<short>(delta.dy));
     }
 
+    const bool natural = coreHidSystemNaturalScrolling();
     if (delta.wheelChanged && delta.wheel != 0) {
-        const int16_t amount = coreHidScrollToHighRes(delta.wheel, m_ReverseScrollDirection);
+        const int16_t amount = coreHidScrollToHighRes(delta.wheel, natural, m_ReverseScrollDirection);
         if (amount != 0) {
             LiSendHighResScrollEvent(amount);
         }
     }
 
     if (delta.hWheelChanged && delta.hWheel != 0) {
-        const int16_t amount = coreHidScrollToHighRes(delta.hWheel, m_ReverseScrollDirection);
+        const int16_t amount = coreHidScrollToHighRes(delta.hWheel, natural, m_ReverseScrollDirection);
         if (amount != 0) {
             LiSendHighResHScrollEvent(amount);
         }
