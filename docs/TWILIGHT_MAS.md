@@ -143,7 +143,7 @@ The client's other HTTPS calls go to moonlight-stream.org over the public web an
 Confirmed from this tree, not from a sandboxed launch (no Apple SDK here):
 
 - `NSMicrophoneUsageDescription` in `app/Info.plist` says Twilight uses the microphone to send voice to the host PC while streaming. The string is already Twilight for every Mac build.
-- `com.apple.security.device.audio-input` is in `Twilight-MAS.entitlements` and in the multicast variant. It is a standard sandbox entitlement, not a restricted capability.
+- `com.apple.security.device.audio-input` is in `Twilight-MAS.entitlements` and in the multicast variant. It is not a restricted capability. The same key is the only entry in `Twilight-DeveloperID.entitlements`: a Hardened Runtime build that is not sandboxed still needs it, or macOS denies the microphone with no prompt.
 - The settings checkbox calls `StreamingPreferences::setMicrophoneEnabled`. Turning it on calls `MacMicrophonePermission::request`, which calls `[AVCaptureDevice requestAccessForMediaType:AVMediaTypeAudio]` while the status is `NotDetermined`. That is the system prompt. Denied and restricted states do not prompt again; the label tells the user to open System Settings.
 - Without the sandbox entitlement, the App Sandbox denies the input device and capture fails instead of prompting. With the usage string and the entitlement, the sandbox allows TCC to show the prompt.
 
@@ -194,7 +194,7 @@ FFmpeg's own license for those libraries is LGPL 2.1 or later unless the prebuil
 
 Head tracking needs `com.apple.developer.coremotion.head-pose`. Personalized HRTF needs `com.apple.developer.spatial-audio.profile-access`. The property writes are gated on macOS 13 and headphones. Apple documents the capabilities for personalized Spatial Audio on macOS 15 and later. The entitlements are in the store file so the profile can carry them. They do nothing useful until the App ID has the capabilities and the profile is regenerated.
 
-Signed desktop DMGs still use `spatial-audio.entitlements`, which includes the sandbox, the microphone entitlement, the two restricted keys, and `com.apple.security.device.input-monitoring`. That is the existing desktop signing file. `TWILIGHT_MAS` does not change it.
+Signed desktop DMGs use `Twilight-DeveloperID.entitlements`: the Hardened Runtime microphone exception only, with no App Sandbox. `scripts/generate-dmg.sh` does not pass `spatial-audio.entitlements`. `TWILIGHT_MAS=1` signs with the store entitlements file instead.
 
 ## Apple Developer account
 

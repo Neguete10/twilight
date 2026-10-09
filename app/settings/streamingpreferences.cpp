@@ -576,10 +576,13 @@ void StreamingPreferences::refreshMicrophoneStatus()
         text = tr("Microphone access granted. Ctrl+Alt+Shift+N mutes it during a stream.");
         break;
     case MacMicrophonePermission::Status::Denied:
-        text = tr("Microphone access is off for this app. Turn it on in System Settings > Privacy & Security > Microphone.");
+        text = tr("Microphone access is off for Twilight. Click here to open System Settings > Privacy & Security > Microphone and turn it on.");
         break;
     case MacMicrophonePermission::Status::Restricted:
         text = tr("Microphone access is restricted on this Mac.");
+        break;
+    case MacMicrophonePermission::Status::MissingEntitlement:
+        text = tr("This Twilight build was signed without the microphone entitlement, so macOS cannot ask for access. Install a build that includes it.");
         break;
     case MacMicrophonePermission::Status::NotDetermined:
     default:
@@ -626,6 +629,16 @@ void StreamingPreferences::completeMicrophoneRequest(int serial, bool granted)
     save();
     emit enableMicrophoneChanged();
     emit microphoneAccessFinished(granted);
+}
+
+void StreamingPreferences::openMicrophoneSettings()
+{
+    MacMicrophonePermission::openSystemSettings();
+}
+
+bool StreamingPreferences::microphoneNeedsSystemSettings() const
+{
+    return MacMicrophonePermission::status() == MacMicrophonePermission::Status::Denied;
 }
 
 int StreamingPreferences::minimumBitrateKbps() const

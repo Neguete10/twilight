@@ -228,6 +228,8 @@ public:
     Q_INVOKABLE bool retranslate();
     Q_INVOKABLE void setMicrophoneEnabled(bool enabled);
     Q_INVOKABLE void refreshMicrophoneStatus();
+    Q_INVOKABLE void openMicrophoneSettings();
+    Q_INVOKABLE bool microphoneNeedsSystemSettings() const;
 
     static bool hudWantsSamples();
 

@@ -44,7 +44,7 @@ scripts/generate-dmg.sh Release
 
 That configures an arm64 build, passes `CONFIG+=pyrowave` unless `TWILIGHT_PYROWAVE=0`, and writes `build/installer-Release/Twilight-<version>.dmg`. The disk image opens with Twilight.app on the left and an Applications alias on the right. Layout and the window picture live in `app/deploy/macos/dmg/`.
 
-Developer ID signing and notarization are hooks only. They do not run unless you set `TWILIGHT_SIGN=1` and, for notarization, `TWILIGHT_NOTARIZE=1`. Developer ID uses the empty entitlements file `app/deploy/macos/Twilight-DeveloperID.entitlements`. The notary keychain profile name is `twilight-notary` (team `TAV97BM6HV`).
+Developer ID signing and notarization are hooks only. They do not run unless you set `TWILIGHT_SIGN=1` and, for notarization, `TWILIGHT_NOTARIZE=1`. Developer ID uses `app/deploy/macos/Twilight-DeveloperID.entitlements`, which contains only the Hardened Runtime microphone exception `com.apple.security.device.audio-input` and does not enable the App Sandbox. The notary keychain profile name is `twilight-notary` (team `TAV97BM6HV`).
 
 `TWILIGHT_MAS=1` is the optional Mac App Store package path. It is not the desktop disk image.
 

@@ -653,7 +653,12 @@ Item {
 
     Connections {
         target: StreamingPreferences
-        onMicrophoneAccessFinished: sheet.micWanted = granted
+        function onMicrophoneAccessFinished(granted) {
+            sheet.micWanted = granted
+            if (!granted && StreamingPreferences.microphoneStatusText !== "") {
+                sheet.toastRequested(StreamingPreferences.microphoneStatusText)
+            }
+        }
     }
 
     Rectangle {
@@ -1136,13 +1141,24 @@ Item {
                             }
                         }
                         TwTextV2 {
+                            id: micStatusText
+                            // Re-evaluated whenever the status text changes.
+                            readonly property bool opensSettings: StreamingPreferences.microphoneStatusText !== ""
+                                                                  && StreamingPreferences.microphoneNeedsSystemSettings()
                             width: parent.width
                             visible: Qt.platform.os == "osx" && StreamingPreferences.microphoneStatusText !== ""
                             theme: sheet.theme
                             color: sheet.theme.tertiary
                             font.pixelSize: 12
+                            font.underline: opensSettings
                             wrapMode: Text.WordWrap
                             text: StreamingPreferences.microphoneStatusText
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: micStatusText.opensSettings
+                                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: StreamingPreferences.openMicrophoneSettings()
+                            }
                         }
                     }
 

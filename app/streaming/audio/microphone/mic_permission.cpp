@@ -17,4 +17,8 @@ void request(std::function<void(bool granted)> callback)
     }
 }
 
+void openSystemSettings()
+{
+}
+
 } // namespace MacMicrophonePermission

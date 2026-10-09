@@ -143,7 +143,8 @@ def test_about():
     version = (ROOT / "app/version.txt").read_text(encoding="utf-8").strip()
     expect(version == "7.1.0", "version is 7.1.0")
     entitlements = plistlib.loads((ROOT / "app/deploy/macos/Twilight-DeveloperID.entitlements").read_bytes())
-    expect(entitlements == {}, "Developer ID entitlements are an empty dict")
+    expect(entitlements == {"com.apple.security.device.audio-input": True},
+           "Developer ID entitlements hold only the Hardened Runtime audio-input exception")
 
 
 def test_package_script():
@@ -153,7 +154,7 @@ def test_package_script():
     expect("3rd Party Mac Developer Application: Your Name (TEAMID)" in text, "application identity placeholder")
     expect("3rd Party Mac Developer Installer: Your Name (TEAMID)" in text, "installer identity placeholder")
     expect("create-dmg" in text, "desktop path still creates a DMG")
-    expect("Twilight-DeveloperID.entitlements" in text, "Developer ID signing passes the empty entitlements file")
+    expect("Twilight-DeveloperID.entitlements" in text, "Developer ID signing passes the Developer ID entitlements file")
     expect("spatial-audio.entitlements" not in text, "Developer ID signing does not use the sandbox entitlements")
     expect("twilight-notary" in text and "TAV97BM6HV" in text, "notarization hook keeps the team profile")
     expect("io.github.neguete10.twilight" in text, "store profile message names the bundle id")

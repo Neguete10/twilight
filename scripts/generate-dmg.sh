@@ -142,8 +142,8 @@ echo Creating app bundle
 EXTRA_ARGS=
 if [ "$BUILD_CONFIG" == "Debug" ]; then EXTRA_ARGS="$EXTRA_ARGS -use-debug-libs"; fi
 echo Extra deployment arguments: $EXTRA_ARGS
-# Sign after deployment so Developer ID gets the empty entitlements plist
-# explicitly. App Sandbox entitlements broke launch in 7.0.1.
+# Sign after deployment so Developer ID gets its entitlements plist
+# (only the Hardened Runtime audio-input exception) explicitly. App Sandbox entitlements broke launch in 7.0.1.
 macdeployqt "$APP_BUNDLE" $EXTRA_ARGS -qmldir=$SOURCE_ROOT/app/gui -no-codesign || fail "macdeployqt failed!"
 
 if [ -d "$QTDIR" ]; then
@@ -191,7 +191,8 @@ if [ "${TWILIGHT_MAS:-}" = "1" ]; then
   codesign -d --entitlements - -vvv "$APP_BUNDLE"
 elif [ "${TWILIGHT_SIGN:-}" = "1" ]; then
   echo Signing app bundle
-  # Empty dict. Do not substitute the App Sandbox or a restricted entitlement file.
+  # Only com.apple.security.device.audio-input (microphone prompt under the
+  # Hardened Runtime). Do not substitute the App Sandbox or a restricted entitlement file.
   codesign --force --deep --verify --verbose --options runtime --timestamp \
     --entitlements "$DEVELOPER_ID_ENTITLEMENTS" \
     --sign "$SIGNING_IDENTITY" \

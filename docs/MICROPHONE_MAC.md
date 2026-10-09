@@ -67,18 +67,20 @@ A working host log looks like `passthrough armed`, then `First mic packet receiv
 
 Mute is Ctrl+Alt+Shift+N during the stream. Mute replaces the frame with silence and still sends, so the host plays silence instead of packet-loss concealment. The device stays open, so unmute does not ask for permission again. Mute does not persist across streams. The shortcut is disabled on non-macOS builds so the keys are still delivered to the host there.
 
-Permission is requested from the settings checkbox via `AVCaptureDevice requestAccessForMediaType:`, not from inside the stream. If access is missing when the stream starts, the stream continues and the log says capture did not start. Denied and restricted states leave the checkbox off. The usage string is `NSMicrophoneUsageDescription` in `app/Info.plist`, and it already says Twilight uses the microphone on every Mac build. A sandboxed build also needs `com.apple.security.device.audio-input` or the sandbox denies the device before macOS can show the prompt. That entitlement is in `Twilight-MAS.entitlements`. See `docs/TWILIGHT_MAS.md`.
+Permission is requested from the settings checkbox via `AVCaptureDevice requestAccessForMediaType:`, not from inside the stream. If access is missing when the stream starts, the stream continues and the log says capture did not start. Denied, restricted, and missing-entitlement states leave the checkbox off. A denial shows a toast. When macOS has already denied access, the status line opens System Settings at Privacy & Security → Microphone. The usage string is `NSMicrophoneUsageDescription` in `app/Info.plist`, and it already says Twilight uses the microphone on every Mac build. A Developer ID build and a sandboxed build both need `com.apple.security.device.audio-input`, or macOS denies the device before it can show the prompt. See the entitlements section below and `docs/TWILIGHT_MAS.md`.
 
 ## Entitlements
 
 TCC requires the usage string for every Mac build, sandboxed or not.
 
-`com.apple.security.device.audio-input` is required only when the App Sandbox is on. It is a standard sandbox entitlement, not a restricted capability, so it does not need the extra Apple approval that head pose and personalized HRTF need.
+`com.apple.security.device.audio-input` is also required on a Developer ID build. That build is signed with the Hardened Runtime and is not sandboxed. Without this key, macOS refuses the microphone and never shows the usage-string prompt, so the settings switch snaps back off and Twilight never appears under Privacy & Security → Microphone. The key is the Hardened Runtime audio-input exception. It is not a restricted entitlement and does not need a provisioning profile or the extra Apple approval that head pose and personalized HRTF need. The App Sandbox needs the same key for a different reason: the sandbox denies the device before macOS can show the prompt.
 
-- `app/deploy/macos/Twilight-MAS.entitlements` — used when `TWILIGHT_MAS=1`.
-- `app/deploy/macos/spatial-audio.entitlements` — used when a desktop DMG is signed. That file already enables the sandbox.
+- `app/deploy/macos/Twilight-DeveloperID.entitlements` — used when `TWILIGHT_SIGN=1`. This file contains only `com.apple.security.device.audio-input`. It does not enable the App Sandbox.
+- `app/deploy/macos/Twilight-MAS.entitlements` — used when `TWILIGHT_MAS=1`. The store profile includes the same microphone key plus the sandbox.
 
-Unsigned local builds do not embed those entitlements. They still need the usage string.
+`scripts/generate-dmg.sh` does not sign with `spatial-audio.entitlements`.
+
+Unsigned and ad-hoc builds that are not running under the Hardened Runtime do not embed this entitlement. They still need the usage string. A signed build that is missing the key is detected at runtime (`SecCodeCopySigningInformation`). Settings then say the build cannot ask for access, and the log says macOS will deny the microphone without asking. That check uses Security.framework APIs that exist on macOS 13.
 
 Do not upload a build or submit it for App Store review.
 
@@ -106,7 +108,7 @@ The second run prints `already patched` and does not edit the files again.
 
 On a Mac, against a host that actually decodes `0x3003` (xenstalker02 Vibepollo, or another tree that copied the Vibelight receiver):
 
-1. Pair and open Settings → Audio. Check "Stream microphone to the host" and allow the system prompt.
+1. Pair and open Settings → Audio. Check "Stream microphone to the host" and allow the system prompt. A Developer ID build has to be signed with `com.apple.security.device.audio-input`. Without that key there is no prompt: the switch snaps off, and the status line says the build cannot ask for access.
 2. Start a stream with Steam running on the Windows host. The Moonlight log should include `Microphone capture started` and `Sent first microphone packet`. The host log should include `First mic packet received from client`. Speak. The recording meter for "Microphone (Steam Streaming Microphone)" should move. Discord or a game has to be set to that device, or to Default after Vibepollo switches the default input.
 3. Press Ctrl+Alt+Shift+N. The meter should drop to silence. Press it again and it should return.
 4. Quit the stream. The next stream starts unmuted.
