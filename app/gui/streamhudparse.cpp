@@ -78,16 +78,32 @@ bool twilightParseHudSample(const char* text, TwilightHudSample* out)
     const char* bitrate = std::strstr(text, "Bitrate:");
     if (bitrate != nullptr) {
         double value = 0.0;
-        char unit[16];
-        unit[0] = '\0';
-        if (std::sscanf(bitrate, "Bitrate: %lf %15s", &value, unit) >= 1) {
+        bool got = false;
+        bool isKbps = false;
+        // Prefer the measured number when the overlay lists requested, the
+        // 0.8x encoder target, and measured. Older lines still use the first number.
+        const char* measured = std::strstr(bitrate, "Mbps measured");
+        const char* measuredKbps = std::strstr(bitrate, "kbps measured");
+        if (measured != nullptr && readDoubleBefore(bitrate, measured, &value)) {
+            got = true;
+        }
+        else if (measuredKbps != nullptr && readDoubleBefore(bitrate, measuredKbps, &value)) {
+            got = true;
+            isKbps = true;
+        }
+        else {
+            char unit[16];
+            unit[0] = '\0';
+            if (std::sscanf(bitrate, "Bitrate: %lf %15s", &value, unit) >= 1) {
+                got = true;
+                if (std::strncmp(unit, "kbps", 4) == 0 || std::strncmp(unit, "Kbps", 4) == 0) {
+                    isKbps = true;
+                }
+            }
+        }
+        if (got) {
             out->hasBitrate = true;
-            if (std::strncmp(unit, "kbps", 4) == 0 || std::strncmp(unit, "Kbps", 4) == 0) {
-                out->bitrateMbps = value / 1000.0;
-            }
-            else {
-                out->bitrateMbps = value;
-            }
+            out->bitrateMbps = isKbps ? value / 1000.0 : value;
         }
     }
 

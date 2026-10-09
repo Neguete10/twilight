@@ -293,19 +293,6 @@ Item {
         closeRequested()
     }
 
-    function applyUnlimited() {
-        var cap = StreamingPreferences.maximumBitrateKbps()
-        var current = StreamingPreferences.bitrateKbps
-        if (current === cap)
-            return
-        if (current > cap) {
-            toastRequested(qsTr("Unlimited sends %1 Mb/s. %2 Mb/s is more than this client will ask a host for, so it was not kept.")
-                           .arg(StreamingPreferences.bitrateMbpsText(cap))
-                           .arg(StreamingPreferences.bitrateMbpsText(current)))
-        }
-        commitBitrateKbps(cap)
-    }
-
     function applyYuv(next) {
         if (StreamingPreferences.enableYUV444 === next)
             return
@@ -352,7 +339,6 @@ Item {
             ids.push("res")
             ids.push("fps")
             ids.push("bitrate")
-            ids.push("bitrateUnlimited")
             ids.push("vsync")
             ids.push("pace")
             ids.push("window")
@@ -425,7 +411,6 @@ Item {
         if (id === "res") return resChoice
         if (id === "fps") return fpsChoice
         if (id === "bitrate") return bitrateRow
-        if (id === "bitrateUnlimited") return unlimitedChip
         if (id === "vsync") return vsyncSwitch
         if (id === "pace") return paceSwitch
         if (id === "window") return windowChoice
@@ -528,7 +513,6 @@ Item {
         if (id !== "decoder") decoderChoice.clearKey()
         if (id !== "uiMode") uiModeChoice.clearKey()
         bitrateSlider.keyed = id === "bitrate"
-        unlimitedChip.keyed = id === "bitrateUnlimited"
         vsyncSwitch.keyed = id === "vsync"
         paceSwitch.keyed = id === "pace"
         hdrSwitch.keyed = id === "hdr"
@@ -651,7 +635,6 @@ Item {
         else if (id === "presence") presenceSwitch.activate()
         else if (id === "classicHud") classicHudSwitch.activate()
         else if (id === "twilightHud") twilightHudSwitch.activate()
-        else if (id === "bitrateUnlimited") applyUnlimited()
     }
 
     Component.onCompleted: {
@@ -848,9 +831,7 @@ Item {
 
                         TwTextV2 {
                             theme: sheet.theme
-                            text: StreamingPreferences.bitrateKbps === StreamingPreferences.maximumBitrateKbps()
-                                  ? qsTr("Bitrate · Unlimited")
-                                  : qsTr("Bitrate · %1 Mb/s").arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
+                            text: qsTr("Bitrate · %1 Mb/s").arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
                             color: sheet.theme.secondary
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
@@ -861,39 +842,10 @@ Item {
                             height: 36
 
                             Rectangle {
-                                id: unlimitedChip
-                                property bool keyed: false
-                                property bool on: StreamingPreferences.bitrateKbps === StreamingPreferences.maximumBitrateKbps()
+                                id: bitrateField
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: unlimitedLabel.implicitWidth + 28
-                                height: 32
-                                radius: 10
-                                color: on ? sheet.theme.accent : sheet.theme.fill
-                                border.width: keyed ? 2 : 1
-                                border.color: keyed ? sheet.theme.ink : (on ? sheet.theme.accent : sheet.theme.stroke)
-                                TwTextV2 {
-                                    id: unlimitedLabel
-                                    anchors.centerIn: parent
-                                    theme: sheet.theme
-                                    text: qsTr("Unlimited")
-                                    font.pixelSize: 13
-                                    font.weight: unlimitedChip.on ? Font.DemiBold : Font.Normal
-                                    color: unlimitedChip.on ? sheet.theme.accentInk : sheet.theme.ink
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: sheet.applyUnlimited()
-                                }
-                            }
-
-                            Rectangle {
-                                id: bitrateField
-                                anchors.right: unlimitedChip.left
-                                anchors.rightMargin: 8
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 108
+                                width: 124
                                 height: 32
                                 radius: 10
                                 color: sheet.theme.field
@@ -971,15 +923,13 @@ Item {
                             wrapMode: Text.WordWrap
                             text: (StreamingPreferences.bitrateKbps < StreamingPreferences.minimumBitrateKbps()
                                    || StreamingPreferences.bitrateKbps > StreamingPreferences.maximumBitrateKbps())
-                                  ? qsTr("Saved %1 Mb/s is outside %2–%3. It is still sent until you change it. The slider stops at %4 Mb/s. GeForce Experience will not encode above %5 Mb/s.")
+                                  ? qsTr("Saved %1 Mb/s is outside %2–%3. It is still sent until you change it. The slider stops at %4 Mb/s. On a wired gigabit link the real-world ceiling is about 800 Mb/s.")
                                     .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
                                     .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
                                     .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
                                     .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
-                                    .arg(StreamingPreferences.gfeBitrateCapKbps() / 1000)
-                                  : qsTr("%1–%2 Mb/s. Unlimited sends %3 Mb/s, the most this client asks a host for. GeForce Experience will not encode above %4 Mb/s.")
+                                  : qsTr("%1–%2 Mb/s. On a wired gigabit link the real-world ceiling is about 800 Mb/s. GeForce Experience will not encode above %3 Mb/s.")
                                     .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
-                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
                                     .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
                                     .arg(StreamingPreferences.gfeBitrateCapKbps() / 1000)
                         }

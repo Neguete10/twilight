@@ -14,7 +14,8 @@ public:
     Q_INVOKABLE static int
     getDefaultBitrate(int width, int height, int fps, bool yuv444);
 
-    // Slider and typed field. 500 kbps through 500 Mbps. Unlimited is the top.
+    // Slider and typed field. 500 kbps through 1 Gbps. A stored Unlimited
+    // value (500000) is kept. Numbers outside the field are kept until changed.
     Q_INVOKABLE int minimumBitrateKbps() const;
     Q_INVOKABLE int maximumBitrateKbps() const;
     Q_INVOKABLE int gfeBitrateCapKbps() const;

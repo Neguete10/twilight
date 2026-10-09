@@ -35,9 +35,12 @@ int main()
     expectKbps("20.", 20000, "trailing dot");
     expectKbps("0.5", 500, "floor");
     expectKbps(".5", 500, "leading dot");
-    expectKbps("500", 500000, "ceiling");
-    expectKbps("500.0", 500000, "ceiling with decimal");
-    expectKbps("500.000", 500000, "ceiling three decimals");
+    expectKbps("500", 500000, "legacy unlimited value is a normal bitrate");
+    expectKbps("500.0", 500000, "500 with decimal");
+    expectKbps("800", 800000, "wired gigabit is inside the field");
+    expectKbps("1000", 1000000, "ceiling");
+    expectKbps("1000.0", 1000000, "ceiling with decimal");
+    expectKbps("1000.000", 1000000, "ceiling three decimals");
     expectKbps("  12.5 ", 12500, "trimmed");
     expectKbps("18.456", 18456, "three decimals");
     expectKbps("18.4564", 18456, "fourth digit rounds down");
@@ -53,8 +56,8 @@ int main()
     expectReject("1e2", "exponent");
     expectReject("0.4", "below floor");
     expectReject("0.499", "just below floor");
-    expectReject("500.001", "just above ceiling");
-    expectReject("800", "above ceiling is not clamped");
+    expectReject("1000.001", "just above ceiling");
+    expectReject("1001", "above ceiling is not clamped");
     expectReject("0", "zero");
 
     expect(formatMbps(18400) == "18.4", "format tenth");
@@ -63,29 +66,54 @@ int main()
     expect(formatMbps(18250) == "18.25", "format hundredth");
     expect(formatMbps(18010) == "18.01", "format hundredth with zero");
     expect(formatMbps(500) == "0.5", "format floor");
-    expect(formatMbps(500000) == "500", "format ceiling");
-    expect(formatMbps(800000) == "800", "format a saved value above the ceiling");
+    expect(formatMbps(500000) == "500", "format the old unlimited value");
+    expect(formatMbps(800000) == "800", "format 800");
+    expect(formatMbps(1000000) == "1000", "format ceiling");
+    expect(formatMbps(2500000) == "2500", "format an old unlocked value above the ceiling");
     expect(formatMbps(1234) == "1.234", "format three places");
 
     expect(parseMbps(formatMbps(18400)).kbps == 18400, "round trip tenth");
     expect(parseMbps(formatMbps(18250)).kbps == 18250, "round trip hundredth");
-    expect(parseMbps(formatMbps(800000)).accepted == false, "saved display is not a new legal value");
+    expect(parseMbps(formatMbps(500000)).accepted && parseMbps(formatMbps(500000)).kbps == 500000, "saved 500 Mb/s is still legal");
+    expect(parseMbps(formatMbps(2500000)).accepted == false, "saved display above the ceiling is not a new legal value");
 
-    expect(kMaxKbps == 500000, "unlimited is the 500 Mb/s protocol ceiling");
+    expect(kMaxKbps == 1000000, "slider top is 1 Gbps");
+    expect(kLegacyUnlimitedKbps == 500000, "old unlimited stays 500 Mb/s");
+    expect(kHostBitrateLimitKbps == 500000, "adaptive ceiling stays the host limit");
     expect(kMinKbps == 500, "floor stays 0.5 Mb/s");
     expect(kGfeCapKbps == 100000, "GFE cap stays 100 Mb/s");
 
+    expect(storedBitrateKbps("500000", 0) == 500000, "stored unlimited number is kept");
+    expect(storedBitrateKbps("unlimited", 0) == 500000, "stored unlimited word is kept");
+    expect(storedBitrateKbps("Unlimited", 0) == 500000, "stored unlimited word ignores case");
+    expect(storedBitrateKbps("2500000", 0) == 2500000, "old unlocked number is kept");
+    expect(storedBitrateKbps("1000000", 0) == 1000000, "stored 1 Gbps is kept");
+    expect(storedBitrateKbps("nope", 18400) == 18400, "unreadable prefs use the fallback");
+    expect(storedBitrateKbps("", 18400) == 18400, "empty prefs use the fallback");
+
     expect(sunshineConfiguredKbps(20000) == 20000, "sunshine gets the typed number");
-    expect(sunshineConfiguredKbps(500000) == 500000, "sunshine gets unlimited");
+    expect(sunshineConfiguredKbps(500000) == 500000, "sunshine gets a kept 500 Mb/s");
+    expect(sunshineConfiguredKbps(1000000) == 1000000, "sunshine gets 1 Gbps");
     expect(sunshineConfiguredKbps(800000) == 800000, "sunshine is not clamped by this client");
+
+    expect(estimatedEncoderTargetKbps(20000) == 16000, "encoder target is 80 percent");
+    expect(estimatedEncoderTargetKbps(1000000) == 800000, "1 Gbps request estimates 800 Mb/s");
+    expect(estimatedEncoderTargetKbps(0) == 0, "no request has no target");
+    const std::string overlay = formatBitrateOverlay(1000000, 74.0);
+    expect(overlay == "1000.0 Mbps requested, 800.0 Mbps encoder target, 74.0 Mbps measured", "overlay lists requested, target, measured");
+
+    expect(adaptiveBitrateCeilingKbps(20000) == 20000, "adaptive ceiling is the user bitrate");
+    expect(adaptiveBitrateCeilingKbps(500000) == 500000, "adaptive ceiling allows the host limit");
+    expect(adaptiveBitrateCeilingKbps(1000000) == 500000, "adaptive ceiling does not follow the 1 Gbps slider");
 
     expect(gfeLocalInitialKbps(20000) == 16000, "local GFE keeps the 80 percent FEC budget");
     expect(gfeLocalInitialKbps(100000) == 80000, "100 Mb/s request is under the GFE cap after FEC");
     expect(gfeLocalInitialKbps(150000) == 100000, "150 Mb/s local hits the GFE cap");
-    expect(gfeLocalInitialKbps(500000) == 100000, "unlimited still encodes at 100 Mb/s on GFE");
+    expect(gfeLocalInitialKbps(500000) == 100000, "500 Mb/s still encodes at 100 Mb/s on GFE");
+    expect(gfeLocalInitialKbps(1000000) == 100000, "1 Gbps still encodes at 100 Mb/s on GFE");
     expect(gfeRemoteInitialKbps(20000) == 15500, "remote GFE subtracts 500 kbps");
     expect(gfeRemoteInitialKbps(500) == 400, "remote budget under 500 kbps is not reduced again");
-    expect(gfeRemoteInitialKbps(500000) == 100000, "remote unlimited hits the same GFE cap");
+    expect(gfeRemoteInitialKbps(1000000) == 100000, "remote 1 Gbps hits the same GFE cap");
 
     if (g_Failures != 0) {
         std::printf("%d failed\n", g_Failures);

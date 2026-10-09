@@ -1,4 +1,5 @@
 #include "stats.h"
+#include "settings/bitrate_choice.h"
 
 #include "streaming/video/ffmpeg-renderers/framepacing/framepacer.h"
 #include "imgui.h"
@@ -405,13 +406,14 @@ void Stats::formatVideoStats(VIDEO_STATS& stats, char* output, size_t length)
         float fecOverhead = (float) rtpVideoStats->packetCountFec * 1.0 /
                             (rtpVideoStats->packetCountVideo + rtpVideoStats->packetCountFec);
 
+        const std::string bitrateOverlay = BitrateChoice::formatBitrateOverlay(m_BitrateKbps, avgVideoMbps);
         ret = snprintf(&output[offset],
                        length - offset,
-                       "Bitrate: %.1f Mbps, +%.0f%% FEC, Peak (%us): %.1f\n"
+                       "Bitrate: %s, +%.0f%% FEC, Peak (%us): %.1f\n"
                        "Incoming frame rate from network: %.2f FPS\n"
                        "Decoding frame rate: %.2f FPS\n"
                        "Rendering frame rate: %.2f FPS (%s, %s)\n",
-                       avgVideoMbps,
+                       bitrateOverlay.c_str(),
                        fecOverhead * 100.0,
                        m_bwTracker.GetWindowSeconds(),
                        peakVideoMbps,

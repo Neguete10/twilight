@@ -1,36 +1,48 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
 #include <string>
 
-// Twilight's bitrate field and the Unlimited control share these limits with
-// the stream. The numbers are the ones the host protocol actually accepts.
+// The slider and the typed field accept 0.5 Mb/s through 1 Gbps. There is no
+// Unlimited control. A stored 500000 (the old Unlimited value) is kept as
+// 500 Mb/s. A stored number outside the field, including the old unlocked
+// slider, is kept until the user changes it.
 //
-// Sunshine reads x-ml-video.configuredBitrateKbps as the user's number. There
-// is no higher numeric ceiling in that attribute. The frame itself is capped
-// by the 10-bit FEC packet index (1024 packets per block, 4 blocks) and by
-// Reed-Solomon's 255 shards. With the usual 20% FEC and this client's 1392-byte
-// LAN packet, one frame holds about 560 Mbit of encoded video at 60 fps.
-// Moonlight stops the slider at 500 Mbit/s so a frame stays inside that budget
-// at 60 fps and above. Going past it is the 1 Gbit/s case Sunshine's packet
-// pacer was not written for, so Unlimited does not raise the cap.
+// Sunshine reads x-ml-video.configuredBitrateKbps as the user's number. The
+// overlay's encoder-target estimate is 80% of that request (the FEC budget).
+// It is not the GeForce Experience cap and it is not the adaptive-bitrate cap.
 //
 // GeForce Experience imposes 100 Mbit/s on maximumBitrateKbps. SdpGenerator.c
 // copies that onto the NVIDIA bitrate attributes (after the 80% FEC budget)
 // and leaves configuredBitrateKbps alone for Sunshine. That GFE clamp stays.
+//
+// Adaptive bitrate is separate. Its ceiling is the user's bitrate, and it
+// never asks the host for more than 500000 kbps (the host /bitrate limit).
 
 namespace BitrateChoice {
 
 // 0.5 Mb/s. Same floor as the slider, the command line, and network profiles.
 constexpr int kMinKbps = 500;
 
-// 500 Mb/s. Highest value this client will request. Not a silent UI clamp of
-// a larger stored number: callers reject new input above this and leave an
-// already-saved higher number untouched until the user changes it.
-constexpr int kMaxKbps = 500000;
+// 1000 Mb/s. Highest value the slider and the typed field accept. Not a silent
+// clamp of a larger stored number: callers reject new input above this and
+// leave an already-saved higher number untouched until the user changes it.
+constexpr int kMaxKbps = 1000000;
+
+// What Unlimited used to store. Loading it keeps 500 Mb/s. It is not remapped
+// to the new top of the slider.
+constexpr int kLegacyUnlimitedKbps = 500000;
+
+// Host /bitrate limit. Adaptive bitrate may use the user's bitrate only up
+// to this. The slider is allowed to go higher.
+constexpr int kHostBitrateLimitKbps = 500000;
 
 // SdpGenerator.c caps the NVIDIA x-nv-video bitrate attributes here.
 constexpr int kGfeCapKbps = 100000;
+
+// FEC budget shown on the overlay as the estimated encoder target.
+constexpr double kEncoderTargetFraction = 0.80;
 
 struct ParseResult {
     bool accepted;
@@ -171,6 +183,101 @@ inline int gfeRemoteInitialKbps(int kbps)
         adjusted = kGfeCapKbps;
     }
     return adjusted;
+}
+
+// Overlay estimate only. Not capped by GFE and not capped by the host
+// /bitrate limit.
+inline int estimatedEncoderTargetKbps(int requestedKbps)
+{
+    if (requestedKbps <= 0) {
+        return 0;
+    }
+    return static_cast<int>(static_cast<double>(requestedKbps) * kEncoderTargetFraction);
+}
+
+// User bitrate, capped at the host's 500000 kbps /bitrate limit.
+inline int adaptiveBitrateCeilingKbps(int userKbps)
+{
+    if (userKbps > kHostBitrateLimitKbps) {
+        return kHostBitrateLimitKbps;
+    }
+    return userKbps;
+}
+
+// "100.0 Mbps requested, 80.0 Mbps encoder target, 74.2 Mbps measured"
+inline std::string formatBitrateOverlay(int requestedKbps, double measuredMbps)
+{
+    char buf[192];
+    std::snprintf(buf, sizeof(buf),
+                  "%.1f Mbps requested, %.1f Mbps encoder target, %.1f Mbps measured",
+                  static_cast<double>(requestedKbps) / 1000.0,
+                  static_cast<double>(estimatedEncoderTargetKbps(requestedKbps)) / 1000.0,
+                  measuredMbps);
+    return std::string(buf);
+}
+
+inline bool equalsIgnoreCase(const std::string& text, const char* literal)
+{
+    if (literal == nullptr) {
+        return false;
+    }
+    std::size_t index = 0;
+    while (index < text.size() && literal[index] != '\0') {
+        char left = text[index];
+        char right = literal[index];
+        if (left >= 'A' && left <= 'Z') {
+            left = static_cast<char>(left - 'A' + 'a');
+        }
+        if (right >= 'A' && right <= 'Z') {
+            right = static_cast<char>(right - 'A' + 'a');
+        }
+        if (left != right) {
+            return false;
+        }
+        index++;
+    }
+    return index == text.size() && literal[index] == '\0';
+}
+
+// Prefs load. "unlimited" (any case) stays at the old 500 Mb/s value. A
+// numeric string is kept even when it is outside the slider. Anything else
+// uses fallback. Does not throw.
+inline int storedBitrateKbps(const std::string& text, int fallback)
+{
+    const std::string raw = trimCopy(text);
+    if (raw.empty()) {
+        return fallback;
+    }
+    if (equalsIgnoreCase(raw, "unlimited")) {
+        return kLegacyUnlimitedKbps;
+    }
+
+    std::size_t index = 0;
+    bool negative = false;
+    if (raw[index] == '+') {
+        index++;
+    } else if (raw[index] == '-') {
+        negative = true;
+        index++;
+    }
+    if (index >= raw.size()) {
+        return fallback;
+    }
+
+    std::int64_t value = 0;
+    for (; index < raw.size(); index++) {
+        if (raw[index] < '0' || raw[index] > '9') {
+            return fallback;
+        }
+        value = value * 10 + (raw[index] - '0');
+        if (value > 2147483647LL) {
+            return fallback;
+        }
+    }
+    if (negative) {
+        value = -value;
+    }
+    return static_cast<int>(value);
 }
 
 } // namespace BitrateChoice

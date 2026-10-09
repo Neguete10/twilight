@@ -43,3 +43,27 @@ jobs:
     uses: ./.github/workflows/build-win-mac.yml
     with:
       ci_version: ${{ needs.setup.outputs.ci_version }}
+
+  macos-13-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+      - name: macOS 13 Mach-O, availability, and CoreHID checks
+        run: |
+          python3 tests/macos_minos_test.py
+          python3 tests/macos_availability_test.py
+          python3 tests/macos_deployment_target_test.py
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            tests/corehid_mouse_test.cpp \
+            app/streaming/input/corehid_mouse_decoder.cpp \
+            -Iapp/streaming/input \
+            -o /tmp/corehid_mouse_test
+          /tmp/corehid_mouse_test
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            tests/bitrate_choice_test.cpp -Iapp/settings -o /tmp/bitrate_choice_test
+          /tmp/bitrate_choice_test
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            tests/twilight_hud_parse_test.cpp app/gui/streamhudparse.cpp \
+            -Iapp/gui -o /tmp/hud_parse_test
+          /tmp/hud_parse_test

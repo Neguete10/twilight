@@ -17,6 +17,7 @@
 
   #include "streaming/session.h"
   #include "gui/streamhudstats.h"
+  #include "settings/bitrate_choice.h"
 
   #ifndef __APPLE__
     #include <drm_fourcc.h>
@@ -1016,15 +1017,20 @@ void PyroWaveVulkanVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* o
     int ret;
 
     if (stats.receivedFps > 0) {
+        int requestedKbps = 0;
+        if (StreamingPreferences* prefs = StreamingPreferences::get()) {
+            requestedKbps = prefs->bitrateKbps;
+        }
+        const std::string bitrateOverlay = BitrateChoice::formatBitrateOverlay(requestedKbps, m_BwTracker.GetAverageMbps());
         ret = snprintf(&output[offset], length - offset,
                        "Video stream: %dx%d %.2f FPS (Codec: PyroWave Vulkan %s%s)\n"
-                       "Bitrate: %.1f Mbps, Peak (%us): %.1f\n"
+                       "Bitrate: %s, Peak (%us): %.1f\n"
                        "Incoming frame rate from network: %.2f FPS\n"
                        "Decoding frame rate: %.2f FPS\n"
                        "Rendering frame rate: %.2f FPS\n",
                        m_Width, m_Height, stats.totalFps, m_YUV444 ? "4:4:4" : "4:2:0",
                        m_TenBit ? (m_HdrEnabled.load() ? " 10-bit HDR" : " 10-bit") : "",
-                       m_BwTracker.GetAverageMbps(), m_BwTracker.GetWindowSeconds(), m_BwTracker.GetPeakMbps(),
+                       bitrateOverlay.c_str(), m_BwTracker.GetWindowSeconds(), m_BwTracker.GetPeakMbps(),
                        stats.receivedFps, stats.decodedFps, stats.renderedFps);
         if (ret < 0 || ret >= length - offset) return;
         offset += ret;
