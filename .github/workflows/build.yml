@@ -70,3 +70,4 @@ jobs:
             tests/twilight_hud_parse_test.cpp app/gui/streamhudparse.cpp \
             -Iapp/gui -o /tmp/hud_parse_test
           /tmp/hud_parse_test
+          python3 tests/stream_quit_teardown_test.py

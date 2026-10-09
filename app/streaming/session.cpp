@@ -280,6 +280,15 @@ void Session::clSetControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g
 }
 
 void Session::clSetAdaptiveTriggers(uint16_t controllerNumber, uint8_t eventFlags, uint8_t typeLeft, uint8_t typeRight, uint8_t *left, uint8_t *right){
+    // One line per process is enough to confirm the host is sending 0x5503.
+    static bool loggedFirst = false;
+    if (!loggedFirst) {
+        loggedFirst = true;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Host adaptive trigger packet 0x5503 (controller %u, flags 0x%02x, left %u, right %u)",
+                    controllerNumber, eventFlags, typeLeft, typeRight);
+    }
+
     // We push an event for the main thread to handle in order to properly synchronize
     // with the removal of game controllers that could result in our game controller
     // going away during this callback.
@@ -2707,19 +2716,23 @@ DispatchDeferredCleanup:
     // Raise any keys that are still down
     m_InputHandler->raiseAllKeys();
 
+    // Stop the render thread before the input handler quits SDL's
+    // gamecontroller and joystick subsystems. The decoder destructor calls
+    // FramePacer::deinit(), which joins FramePacerRender and shuts down the
+    // ImGui SDL backend. That backend reads the gamepad it opened. Quitting
+    // the subsystem first frees that handle, and the next ImGui frame crashes
+    // in SDL_GetJoystickID. The decoder still goes away on this thread, and
+    // still before LiStopConnection(), which pull-based decoders require.
+    SDL_LockMutex(m_DecoderLock);
+    delete m_VideoDecoder;
+    m_VideoDecoder = nullptr;
+    SDL_UnlockMutex(m_DecoderLock);
+
     // Destroy the input handler now. This must be destroyed
     // before allowwing the UI to continue execution or it could
     // interfere with SDLGamepadKeyNavigation.
     delete m_InputHandler;
     m_InputHandler = nullptr;
-
-    // Destroy the decoder, since this must be done on the main thread
-    // NB: This must happen before LiStopConnection() for pull-based
-    // decoders.
-    SDL_LockMutex(m_DecoderLock);
-    delete m_VideoDecoder;
-    m_VideoDecoder = nullptr;
-    SDL_UnlockMutex(m_DecoderLock);
 
     // Propagate state changes from the SDL window back to the Qt window
     //

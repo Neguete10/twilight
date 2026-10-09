@@ -9,6 +9,13 @@ CONFIG += staticlib
 # Include global qmake defs
 include(../globaldefs.pri)
 
+# The docking pin opens its own SDL gamepads. Shutdown must not close them
+# after the stream has quit the gamecontroller subsystem. The script is
+# idempotent. This repo cannot publish a commit on the imgui remote.
+!system(python3 $$PWD/../scripts/apply_imgui_gamepad_shutdown.py) {
+    error("Failed to apply the ImGui gamepad shutdown patch")
+}
+
 INCLUDEPATH += \
     $$PWD/imgui \
     $$PWD/imgui/backends \

@@ -15,6 +15,14 @@ CONFIG += staticlib
 # Include global qmake defs
 include(../globaldefs.pri)
 
+# 7feb0a6 reads packetTypes[IDX_DS_ADAPTIVE_TRIGGERS] (index 12) on every
+# async callback check. The four pre-Sunshine tables are one entry short,
+# so a GFE host reads past the array. The script is idempotent. This repo
+# cannot publish a commit on the submodule remote.
+!system(python3 $$PWD/../scripts/apply_control_packet_bounds.py) {
+    error("Failed to apply the control-stream packet table bounds patch")
+}
+
 win32 {
     contains(QT_ARCH, i386) {
         INCLUDEPATH += $$PWD/../libs/windows/include/x86
