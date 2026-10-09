@@ -32,10 +32,10 @@ static Observation at(int64_t nowMs, uint32_t frames, uint32_t dropped, uint32_t
 
 int main()
 {
-    expect(wireCeilingKbps(true, 1000000) == 500000, "unlimited ceiling is the host cap");
-    expect(wireCeilingKbps(false, 20000) == 20000, "typed ceiling is the user bitrate");
-    expect(wireCeilingKbps(false, 800000) == 500000, "typed bitrate above the endpoint is capped");
-    expect(wireCeilingKbps(false, 0) == 1, "a zero request still has a positive ceiling");
+    expect(wireCeilingKbps(1000000) == 500000, "a 1 Gbps request is capped at the host endpoint");
+    expect(wireCeilingKbps(20000) == 20000, "typed ceiling is the user bitrate");
+    expect(wireCeilingKbps(800000) == 500000, "typed bitrate above the endpoint is capped");
+    expect(wireCeilingKbps(0) == 1, "a zero request still has a positive ceiling");
 
     expect(assumedAudioKbps(2, true) == 512, "local stereo audio budget");
     expect(assumedAudioKbps(2, false) == 96, "remote stereo audio budget");

@@ -253,7 +253,6 @@ Item {
     function commitBitrateKbps(kbps) {
         if (kbps > 150000)
             StreamingPreferences.unlockBitrate = true
-        StreamingPreferences.bitrateUnlimited = false
         StreamingPreferences.bitrateKbps = kbps
         bitrateInput.text = StreamingPreferences.bitrateMbpsText(kbps)
     }
@@ -340,7 +339,6 @@ Item {
             ids.push("res")
             ids.push("fps")
             ids.push("bitrate")
-            ids.push("unlimited")
             ids.push("vsync")
             ids.push("pace")
             ids.push("window")
@@ -414,7 +412,6 @@ Item {
         if (id === "res") return resChoice
         if (id === "fps") return fpsChoice
         if (id === "bitrate") return bitrateRow
-        if (id === "unlimited") return unlimitedSwitch
         if (id === "vsync") return vsyncSwitch
         if (id === "pace") return paceSwitch
         if (id === "window") return windowChoice
@@ -518,7 +515,6 @@ Item {
         if (id !== "decoder") decoderChoice.clearKey()
         if (id !== "uiMode") uiModeChoice.clearKey()
         bitrateSlider.keyed = id === "bitrate"
-        unlimitedSwitch.keyed = id === "unlimited"
         vsyncSwitch.keyed = id === "vsync"
         paceSwitch.keyed = id === "pace"
         hdrSwitch.keyed = id === "hdr"
@@ -616,7 +612,6 @@ Item {
         else if (id === "pyro") pyroChoice.pickKey()
         else if (id === "decoder") decoderChoice.pickKey()
         else if (id === "uiMode") uiModeChoice.pickKey()
-        else if (id === "unlimited") unlimitedSwitch.activate()
         else if (id === "vsync") vsyncSwitch.activate()
         else if (id === "pace") paceSwitch.activate()
         else if (id === "hdr") hdrSwitch.activate()
@@ -845,9 +840,7 @@ Item {
 
                         TwTextV2 {
                             theme: sheet.theme
-                            text: StreamingPreferences.bitrateUnlimited
-                                  ? qsTr("Bitrate · Unlimited")
-                                  : qsTr("Bitrate · %1 Mb/s").arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
+                            text: qsTr("Bitrate · %1 Mb/s").arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
                             color: sheet.theme.secondary
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
@@ -937,32 +930,17 @@ Item {
                             color: sheet.theme.secondary
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
-                            text: StreamingPreferences.bitrateUnlimited
-                                  ? qsTr("Unlimited lets the host use as much as the network allows. At home that asks for 1000 Mb/s. Away from home it asks for 500 Mb/s. On a wired gigabit link the real ceiling is about 800 Mb/s.")
-                                  : ((StreamingPreferences.bitrateKbps < StreamingPreferences.minimumBitrateKbps()
-                                      || StreamingPreferences.bitrateKbps > StreamingPreferences.maximumBitrateKbps())
-                                     ? qsTr("Saved %1 Mb/s is outside %2–%3. It is still sent until you change it. The slider stops at %4 Mb/s. On a wired gigabit link the real-world ceiling is about 800 Mb/s.")
-                                       .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
-                                       .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
-                                       .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
-                                       .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
-                                     : qsTr("%1–%2 Mb/s. On a wired gigabit link the real-world ceiling is about 800 Mb/s. GeForce Experience will not encode above %3 Mb/s.")
-                                       .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
-                                       .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
-                                       .arg(StreamingPreferences.gfeBitrateCapKbps() / 1000))
-                        }
-
-                        SettingRowV2 {
-                            width: parent.width
-                            theme: sheet.theme
-                            title: qsTr("Unlimited")
-                            subtitle: qsTr("Lets the host use as much as the network allows. At home that asks for 1000 Mb/s. Away from home it asks for 500 Mb/s. On a wired gigabit link the real ceiling is about 800 Mb/s.")
-                            SwitchV2 {
-                                id: unlimitedSwitch
-                                theme: sheet.theme
-                                checked: StreamingPreferences.bitrateUnlimited
-                                onToggled: StreamingPreferences.bitrateUnlimited = next
-                            }
+                            text: (StreamingPreferences.bitrateKbps < StreamingPreferences.minimumBitrateKbps()
+                                   || StreamingPreferences.bitrateKbps > StreamingPreferences.maximumBitrateKbps())
+                                  ? qsTr("Saved %1 Mb/s is outside %2–%3. It is still sent until you change it. The slider stops at %4 Mb/s. On a wired gigabit link the real-world ceiling is about 800 Mb/s.")
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
+                                  : qsTr("%1–%2 Mb/s. On a wired gigabit link the real-world ceiling is about 800 Mb/s. GeForce Experience will not encode above %3 Mb/s.")
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.minimumBitrateKbps()))
+                                    .arg(StreamingPreferences.bitrateMbpsText(StreamingPreferences.maximumBitrateKbps()))
+                                    .arg(StreamingPreferences.gfeBitrateCapKbps() / 1000)
                         }
 
                         SettingRowV2 {

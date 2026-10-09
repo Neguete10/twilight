@@ -14,8 +14,8 @@ public:
     Q_INVOKABLE static int
     getDefaultBitrate(int width, int height, int fps, bool yuv444);
 
-    // Slider and typed field. 500 kbps through 1 Gbps. Unlimited is a separate
-    // setting. Numbers outside the field are kept until changed.
+    // Slider and typed field. 500 kbps through 1 Gbps. There is no Unlimited
+    // control. Numbers outside the field are kept until changed.
     Q_INVOKABLE int minimumBitrateKbps() const;
     Q_INVOKABLE int maximumBitrateKbps() const;
     Q_INVOKABLE int gfeBitrateCapKbps() const;
@@ -174,7 +174,6 @@ public:
     Q_PROPERTY(int height MEMBER height NOTIFY displayModeChanged)
     Q_PROPERTY(int fps MEMBER fps NOTIFY displayModeChanged)
     Q_PROPERTY(int bitrateKbps MEMBER bitrateKbps NOTIFY bitrateChanged)
-    Q_PROPERTY(bool bitrateUnlimited MEMBER bitrateUnlimited NOTIFY bitrateUnlimitedChanged)
     Q_PROPERTY(bool unlockBitrate MEMBER unlockBitrate NOTIFY unlockBitrateChanged)
     Q_PROPERTY(bool autoAdjustBitrate MEMBER autoAdjustBitrate NOTIFY autoAdjustBitrateChanged)
     Q_PROPERTY(bool enableAdaptiveBitrate MEMBER enableAdaptiveBitrate NOTIFY enableAdaptiveBitrateChanged)
@@ -248,7 +247,6 @@ public:
     int height;
     int fps;
     int bitrateKbps;
-    bool bitrateUnlimited;
     // What this stream asked the host for. Not saved. 0 until a stream starts.
     int streamRequestedBitrateKbps;
     bool unlockBitrate;
@@ -300,7 +298,6 @@ public:
 signals:
     void displayModeChanged();
     void bitrateChanged();
-    void bitrateUnlimitedChanged();
     void unlockBitrateChanged();
     void autoAdjustBitrateChanged();
     void enableAdaptiveBitrateChanged();

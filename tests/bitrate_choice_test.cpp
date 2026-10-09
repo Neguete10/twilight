@@ -78,41 +78,25 @@ int main()
     expect(parseMbps(formatMbps(2500000)).accepted == false, "saved display above the ceiling is not a new legal value");
 
     expect(kMaxKbps == 1000000, "slider top is 1 Gbps");
-    expect(kUnlimitedLanKbps == 1000000, "unlimited on a local link is 1 Gbps");
     expect(kLegacyUnlimitedKbps == 500000, "old unlimited value is 500 Mb/s");
     expect(kAbsoluteSendCapKbps == 1500000, "send cap is 1.5 Gbps");
     expect(kHostBitrateLimitKbps == 500000, "adaptive ceiling stays the host limit");
     expect(kMinKbps == 500, "floor stays 0.5 Mb/s");
     expect(kGfeCapKbps == 100000, "GFE cap stays 100 Mb/s");
 
-    expect(storedBitrateKbps("500000", 0) == 500000, "stored unlimited number is kept");
-    expect(storedBitrateKbps("unlimited", 0) == 500000, "stored unlimited word is kept");
-    expect(storedBitrateKbps("Unlimited", 0) == 500000, "stored unlimited word ignores case");
+    expect(storedBitrateKbps("500000", 0) == 500000, "a stored 500000 loads as 500000");
+    expect(storedBitrateKbps("unlimited", 0) == 500000, "the word unlimited loads as 500000");
+    expect(storedBitrateKbps("Unlimited", 18400) == 500000, "the word unlimited ignores case");
     expect(storedBitrateKbps("2500000", 0) == 2500000, "old unlocked number is kept");
     expect(storedBitrateKbps("1000000", 0) == 1000000, "stored 1 Gbps is kept");
     expect(storedBitrateKbps("nope", 18400) == 18400, "unreadable prefs use the fallback");
     expect(storedBitrateKbps("", 18400) == 18400, "empty prefs use the fallback");
 
-    const LoadedBitrate migrated = loadBitratePref("500000", 0, false, false);
-    expect(migrated.kbps == 500000 && migrated.unlimited, "missing key plus 500000 is Unlimited");
-    const LoadedBitrate migratedWord = loadBitratePref("Unlimited", 18400, false, false);
-    expect(migratedWord.kbps == 500000 && migratedWord.unlimited, "the word unlimited migrates");
-    const LoadedBitrate keptTyped = loadBitratePref("500000", 0, true, false);
-    expect(keptTyped.kbps == 500000 && !keptTyped.unlimited, "an explicit off key keeps 500 Mb/s");
-    const LoadedBitrate keptOn = loadBitratePref("20000", 0, true, true);
-    expect(keptOn.kbps == 20000 && keptOn.unlimited, "an explicit on key stays Unlimited");
-    const LoadedBitrate typedGigabit = loadBitratePref("1000000", 0, false, false);
-    expect(typedGigabit.kbps == 1000000 && !typedGigabit.unlimited, "1 Gbps is not Unlimited");
-    const LoadedBitrate unreadable = loadBitratePref("nope", 18400, false, false);
-    expect(unreadable.kbps == 18400 && !unreadable.unlimited, "unreadable prefs are not Unlimited");
-
-    expect(bitrateToSendKbps(true, 20000, LinkKind::Lan) == 1000000, "unlimited on LAN sends 1 Gbps");
-    expect(bitrateToSendKbps(true, 20000, LinkKind::Remote) == 500000, "unlimited off-LAN sends 500 Mb/s");
-    expect(bitrateToSendKbps(false, 800000, LinkKind::Lan) == 800000, "a typed value is sent as typed");
-    expect(bitrateToSendKbps(false, 500000, LinkKind::Remote) == 500000, "typed 500 Mb/s is not forced to Unlimited");
-    expect(bitrateToSendKbps(false, 2500000, LinkKind::Lan) == 1500000, "an old unlocked value is capped at 1.5 Gbps");
-    expect(bitrateToSendKbps(false, 100, LinkKind::Lan) == 100, "a stored low number is not raised");
-    expect(bitrateToSendKbps(false, -5, LinkKind::Lan) == 0, "a negative stored number sends nothing");
+    expect(bitrateToSendKbps(800000) == 800000, "a typed value is sent as typed");
+    expect(bitrateToSendKbps(500000) == 500000, "typed 500 Mb/s is sent as 500 Mb/s");
+    expect(bitrateToSendKbps(2500000) == 1500000, "an old unlocked value is capped at 1.5 Gbps");
+    expect(bitrateToSendKbps(100) == 100, "a stored low number is not raised");
+    expect(bitrateToSendKbps(-5) == 0, "a negative stored number sends nothing");
 
     expect(sunshineConfiguredKbps(20000) == 20000, "sunshine gets the typed number");
     expect(sunshineConfiguredKbps(500000) == 500000, "sunshine gets a kept 500 Mb/s");
@@ -127,10 +111,9 @@ int main()
     const std::string adaptiveOverlay = formatBitrateOverlay(1000000, 74.0, 350000);
     expect(adaptiveOverlay == "1000.0 Mbps requested, 800.0 Mbps estimated encoder target, 74.0 Mbps measured, 350.0 Mbps adaptive", "overlay can add the adaptive target");
 
-    expect(adaptiveBitrateCeilingKbps(20000, false) == 20000, "adaptive ceiling is the user bitrate");
-    expect(adaptiveBitrateCeilingKbps(500000, false) == 500000, "adaptive ceiling allows the host limit");
-    expect(adaptiveBitrateCeilingKbps(1000000, false) == 500000, "adaptive ceiling does not follow the 1 Gbps slider");
-    expect(adaptiveBitrateCeilingKbps(1000000, true) == 500000, "unlimited adaptive ceiling is the host limit");
+    expect(adaptiveBitrateCeilingKbps(20000) == 20000, "adaptive ceiling is the user bitrate");
+    expect(adaptiveBitrateCeilingKbps(500000) == 500000, "adaptive ceiling allows the host limit");
+    expect(adaptiveBitrateCeilingKbps(1000000) == 500000, "adaptive ceiling does not follow the 1 Gbps slider");
 
     expect(gfeLocalInitialKbps(20000) == 16000, "local GFE keeps the 80 percent FEC budget");
     expect(gfeLocalInitialKbps(100000) == 80000, "100 Mb/s request is under the GFE cap after FEC");

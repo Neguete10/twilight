@@ -20,10 +20,10 @@ constexpr double kCutFactor = 0.70;
 constexpr double kRaiseFactor = 1.05;
 constexpr int kAudioCushionKbps = 500;
 
-// Unlimited is capped by the host endpoint. A typed bitrate is capped there too.
-inline int wireCeilingKbps(bool unlimited, int requestedWireKbps)
+// The user's bitrate, never above the host /bitrate endpoint.
+inline int wireCeilingKbps(int requestedWireKbps)
 {
-    if (unlimited || requestedWireKbps > kHostEndpointCapKbps) {
+    if (requestedWireKbps > kHostEndpointCapKbps) {
         return kHostEndpointCapKbps;
     }
     if (requestedWireKbps < 1) {

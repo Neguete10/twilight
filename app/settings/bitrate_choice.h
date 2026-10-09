@@ -4,16 +4,11 @@
 #include <cstdio>
 #include <string>
 
-// The slider and the typed field accept 0.5 Mb/s through 1 Gbps. Unlimited is
-// a separate setting, not the top of the slider. On a local link it asks the
-// host for 1 Gbps. On a remote or unknown link it asks for 500 Mb/s. Nothing
-// this client sends is above 1,500,000 kbps.
-//
-// The old Unlimited control stored the integer 500000, with no separate flag.
-// A missing bitrateunlimited key plus that value, or the word "unlimited",
-// becomes the new setting. Once the key is saved, 500000 is an ordinary
-// typed bitrate. A stored number outside the field is kept until the user
-// changes it, and is still clamped at send time.
+// There is no Unlimited control. The slider and the typed field accept
+// 0.5 Mb/s through 1 Gbps. A stored 500000, or the word "unlimited", loads
+// as 500 Mb/s and is not remapped to the slider top. A stale bitrateunlimited
+// key is ignored. A stored number outside the field is kept until the user
+// changes it. Nothing this client sends is above 1,500,000 kbps.
 //
 // Sunshine reads x-ml-video.configuredBitrateKbps as the number we send. The
 // overlay's encoder-target estimate is 80% of that request (the FEC budget).
@@ -33,20 +28,16 @@ constexpr int kMinKbps = 500;
 // leave an already-saved higher number untouched until the user changes it.
 constexpr int kMaxKbps = 1000000;
 
-// What the old Unlimited control stored. With no bitrateunlimited key, this
-// value migrates to the new Unlimited setting. It is also what Unlimited
-// sends on a remote or unknown link.
+// What the old Unlimited control stored. Loading it keeps 500 Mb/s. It is
+// not remapped to the slider top.
 constexpr int kLegacyUnlimitedKbps = 500000;
-
-// Unlimited on a link we know is local.
-constexpr int kUnlimitedLanKbps = 1000000;
 
 // Hard ceiling for the number placed in the stream configuration.
 constexpr int kAbsoluteSendCapKbps = 1500000;
 
 // Host /bitrate limit. Adaptive bitrate may use the user's bitrate only up
-// to this. The slider and Unlimited on a local link are allowed to go higher
-// in the initial stream configuration.
+// to this. The slider is allowed to go higher in the initial stream
+// configuration.
 constexpr int kHostBitrateLimitKbps = 500000;
 
 // SdpGenerator.c caps the NVIDIA x-nv-video bitrate attributes here.
@@ -206,11 +197,10 @@ inline int estimatedEncoderTargetKbps(int requestedKbps)
     return static_cast<int>(static_cast<double>(requestedKbps) * kEncoderTargetFraction);
 }
 
-// User bitrate, capped at the host's 500000 kbps /bitrate limit. Unlimited
-// uses that cap because the runtime endpoint will not go higher.
-inline int adaptiveBitrateCeilingKbps(int userKbps, bool unlimited)
+// User bitrate, capped at the host's 500000 kbps /bitrate limit.
+inline int adaptiveBitrateCeilingKbps(int userKbps)
 {
-    if (unlimited || userKbps > kHostBitrateLimitKbps) {
+    if (userKbps > kHostBitrateLimitKbps) {
         return kHostBitrateLimitKbps;
     }
     if (userKbps < 0) {
@@ -219,35 +209,16 @@ inline int adaptiveBitrateCeilingKbps(int userKbps, bool unlimited)
     return userKbps;
 }
 
-enum class LinkKind {
-    Lan,
-    Remote,
-};
-
-// Number written into the stream configuration. Unlimited depends on the
-// link. Every other value is the stored preference, never above 1,500,000.
-inline int bitrateToSendKbps(bool unlimited, int storedKbps, LinkKind link)
+// Number written into the stream configuration. The stored preference,
+// never above 1,500,000. A negative stored number sends nothing.
+inline int bitrateToSendKbps(int storedKbps)
 {
-    int kbps;
-    if (unlimited) {
-        kbps = link == LinkKind::Lan ? kUnlimitedLanKbps : kLegacyUnlimitedKbps;
-    }
-    else if (storedKbps < 0) {
-        kbps = 0;
-    }
-    else {
-        kbps = storedKbps;
-    }
+    int kbps = storedKbps < 0 ? 0 : storedKbps;
     if (kbps > kAbsoluteSendCapKbps) {
         kbps = kAbsoluteSendCapKbps;
     }
     return kbps;
 }
-
-struct LoadedBitrate {
-    int kbps;
-    bool unlimited;
-};
 
 // "1000.0 Mbps requested, 800.0 Mbps estimated encoder target, 74.0 Mbps measured"
 // adaptiveWireKbps > 0 appends the live adaptive target.
@@ -295,10 +266,9 @@ inline bool equalsIgnoreCase(const std::string& text, const char* literal)
     return index == text.size() && literal[index] == '\0';
 }
 
-// Numeric prefs load. "unlimited" (any case) is the old stored value,
-// 500000. A numeric string is kept even when it is outside the slider.
-// Anything else uses fallback. Does not throw. loadBitratePref decides
-// whether that value is the Unlimited setting.
+// Numeric prefs load. "unlimited" (any case) loads as 500000. A numeric
+// string is kept even when it is outside the slider. Anything else uses
+// fallback. Does not throw. A stale bitrateunlimited key is not read here.
 inline int storedBitrateKbps(const std::string& text, int fallback)
 {
     const std::string raw = trimCopy(text);
@@ -335,24 +305,6 @@ inline int storedBitrateKbps(const std::string& text, int fallback)
         value = -value;
     }
     return static_cast<int>(value);
-}
-
-// Prefs load. A missing bitrateunlimited key treats 500000 and the word
-// "unlimited" as the new Unlimited setting. An explicit key wins, so a later
-// choice of exactly 500 Mb/s stays a number. Does not throw.
-inline LoadedBitrate loadBitratePref(const std::string& text,
-                                     int fallback,
-                                     bool unlimitedKeyPresent,
-                                     bool unlimitedKey)
-{
-    const std::string raw = trimCopy(text);
-    const bool word = equalsIgnoreCase(raw, "unlimited");
-    const int kbps = storedBitrateKbps(text, fallback);
-    if (unlimitedKeyPresent) {
-        return LoadedBitrate{kbps, unlimitedKey};
-    }
-    const bool legacyUnlimited = word || kbps == kLegacyUnlimitedKbps;
-    return LoadedBitrate{kbps, legacyUnlimited};
 }
 
 } // namespace BitrateChoice
