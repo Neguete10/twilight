@@ -158,6 +158,22 @@ public:
     QVector<int>
     parseQuad(QString quad);
 
+    struct AbrCapabilities {
+        bool reachable;
+        bool runtimeBitrate;
+    };
+
+    // Paired HTTPS. Missing endpoint or a host without runtime_bitrate
+    // returns reachable/runtimeBitrate false. It does not throw.
+    AbrCapabilities
+    getAbrCapabilities();
+
+    // Sets the encoder bitrate directly. The host caps this at 500000 kbps.
+    // Throws on a rejected or failed request. Do not call this from the
+    // render thread or the input thread.
+    int
+    setBitrate(int kbps);
+
     void
     quitApp();
 

@@ -177,6 +177,7 @@ public:
     Q_PROPERTY(bool bitrateUnlimited MEMBER bitrateUnlimited NOTIFY bitrateUnlimitedChanged)
     Q_PROPERTY(bool unlockBitrate MEMBER unlockBitrate NOTIFY unlockBitrateChanged)
     Q_PROPERTY(bool autoAdjustBitrate MEMBER autoAdjustBitrate NOTIFY autoAdjustBitrateChanged)
+    Q_PROPERTY(bool enableAdaptiveBitrate MEMBER enableAdaptiveBitrate NOTIFY enableAdaptiveBitrateChanged)
     Q_PROPERTY(bool enableVsync MEMBER enableVsync NOTIFY enableVsyncChanged)
     Q_PROPERTY(bool gameOptimizations MEMBER gameOptimizations NOTIFY gameOptimizationsChanged)
     Q_PROPERTY(bool playAudioOnHost MEMBER playAudioOnHost NOTIFY playAudioOnHostChanged)
@@ -250,6 +251,7 @@ public:
     int streamRequestedBitrateKbps;
     bool unlockBitrate;
     bool autoAdjustBitrate;
+    bool enableAdaptiveBitrate;
     bool enableVsync;
     bool gameOptimizations;
     bool playAudioOnHost;
@@ -299,6 +301,7 @@ signals:
     void bitrateUnlimitedChanged();
     void unlockBitrateChanged();
     void autoAdjustBitrateChanged();
+    void enableAdaptiveBitrateChanged();
     void enableVsyncChanged();
     void gameOptimizationsChanged();
     void playAudioOnHostChanged();

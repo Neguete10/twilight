@@ -1,4 +1,6 @@
 #include "nvcomputer.h"
+#include "settings/bitrate_choice.h"
+#include "streaming/adaptive_bitrate.h"
 #include <Limelight.h>
 
 #include <QDebug>
@@ -243,6 +245,49 @@ NvHTTP::startApp(QString verb,
     verifyResponseStatus(response);
 
     rtspSessionUrl = getXmlString(response, "sessionUrl0");
+}
+
+NvHTTP::AbrCapabilities
+NvHTTP::getAbrCapabilities()
+{
+    AbrCapabilities result{false, false};
+    try {
+        const QString body = openConnectionToString(m_BaseUrlHttps,
+                                                    "api/abr/capabilities",
+                                                    nullptr,
+                                                    REQUEST_TIMEOUT_MS,
+                                                    NvLogLevel::NVLL_ERROR);
+        result.reachable = true;
+        result.runtimeBitrate = AdaptiveBitrate::hostOffersRuntimeBitrate(body.toStdString());
+    } catch (const GfeHttpResponseException&) {
+    } catch (const QtNetworkReplyException&) {
+    }
+    return result;
+}
+
+int
+NvHTTP::setBitrate(int kbps)
+{
+    if (kbps > BitrateChoice::kHostBitrateLimitKbps) {
+        kbps = BitrateChoice::kHostBitrateLimitKbps;
+    }
+    if (kbps < 1) {
+        kbps = 1;
+    }
+
+    const QString response = openConnectionToString(m_BaseUrlHttps,
+                                                    "bitrate",
+                                                    "bitrate=" + QString::number(kbps),
+                                                    REQUEST_TIMEOUT_MS,
+                                                    NvLogLevel::NVLL_VERBOSE);
+    verifyResponseStatus(response);
+
+    bool ok = false;
+    const int applied = getXmlString(response, "bitrate").toInt(&ok);
+    if (!ok || applied <= 0) {
+        throw GfeHttpResponseException(-1, "Host did not apply a bitrate");
+    }
+    return applied;
 }
 
 void

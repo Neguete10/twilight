@@ -3,6 +3,8 @@
 #include <QSemaphore>
 #include <QQuickWindow>
 
+#include <atomic>
+
 #include <Limelight.h>
 #include <opus_multistream.h>
 #include "settings/streamingpreferences.h"
@@ -19,6 +21,8 @@
 #define SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED 104
 #define SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS 105
 #define SDL_CODE_SET_WINDOW_MODE 106
+
+class AdaptiveBitrateThread;
 
 class SupportedVideoFormatList : public QList<int>
 {
@@ -193,6 +197,10 @@ signals:
 private:
     void exec();
 
+    void startAdaptiveBitrate();
+
+    void stopAdaptiveBitrate();
+
     bool startConnectionAsync();
 
     bool validateLaunch(SDL_Window* testWindow);
@@ -355,6 +363,10 @@ private:
     Uint32 m_PipSnapBackUntil;
     QString m_PipRestoreTitle;
 #endif
+
+    AdaptiveBitrateThread* m_AbrThread = nullptr;
+    std::atomic<bool> m_PoorConnection{false};
+    std::atomic<bool> m_PoorConnectionEdge{false};
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;

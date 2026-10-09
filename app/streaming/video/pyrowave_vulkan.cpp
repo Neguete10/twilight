@@ -18,6 +18,8 @@
   #include "streaming/session.h"
   #include "gui/streamhudstats.h"
   #include "settings/bitrate_choice.h"
+  #include "streaming/adaptive_bitrate.h"
+  #include "streaming/stats.h"
 
   #ifndef __APPLE__
     #include <drm_fourcc.h>
@@ -1023,7 +1025,8 @@ void PyroWaveVulkanVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* o
                     ? prefs->streamRequestedBitrateKbps
                     : prefs->bitrateKbps;
         }
-        const std::string bitrateOverlay = BitrateChoice::formatBitrateOverlay(requestedKbps, m_BwTracker.GetAverageMbps());
+        const std::string bitrateOverlay = BitrateChoice::formatBitrateOverlay(
+                    requestedKbps, m_BwTracker.GetAverageMbps(), AdaptiveBitrate::overlayTargetKbps());
         ret = snprintf(&output[offset], length - offset,
                        "Video stream: %dx%d %.2f FPS (Codec: PyroWave Vulkan %s%s)\n"
                        "Bitrate: %s, Peak (%us): %.1f\n"
@@ -1070,12 +1073,14 @@ void PyroWaveVulkanVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* o
 
 int PyroWaveVulkanVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
     // Per-frame performance stats + overlay text (mirrors FFmpegVideoDecoder).
+    uint32_t abrDropped = 0;
     if (!m_LastFrameNumber) {
         m_ActiveWndVideoStats.measurementStartUs = LiGetMicroseconds();
         m_LastFrameNumber = du->frameNumber;
     } else {
-        m_ActiveWndVideoStats.networkDroppedFrames += du->frameNumber - (m_LastFrameNumber + 1);
-        m_ActiveWndVideoStats.totalFrames += du->frameNumber - (m_LastFrameNumber + 1);
+        abrDropped = du->frameNumber - (m_LastFrameNumber + 1);
+        m_ActiveWndVideoStats.networkDroppedFrames += abrDropped;
+        m_ActiveWndVideoStats.totalFrames += abrDropped;
         m_LastFrameNumber = du->frameNumber;
     }
 
@@ -1129,6 +1134,7 @@ int PyroWaveVulkanVideoDecoder::submitDecodeUnit(PDECODE_UNIT du) {
     m_ActiveWndVideoStats.totalHostProcessingLatency += du->frameHostProcessingLatency;
     m_ActiveWndVideoStats.receivedFrames++;
     m_ActiveWndVideoStats.totalFrames++;
+    Stats::instance().addAbrFrames(abrDropped + 1, abrDropped);
     m_ActiveWndVideoStats.receivedVideoBytes += (uint64_t)du->fullLength;
 
     m_BwTracker.AddBytes(du->fullLength);

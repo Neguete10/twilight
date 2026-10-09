@@ -373,6 +373,7 @@ Item {
             ids.push("mdns")
             ids.push("blocking")
             ids.push("warnings")
+            ids.push("abr")
         }
         else if (section === "advanced") {
             ids.push("codec")
@@ -438,6 +439,7 @@ Item {
         if (id === "mdns") return mdnsSwitch
         if (id === "blocking") return blockingSwitch
         if (id === "warnings") return warningsSwitch
+        if (id === "abr") return abrSwitch
         if (id === "codec") return codecChoice
         if (id === "pyro") return pyroChoice
         if (id === "decoder") return decoderChoice
@@ -537,6 +539,7 @@ Item {
         mdnsSwitch.keyed = id === "mdns"
         blockingSwitch.keyed = id === "blocking"
         warningsSwitch.keyed = id === "warnings"
+        abrSwitch.keyed = id === "abr"
         optimSwitch.keyed = id === "optim"
         quitAfterSwitch.keyed = id === "quitAfter"
         awakeSwitch.keyed = id === "awake"
@@ -634,6 +637,7 @@ Item {
         else if (id === "mdns") mdnsSwitch.activate()
         else if (id === "blocking") blockingSwitch.activate()
         else if (id === "warnings") warningsSwitch.activate()
+        else if (id === "abr") abrSwitch.activate()
         else if (id === "optim") optimSwitch.activate()
         else if (id === "quitAfter") quitAfterSwitch.activate()
         else if (id === "awake") awakeSwitch.activate()
@@ -1302,7 +1306,6 @@ Item {
                         SettingRowV2 {
                             width: parent.width
                             theme: sheet.theme
-                            divider: false
                             title: qsTr("Connection quality warnings")
                             subtitle: qsTr("Tells you when the link is too weak for the current settings.")
                             SwitchV2 {
@@ -1310,6 +1313,19 @@ Item {
                                 theme: sheet.theme
                                 checked: StreamingPreferences.connectionWarnings
                                 onToggled: StreamingPreferences.connectionWarnings = next
+                            }
+                        }
+                        SettingRowV2 {
+                            width: parent.width
+                            theme: sheet.theme
+                            divider: false
+                            title: qsTr("Adaptive bitrate")
+                            subtitle: qsTr("Lowers the bitrate when the link drops frames, and raises it slowly when the link stays clean. Off unless the host allows live changes. The ceiling is the bitrate you chose, and at most 500 Mb/s.")
+                            SwitchV2 {
+                                id: abrSwitch
+                                theme: sheet.theme
+                                checked: StreamingPreferences.enableAdaptiveBitrate
+                                onToggled: StreamingPreferences.enableAdaptiveBitrate = next
                             }
                         }
                     }

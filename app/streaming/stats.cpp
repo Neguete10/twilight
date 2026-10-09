@@ -1,5 +1,6 @@
 #include "stats.h"
 #include "settings/bitrate_choice.h"
+#include "streaming/adaptive_bitrate.h"
 
 #include "streaming/video/ffmpeg-renderers/framepacing/framepacer.h"
 #include "imgui.h"
@@ -64,6 +65,22 @@ void Stats::SetShowGraphs(bool enabled)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_ShowGraphs = enabled;
+}
+
+void Stats::addAbrFrames(uint32_t frames, uint32_t dropped)
+{
+    m_AbrTotalFrames.fetch_add(frames, std::memory_order_relaxed);
+    m_AbrDroppedFrames.fetch_add(dropped, std::memory_order_relaxed);
+}
+
+void Stats::abrFrameTotals(uint32_t* frames, uint32_t* dropped) const
+{
+    if (frames != nullptr) {
+        *frames = m_AbrTotalFrames.load(std::memory_order_relaxed);
+    }
+    if (dropped != nullptr) {
+        *dropped = m_AbrDroppedFrames.load(std::memory_order_relaxed);
+    }
 }
 
 // Called every frame, if true is returned, the stats text is refreshed
@@ -156,6 +173,7 @@ void Stats::SubmitVideoBytesAndReassemblyTime(PDECODE_UNIT decodeUnit, uint32_t 
         m_ActiveWndVideoStats.networkDroppedFrames += droppedFrames;
         m_ActiveWndVideoStats.totalFrames += droppedFrames;
     }
+    addAbrFrames(1 + droppedFrames, droppedFrames);
     ImGuiPlots::instance().observeFloat(PLOT_DROPPED_NETWORK, (float) droppedFrames);
 
     // Host frametime graph, uses raw 90kHz units to avoid rounding errors
@@ -408,7 +426,8 @@ void Stats::formatVideoStats(VIDEO_STATS& stats, char* output, size_t length)
         float fecOverhead = (float) rtpVideoStats->packetCountFec * 1.0 /
                             (rtpVideoStats->packetCountVideo + rtpVideoStats->packetCountFec);
 
-        const std::string bitrateOverlay = BitrateChoice::formatBitrateOverlay(m_BitrateKbps, avgVideoMbps);
+        const std::string bitrateOverlay = BitrateChoice::formatBitrateOverlay(
+                    m_BitrateKbps, avgVideoMbps, AdaptiveBitrate::overlayTargetKbps());
         ret = snprintf(&output[offset],
                        length - offset,
                        "Bitrate: %s, +%.0f%% FEC, Peak (%us): %.1f\n"

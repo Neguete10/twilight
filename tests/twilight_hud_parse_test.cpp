@@ -59,6 +59,18 @@ static void testLegacyBitrateLine()
     expect(sample.bitrateMbps > 79.9 && sample.bitrateMbps < 80.1, "legacy line uses the only bitrate");
 }
 
+static void testAdaptiveSuffixDoesNotStealMeasured()
+{
+    const char* text =
+        "Video stream: 1920x1080 60.00 FPS (Codec: HEVC)\n"
+        "Bitrate: 1000.0 Mbps requested, 800.0 Mbps estimated encoder target, 74.2 Mbps measured, 350.0 Mbps adaptive\n"
+        "Average network latency: 12 ms\n";
+    TwilightHudSample sample;
+    expect(twilightParseHudSample(text, &sample), "adaptive line parses");
+    expect(sample.hasBitrate, "adaptive line has bitrate");
+    expect(sample.bitrateMbps > 74.1 && sample.bitrateMbps < 74.3, "chip stays on the measured number");
+}
+
 static void testRejectsEmpty()
 {
     TwilightHudSample sample;
@@ -73,6 +85,7 @@ int main()
     testPyroWaveSample();
     testFfmpegSampleDropsFec();
     testLegacyBitrateLine();
+    testAdaptiveSuffixDoesNotStealMeasured();
     testRejectsEmpty();
     if (g_Failures != 0) {
         std::printf("%d failure(s)\n", g_Failures);

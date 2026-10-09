@@ -2,6 +2,8 @@
 #include "gui/streamhudstats.h"
 #include "settings/bitrate_choice.h"
 #include "settings/streamingpreferences.h"
+#include "streaming/adaptive_bitrate.h"
+#include "streaming/adaptive_bitrate_worker.h"
 #include "streaming/streamutils.h"
 #include "backend/richpresencemanager.h"
 
@@ -190,6 +192,16 @@ void Session::clConnectionStatusUpdate(int connectionStatus)
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Connection status update: %d",
                 connectionStatus);
+
+    if (s_ActiveSession != nullptr) {
+        if (connectionStatus == CONN_STATUS_POOR) {
+            s_ActiveSession->m_PoorConnection.store(true, std::memory_order_relaxed);
+            s_ActiveSession->m_PoorConnectionEdge.store(true, std::memory_order_relaxed);
+        }
+        else if (connectionStatus == CONN_STATUS_OKAY) {
+            s_ActiveSession->m_PoorConnection.store(false, std::memory_order_relaxed);
+        }
+    }
 
     if (!s_ActiveSession->m_Preferences->connectionWarnings) {
         return;
@@ -1989,6 +2001,39 @@ bool Session::startConnectionAsync()
     return true;
 }
 
+void Session::startAdaptiveBitrate()
+{
+    if (m_AbrThread != nullptr || !m_Preferences->enableAdaptiveBitrate) {
+        return;
+    }
+
+    const int channels = CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(m_StreamConfig.audioConfiguration);
+    const bool lan = m_StreamConfig.streamingRemotely == STREAM_CFG_LOCAL;
+    const int audioKbps = AdaptiveBitrate::assumedAudioKbps(channels, lan);
+    const int ceiling = AdaptiveBitrate::wireCeilingKbps(
+                m_Preferences->bitrateUnlimited, m_StreamConfig.bitrate);
+    m_PoorConnection.store(false, std::memory_order_relaxed);
+    m_PoorConnectionEdge.store(false, std::memory_order_relaxed);
+    m_AbrThread = new AdaptiveBitrateThread(m_Computer,
+                                            ceiling,
+                                            audioKbps,
+                                            &m_PoorConnection,
+                                            &m_PoorConnectionEdge);
+    m_AbrThread->start();
+}
+
+void Session::stopAdaptiveBitrate()
+{
+    if (m_AbrThread == nullptr) {
+        return;
+    }
+    m_AbrThread->requestStop();
+    m_AbrThread->wait();
+    delete m_AbrThread;
+    m_AbrThread = nullptr;
+    AdaptiveBitrate::setOverlayTargetKbps(0);
+}
+
 void Session::flushWindowEvents()
 {
     // Pump events to ensure all pending OS events are posted
@@ -2251,6 +2296,8 @@ void Session::exec()
 
     // Toggle the stats overlay if requested by the user
     m_OverlayManager.setOverlayState(Overlay::OverlayDebug, m_Preferences->showPerformanceOverlay);
+
+    startAdaptiveBitrate();
 
     // Switch to async logging mode when we enter the SDL loop
     StreamUtils::enterAsyncLoggingMode();
@@ -2639,6 +2686,7 @@ void Session::exec()
     }
 
 DispatchDeferredCleanup:
+    stopAdaptiveBitrate();
     setStreamLoopAcceptsQuit(false);
     SDL_FlushEvent(SDL_QUIT);
 #ifdef Q_OS_DARWIN

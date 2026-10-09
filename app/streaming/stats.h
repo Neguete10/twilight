@@ -5,6 +5,7 @@
 #include "qpc.h"
 #include "settings/streamingpreferences.h"
 
+#include <atomic>
 #include <mutex>
 #include <string>
 
@@ -66,6 +67,11 @@ class Stats
     void SubmitPresentTimeUs(uint64_t presentTimeUs, int presentMode);
     void SubmitRenderStats(double preWaitTimeMs, double renderTimeMs, bool hitDeadline);
 
+    // Cumulative frame counters for adaptive bitrate. Safe to call from the
+    // decode thread and to read from the adaptive-bitrate thread.
+    void addAbrFrames(uint32_t frames, uint32_t dropped);
+    void abrFrameTotals(uint32_t* frames, uint32_t* dropped) const;
+
   private:
 	Stats();
 	Stats(const Stats&) = delete;
@@ -75,6 +81,8 @@ class Stats
     void formatVideoStats(VIDEO_STATS& stats, char* output, size_t length);
 
     std::mutex m_mutex;
+    std::atomic<uint32_t> m_AbrTotalFrames{0};
+    std::atomic<uint32_t> m_AbrDroppedFrames{0};
 
     // Moonlight stats overlay
     VIDEO_STATS m_ActiveWndVideoStats;
