@@ -49,7 +49,9 @@ void Stats::SetMetadata(int videoFormat, int width, int height)
     m_Height = height;
 
     StreamingPreferences *prefs = StreamingPreferences::get();
-    m_BitrateKbps = prefs->bitrateKbps;
+    m_BitrateKbps = prefs->streamRequestedBitrateKbps > 0
+            ? prefs->streamRequestedBitrateKbps
+            : prefs->bitrateKbps;
 }
 
 bool Stats::GetShowGraphs()

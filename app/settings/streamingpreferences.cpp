@@ -18,6 +18,7 @@
 #define SER_HEIGHT "height"
 #define SER_FPS "fps"
 #define SER_BITRATE "bitrate"
+#define SER_BITRATE_UNLIMITED "bitrateunlimited"
 #define SER_UNLOCK_BITRATE "unlockbitrate"
 #define SER_AUTOADJUSTBITRATE "autoadjustbitrate"
 #define SER_FULLSCREEN "fullscreen"
@@ -148,12 +149,19 @@ void StreamingPreferences::reload()
     enableYUV444 = settings.value(SER_YUV444, false).toBool();
     {
         const int defaultBitrate = getDefaultBitrate(width, height, fps, enableYUV444);
-        // Keep a stored Unlimited/500000, and keep an older unlocked number.
-        // A missing or unreadable value uses the resolution default.
-        bitrateKbps = BitrateChoice::storedBitrateKbps(
+        // A missing bitrateunlimited key plus 500000, or the word "unlimited",
+        // is the old Unlimited control. An explicit key is left as saved.
+        // A missing or unreadable number uses the resolution default.
+        const bool unlimitedKeyPresent = settings.contains(SER_BITRATE_UNLIMITED);
+        const BitrateChoice::LoadedBitrate loaded = BitrateChoice::loadBitratePref(
                     settings.value(SER_BITRATE, defaultBitrate).toString().toStdString(),
-                    defaultBitrate);
+                    defaultBitrate,
+                    unlimitedKeyPresent,
+                    settings.value(SER_BITRATE_UNLIMITED, false).toBool());
+        bitrateKbps = loaded.kbps;
+        bitrateUnlimited = loaded.unlimited;
     }
+    streamRequestedBitrateKbps = 0;
     unlockBitrate = settings.value(SER_UNLOCK_BITRATE, false).toBool();
     autoAdjustBitrate = settings.value(SER_AUTOADJUSTBITRATE, true).toBool();
     enableVsync = settings.value(SER_VSYNC, true).toBool();
@@ -432,6 +440,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_HEIGHT, height);
     settings.setValue(SER_FPS, fps);
     settings.setValue(SER_BITRATE, bitrateKbps);
+    settings.setValue(SER_BITRATE_UNLIMITED, bitrateUnlimited);
     settings.setValue(SER_UNLOCK_BITRATE, unlockBitrate);
     settings.setValue(SER_AUTOADJUSTBITRATE, autoAdjustBitrate);
     settings.setValue(SER_VSYNC, enableVsync);

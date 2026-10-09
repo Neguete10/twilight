@@ -1019,7 +1019,9 @@ void PyroWaveVulkanVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* o
     if (stats.receivedFps > 0) {
         int requestedKbps = 0;
         if (StreamingPreferences* prefs = StreamingPreferences::get()) {
-            requestedKbps = prefs->bitrateKbps;
+            requestedKbps = prefs->streamRequestedBitrateKbps > 0
+                    ? prefs->streamRequestedBitrateKbps
+                    : prefs->bitrateKbps;
         }
         const std::string bitrateOverlay = BitrateChoice::formatBitrateOverlay(requestedKbps, m_BwTracker.GetAverageMbps());
         ret = snprintf(&output[offset], length - offset,

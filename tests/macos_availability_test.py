@@ -67,8 +67,9 @@ def test_tree(checker):
     expect("CVDisplayLink" in display, "macOS 13 display link falls back to CVDisplayLink")
     expect("@available(macOS 14.0, *)" in display, "CADisplayLink stays inside a 14.0 check")
     sheet = (ROOT / "app/gui/ui/v2/SettingsSheetV2.qml").read_text(encoding="utf-8")
-    expect("Unlimited" not in sheet, "settings has no Unlimited control")
+    expect("Unlimited" in sheet, "settings has an Unlimited control")
     expect("800 Mb/s" in sheet, "help text names the wired gigabit ceiling")
+    expect("as much as the network allows" in sheet, "unlimited help says the host follows the network")
 
 
 def main():

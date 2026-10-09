@@ -1,5 +1,6 @@
 #include "session.h"
 #include "gui/streamhudstats.h"
+#include "settings/bitrate_choice.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
 #include "backend/richpresencemanager.h"
@@ -858,8 +859,9 @@ bool Session::initialize(QQuickWindow* qtWindow)
 #endif
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Video bitrate: %d kbps",
-                m_StreamConfig.bitrate);
+                "Video bitrate preference: %d kbps%s",
+                m_Preferences->bitrateKbps,
+                m_Preferences->bitrateUnlimited ? " (Unlimited)" : "");
 
     RAND_bytes(reinterpret_cast<unsigned char*>(m_StreamConfig.remoteInputAesKey),
                sizeof(m_StreamConfig.remoteInputAesKey));
@@ -1907,11 +1909,13 @@ bool Session::startConnectionAsync()
         hostInfo.rtspSessionUrl = rtspSessionUrlStr.data();
     }
 
+    BitrateChoice::LinkKind link = BitrateChoice::LinkKind::Remote;
     if (m_Preferences->packetSize != 0) {
         // Override default packet size and remote streaming detection
         // NB: Using STREAM_CFG_AUTO will cap our packet size at 1024 for remote hosts.
         m_StreamConfig.streamingRemotely = STREAM_CFG_LOCAL;
         m_StreamConfig.packetSize = m_Preferences->packetSize;
+        link = BitrateChoice::LinkKind::Lan;
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Using custom packet size: %d bytes",
                     m_Preferences->packetSize);
@@ -1927,16 +1931,20 @@ bool Session::startConnectionAsync()
             // This address is on-link, so treat it as a local address
             // even if it's not in RFC 1918 space or it's an IPv6 address.
             m_StreamConfig.streamingRemotely = STREAM_CFG_LOCAL;
+            link = BitrateChoice::LinkKind::Lan;
             break;
         case NvComputer::RI_VPN:
             // It looks like our route to this PC is over a VPN, so cap at 1024 bytes.
             // Treat it as remote even if the target address is in RFC 1918 address space.
             m_StreamConfig.streamingRemotely = STREAM_CFG_REMOTE;
             m_StreamConfig.packetSize = 1024;
+            link = BitrateChoice::LinkKind::Remote;
             break;
         default:
             // If we don't have reachability info, let moonlight-common-c decide.
+            // Unlimited stays at the remote number until the link is known to be local.
             m_StreamConfig.streamingRemotely = STREAM_CFG_AUTO;
+            link = BitrateChoice::LinkKind::Remote;
             break;
         }
     }
@@ -1946,18 +1954,26 @@ bool Session::startConnectionAsync()
     // This should provide equivalent image quality for YUV420 as the stream would have
     // had if the host supported YUV444 (though obviously with 4:2:0 subsampling).
     // If the user has adjusted the bitrate from default, we'll assume they really wanted
-    // that value and not second guess them.
-    if (m_Preferences->enableYUV444 &&
-        !(m_StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_YUV444) &&
-        m_StreamConfig.bitrate == StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
-                                                                          m_StreamConfig.height,
-                                                                          m_StreamConfig.fps,
-                                                                          true)) {
-        m_StreamConfig.bitrate = StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
-                                                                         m_StreamConfig.height,
-                                                                         m_StreamConfig.fps,
-                                                                         false);
+    // that value and not second guess them. Unlimited is its own choice.
+    int chosenKbps = m_Preferences->bitrateKbps;
+    if (!m_Preferences->bitrateUnlimited &&
+            m_Preferences->enableYUV444 &&
+            !(m_StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_YUV444) &&
+            chosenKbps == StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
+                                                                  m_StreamConfig.height,
+                                                                  m_StreamConfig.fps,
+                                                                  true)) {
+        chosenKbps = StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
+                                                             m_StreamConfig.height,
+                                                             m_StreamConfig.fps,
+                                                             false);
     }
+    m_StreamConfig.bitrate = BitrateChoice::bitrateToSendKbps(
+                m_Preferences->bitrateUnlimited, chosenKbps, link);
+    m_Preferences->streamRequestedBitrateKbps = m_StreamConfig.bitrate;
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Video bitrate for this link: %d kbps",
+                m_StreamConfig.bitrate);
 
     int err = LiStartConnection(&hostInfo, &m_StreamConfig, &k_ConnCallbacks,
                                 &m_VideoCallbacks, &m_AudioCallbacks,

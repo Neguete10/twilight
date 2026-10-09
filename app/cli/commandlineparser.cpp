@@ -424,6 +424,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     // Resolve --bitrate option
     if (parser.isSet("bitrate")) {
         preferences->bitrateKbps = parser.getIntOption("bitrate");
+        preferences->bitrateUnlimited = false;
         if (!inRange(preferences->bitrateKbps, BitrateChoice::kMinKbps, BitrateChoice::kMaxKbps)) {
             fprintf(stderr, "Warning: Bitrate is out of the supported range (%d - %d Kbps). Performance may suffer!\n",
                     BitrateChoice::kMinKbps, BitrateChoice::kMaxKbps);
@@ -431,6 +432,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     } else if (displaySet || parser.isSet("fps")) {
         preferences->bitrateKbps = preferences->getDefaultBitrate(
             preferences->width, preferences->height, preferences->fps, preferences->enableYUV444);
+        preferences->bitrateUnlimited = false;
     }
 
     // Resolve --packet-size option

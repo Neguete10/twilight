@@ -17,7 +17,7 @@ static void testPyroWaveSample()
 {
     const char* text =
         "Video stream: 2560x1440 120.00 FPS (Codec: PyroWave Vulkan 4:2:0)\n"
-        "Bitrate: 100.0 Mbps requested, 80.0 Mbps encoder target, 74.2 Mbps measured, Peak (3s): 90.5\n"
+        "Bitrate: 100.0 Mbps requested, 80.0 Mbps estimated encoder target, 74.2 Mbps measured, Peak (3s): 90.5\n"
         "Incoming frame rate from network: 119.50 FPS\n"
         "Average network latency: N/A\n";
     TwilightHudSample sample;
