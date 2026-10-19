@@ -319,6 +319,7 @@ HEADERS += \
     cli/startstream.h \
     settings/streamingpreferences.h \
     settings/bitrate_choice.h \
+    settings/vsync_choice.h \
     streaming/input/input.h \
     streaming/session.h \
     streaming/audio/renderers/renderer.h \

@@ -947,7 +947,9 @@ Item {
                             width: parent.width
                             theme: sheet.theme
                             title: qsTr("V-Sync")
-                            subtitle: qsTr("Turn off for lower latency. You may see tearing.")
+                            subtitle: StreamingPreferences.windowMode === StreamingPreferences.WM_WINDOWED
+                                      ? qsTr("A window always presents with V-Sync. This switch is saved for fullscreen and borderless.")
+                                      : qsTr("Turn off for lower latency. You may see tearing.")
                             SwitchV2 {
                                 id: vsyncSwitch
                                 theme: sheet.theme
