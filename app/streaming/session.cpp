@@ -710,6 +710,7 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_MouseEmulationRefCount(0),
       m_FlushingWindowEventsRef(0),
       m_ShouldExit(false),
+      m_QuitHostApp(false),
       m_HostAppLaunched(false),
       m_AsyncConnectionSuccess(false),
       m_PortTestResults(0),
@@ -1506,7 +1507,7 @@ private:
         // Only quit the running app if our session terminated gracefully
         bool shouldQuit =
                 !m_Session->m_UnexpectedTermination &&
-                m_Session->m_Preferences->quitAppAfter;
+                (m_Session->m_Preferences->quitAppAfter || m_Session->m_QuitHostApp);
 
         // Notify the UI
         if (shouldQuit) {
@@ -2052,12 +2053,10 @@ void Session::flushWindowEvents()
 
 void Session::setShouldExit(bool quitHostApp)
 {
-    // If the caller has explicitly asked us to quit the host app,
-    // override whatever the preferences say and do it. If the
-    // caller doesn't override to force quit, let the preferences
-    // dictate what we do.
+    // Quit the host app for this stream only. Writing quitAppAfter here
+    // turned the Settings switch on, and the next save stored that.
     if (quitHostApp) {
-        m_Preferences->quitAppAfter = true;
+        m_QuitHostApp = true;
     }
 
     m_ShouldExit = true;

@@ -328,6 +328,9 @@ private:
     int m_FlushingWindowEventsRef;
     QStringList m_LaunchWarnings;
     bool m_ShouldExit;
+    // Set by "Disconnect and close" and the quit-and-exit shortcut.
+    // This stream only. The saved quitAppAfter switch is left alone.
+    bool m_QuitHostApp;
     bool m_HostAppLaunched;
 
     bool m_AsyncConnectionSuccess;

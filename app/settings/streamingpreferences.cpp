@@ -159,7 +159,10 @@ void StreamingPreferences::reload()
     }
     streamRequestedBitrateKbps = 0;
     unlockBitrate = settings.value(SER_UNLOCK_BITRATE, false).toBool();
-    autoAdjustBitrate = settings.value(SER_AUTOADJUSTBITRATE, true).toBool();
+    autoAdjustBitrate = BitrateChoice::autoAdjustAfterLoad(
+                settings.value(SER_AUTOADJUSTBITRATE, true).toBool(),
+                bitrateKbps,
+                getDefaultBitrate(width, height, fps, enableYUV444));
     enableAdaptiveBitrate = settings.value(SER_ADAPTIVE_BITRATE, false).toBool();
     const bool vsyncKeyPresent = settings.contains(SER_VSYNC);
     enableVsync = settings.value(SER_VSYNC, true).toBool();
@@ -216,10 +219,12 @@ void StreamingPreferences::reload()
 #ifdef Q_OS_DARWIN
     rendererSelection = static_cast<RendererSelection>(settings.value(SER_RENDERER,
                                                   static_cast<int>(RendererSelection::RS_METAL)).toInt());
+#endif
+    // Read on every platform. save() always writes these keys. Leaving them
+    // unread off macOS replaced a stored value with an uninitialized one.
     vtMetalFramesInFlight = settings.value(SER_VTMETALFRAMESINFLIGHT, 3).toInt();
     audioRenderer = static_cast<AudioRenderer>(settings.value(SER_AUDIO_RENDERER,
                                                     static_cast<int>(AudioRenderer::AUDIO_RENDERER_COREAUDIO)).toInt());
-#endif
 #ifdef Q_OS_WIN32
     rendererSelection = static_cast<RendererSelection>(settings.value(SER_RENDERER,
                                                     static_cast<int>(RendererSelection::RS_D3D11)).toInt());
@@ -661,6 +666,12 @@ int StreamingPreferences::bitrateKbpsFromMbpsText(const QString& text) const
 QString StreamingPreferences::bitrateMbpsText(int kbps) const
 {
     return QString::fromStdString(BitrateChoice::formatMbps(kbps));
+}
+
+bool StreamingPreferences::tracksDisplayAfterBitrate(int kbps) const
+{
+    return BitrateChoice::tracksDisplayAfterBitrateChoice(
+                kbps, getDefaultBitrate(width, height, fps, enableYUV444));
 }
 
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)

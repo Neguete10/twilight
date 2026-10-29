@@ -202,7 +202,7 @@ Item {
             return
         StreamingPreferences.width = w
         StreamingPreferences.height = h
-        StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(w, h, StreamingPreferences.fps, StreamingPreferences.enableYUV444)
+        applyAutomaticBitrate()
         StreamingPreferences.save()
         rebuildChoices()
     }
@@ -216,7 +216,7 @@ Item {
         }
         StreamingPreferences.width = w
         StreamingPreferences.height = h
-        StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(w, h, StreamingPreferences.fps, StreamingPreferences.enableYUV444)
+        applyAutomaticBitrate()
         StreamingPreferences.save()
         customResOpen = false
         rebuildChoices()
@@ -234,8 +234,7 @@ Item {
         if (StreamingPreferences.fps === rate)
             return
         StreamingPreferences.fps = rate
-        StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(
-                    StreamingPreferences.width, StreamingPreferences.height, rate, StreamingPreferences.enableYUV444)
+        applyAutomaticBitrate()
         StreamingPreferences.save()
         rebuildChoices()
     }
@@ -250,9 +249,18 @@ Item {
         customFpsOpen = false
     }
 
+    function applyAutomaticBitrate() {
+        if (!StreamingPreferences.autoAdjustBitrate)
+            return
+        StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(
+                    StreamingPreferences.width, StreamingPreferences.height,
+                    StreamingPreferences.fps, StreamingPreferences.enableYUV444)
+    }
+
     function commitBitrateKbps(kbps) {
         if (kbps > 150000)
             StreamingPreferences.unlockBitrate = true
+        StreamingPreferences.autoAdjustBitrate = StreamingPreferences.tracksDisplayAfterBitrate(kbps)
         StreamingPreferences.bitrateKbps = kbps
         bitrateInput.text = StreamingPreferences.bitrateMbpsText(kbps)
     }
@@ -297,8 +305,7 @@ Item {
         if (StreamingPreferences.enableYUV444 === next)
             return
         StreamingPreferences.enableYUV444 = next
-        StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(
-                    StreamingPreferences.width, StreamingPreferences.height, StreamingPreferences.fps, next)
+        applyAutomaticBitrate()
     }
 
     function setMdns(next) {

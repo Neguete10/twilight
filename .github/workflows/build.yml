@@ -74,3 +74,4 @@ jobs:
             -Iapp/gui -o /tmp/hud_parse_test
           /tmp/hud_parse_test
           python3 tests/stream_quit_teardown_test.py
+          python3 tests/preference_persistence_test.py

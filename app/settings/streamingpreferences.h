@@ -23,6 +23,10 @@ public:
     // The previous saved value is left alone; callers must not substitute a clamp.
     Q_INVOKABLE int bitrateKbpsFromMbpsText(const QString& text) const;
     Q_INVOKABLE QString bitrateMbpsText(int kbps) const;
+    // True when a manual bitrate is still the default for the current
+    // resolution, frame rate, and 4:4:4 mode, so later display changes
+    // may replace it. Any other number stops that replacement.
+    Q_INVOKABLE bool tracksDisplayAfterBitrate(int kbps) const;
 
     Q_INVOKABLE void save();
 
