@@ -50,4 +50,4 @@ Developer ID signing and notarization are hooks only. They do not run unless you
 
 The version in this tree is `7.1.1`. That number is not a published release.
 
-7.1.1 keeps a saved V-Sync choice across relaunch. Ending one stream with quit-the-host-app no longer turns that Settings switch on. A custom bitrate is no longer replaced when resolution, frame rate, or 4:4:4 changes.
+7.1.1 keeps a saved V-Sync choice across relaunch. A custom bitrate is no longer replaced when resolution, frame rate, or 4:4:4 changes.

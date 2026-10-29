@@ -1411,7 +1411,10 @@ Item {
                                 id: quitAfterSwitch
                                 theme: sheet.theme
                                 checked: StreamingPreferences.quitAppAfter
-                                onToggled: StreamingPreferences.quitAppAfter = next
+                                onToggled: {
+                                    StreamingPreferences.quitAppAfter = next
+                                    StreamingPreferences.save()
+                                }
                             }
                         }
                         SettingRowV2 {

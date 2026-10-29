@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Preferences that must not be rewritten by another action.
 
-No Qt. Locks the two load/save bugs found after the V-Sync fix:
-ending one stream with "quit the host app" must not store that, and a
-custom bitrate must survive a resolution, frame rate, or 4:4:4 change.
+No Qt. A custom bitrate must survive a resolution, frame rate, or 4:4:4
+change. Ending a stream with quit-the-host-app stores quitAppAfter.
 """
 
 import sys
@@ -37,15 +36,20 @@ def _outside_platform_if(load, needle):
     return depth == 0
 
 
-def test_quit_host_app_is_not_saved():
+def test_quit_host_app_is_saved():
     session = (ROOT / "app/streaming/session.cpp").read_text(encoding="utf-8")
     header = (ROOT / "app/streaming/session.h").read_text(encoding="utf-8")
     setter = session.split("void Session::setShouldExit", 1)[1].split("void Session::start", 1)[0]
-    expect("m_Preferences->quitAppAfter" not in setter, "setShouldExit does not write the saved switch")
-    expect("m_QuitHostApp = true" in setter, "setShouldExit records this stream only")
-    expect("m_QuitHostApp" in header, "the session keeps its own quit flag")
+    expect('setProperty("quitAppAfter", true)' in setter, "quit-and-exit stores quitAppAfter")
+    expect("m_QuitHostApp" not in setter and "m_QuitHostApp" not in header, "quit-and-exit is not session-local")
+    expect('"save"' in setter, "quit-and-exit writes the preference immediately")
     cleanup = session.split("bool shouldQuit =", 1)[1].split(";", 1)[0]
-    expect("quitAppAfter" in cleanup and "m_QuitHostApp" in cleanup, "cleanup honors the saved switch or this stream")
+    expect("quitAppAfter" in cleanup and "m_QuitHostApp" not in cleanup, "later streams follow the saved switch")
+    sheet = (ROOT / "app/gui/ui/v2/SettingsSheetV2.qml").read_text(encoding="utf-8")
+    toggle = sheet.split("id: quitAfterSwitch", 1)[1].split("SettingRowV2", 1)[0]
+    expect("StreamingPreferences.quitAppAfter = next" in toggle, "the settings switch writes quitAppAfter")
+    expect("StreamingPreferences.save()" in toggle, "the settings switch saves immediately")
+    expect("checked: StreamingPreferences.quitAppAfter" in toggle, "the switch shows the saved value")
 
 
 def test_custom_bitrate_survives_display_changes():
@@ -67,7 +71,7 @@ def test_custom_bitrate_survives_display_changes():
 
 
 def main():
-    test_quit_host_app_is_not_saved()
+    test_quit_host_app_is_saved()
     test_custom_bitrate_survives_display_changes()
     if FAILURES:
         print("%d failure(s)" % FAILURES)
