@@ -48,4 +48,6 @@ Developer ID signing and notarization are hooks only. They do not run unless you
 
 `TWILIGHT_MAS=1` is the optional Mac App Store package path. It is not the desktop disk image.
 
-The version in this tree is `7.1.0`. That number is not a published release.
+The version in this tree is `7.1.1`. That number is not a published release.
+
+7.1.1 keeps a saved V-Sync choice across relaunch. Ending one stream with quit-the-host-app no longer turns that Settings switch on. A custom bitrate is no longer replaced when resolution, frame rate, or 4:4:4 changes.
