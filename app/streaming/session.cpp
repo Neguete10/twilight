@@ -2055,9 +2055,11 @@ void Session::setShouldExit(bool quitHostApp)
     // If the caller has explicitly asked us to quit the host app,
     // override whatever the preferences say and do it. If the
     // caller doesn't override to force quit, let the preferences
-    // dictate what we do.
+    // dictate what we do. This stays in quitAppAfter so the next
+    // stream does the same, and the Settings switch matches it.
     if (quitHostApp) {
-        m_Preferences->quitAppAfter = true;
+        m_Preferences->setProperty("quitAppAfter", true);
+        QMetaObject::invokeMethod(m_Preferences, "save", Qt::QueuedConnection);
     }
 
     m_ShouldExit = true;

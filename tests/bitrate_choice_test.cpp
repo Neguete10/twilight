@@ -111,6 +111,13 @@ int main()
     const std::string adaptiveOverlay = formatBitrateOverlay(1000000, 74.0, 350000);
     expect(adaptiveOverlay == "1000.0 Mbps requested, 800.0 Mbps estimated encoder target, 74.0 Mbps measured, 350.0 Mbps adaptive", "overlay can add the adaptive target");
 
+    expect(tracksDisplayAfterBitrateChoice(20000, 20000), "the default bitrate still tracks the display");
+    expect(!tracksDisplayAfterBitrateChoice(18400, 20000), "a custom bitrate stops tracking the display");
+    expect(!tracksDisplayAfterBitrateChoice(500000, 20000), "a kept high bitrate stops tracking the display");
+    expect(autoAdjustAfterLoad(true, 20000, 20000), "tracking stays on when the stored number is the default");
+    expect(!autoAdjustAfterLoad(true, 18400, 20000), "a custom number stops tracking on load");
+    expect(!autoAdjustAfterLoad(false, 20000, 20000), "an explicit off stays off");
+
     expect(adaptiveBitrateCeilingKbps(20000) == 20000, "adaptive ceiling is the user bitrate");
     expect(adaptiveBitrateCeilingKbps(500000) == 500000, "adaptive ceiling allows the host limit");
     expect(adaptiveBitrateCeilingKbps(1000000) == 500000, "adaptive ceiling does not follow the 1 Gbps slider");

@@ -1,5 +1,6 @@
 #include "streamingpreferences.h"
 #include "bitrate_choice.h"
+#include "vsync_choice.h"
 #include "streaming/audio/microphone/mic_permission.h"
 #include "utils.h"
 
@@ -158,8 +159,12 @@ void StreamingPreferences::reload()
     }
     streamRequestedBitrateKbps = 0;
     unlockBitrate = settings.value(SER_UNLOCK_BITRATE, false).toBool();
-    autoAdjustBitrate = settings.value(SER_AUTOADJUSTBITRATE, true).toBool();
+    autoAdjustBitrate = BitrateChoice::autoAdjustAfterLoad(
+                settings.value(SER_AUTOADJUSTBITRATE, true).toBool(),
+                bitrateKbps,
+                getDefaultBitrate(width, height, fps, enableYUV444));
     enableAdaptiveBitrate = settings.value(SER_ADAPTIVE_BITRATE, false).toBool();
+    const bool vsyncKeyPresent = settings.contains(SER_VSYNC);
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     gameOptimizations = settings.value(SER_GAMEOPTS, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
@@ -214,10 +219,12 @@ void StreamingPreferences::reload()
 #ifdef Q_OS_DARWIN
     rendererSelection = static_cast<RendererSelection>(settings.value(SER_RENDERER,
                                                   static_cast<int>(RendererSelection::RS_METAL)).toInt());
+#endif
+    // Read on every platform. save() always writes these keys. Leaving them
+    // unread off macOS replaced a stored value with an uninitialized one.
     vtMetalFramesInFlight = settings.value(SER_VTMETALFRAMESINFLIGHT, 3).toInt();
     audioRenderer = static_cast<AudioRenderer>(settings.value(SER_AUDIO_RENDERER,
                                                     static_cast<int>(AudioRenderer::AUDIO_RENDERER_COREAUDIO)).toInt());
-#endif
 #ifdef Q_OS_WIN32
     rendererSelection = static_cast<RendererSelection>(settings.value(SER_RENDERER,
                                                     static_cast<int>(RendererSelection::RS_D3D11)).toInt());
@@ -273,13 +280,14 @@ void StreamingPreferences::reload()
     publishHudSamplingFlag();
     refreshMicrophoneStatus();
 
-    // old enableVsync is now based on presentMode
-    if (presentMode == PresentMode::PRESENT_NO_VSYNC) {
-        enableVsync = false;
-    }
-    else {
-        enableVsync = true;
-    }
+    // The Video switch is the vsync key. presentMode is a separate request:
+    // Auto (the default the switch leaves alone) still selects VRR in
+    // fullscreen on an external VRR display. Treating every mode other than
+    // No V-Sync as "switch on" discarded a saved Off at the next launch, and
+    // the following save wrote vsync back to 1.
+    enableVsync = VsyncChoice::loadedEnableVsync(enableVsync,
+                                                  vsyncKeyPresent,
+                                                  static_cast<int>(presentMode));
 
 
     // Perform default settings updates as required based on last default version
@@ -658,6 +666,12 @@ int StreamingPreferences::bitrateKbpsFromMbpsText(const QString& text) const
 QString StreamingPreferences::bitrateMbpsText(int kbps) const
 {
     return QString::fromStdString(BitrateChoice::formatMbps(kbps));
+}
+
+bool StreamingPreferences::tracksDisplayAfterBitrate(int kbps) const
+{
+    return BitrateChoice::tracksDisplayAfterBitrateChoice(
+                kbps, getDefaultBitrate(width, height, fps, enableYUV444));
 }
 
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)
