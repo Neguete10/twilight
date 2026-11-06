@@ -141,7 +141,7 @@ def test_about():
     expect("Licenses" not in qml, "About UI has no Licenses page")
     expect("NOTICES.txt" not in qml and "GPL-3.0.txt" not in qml, "About UI does not open license files")
     version = (ROOT / "app/version.txt").read_text(encoding="utf-8").strip()
-    expect(version == "7.1.0", "version is 7.1.0")
+    expect(version == "7.1.1", "version is 7.1.1")
     entitlements = plistlib.loads((ROOT / "app/deploy/macos/Twilight-DeveloperID.entitlements").read_bytes())
     expect(entitlements == {"com.apple.security.device.audio-input": True},
            "Developer ID entitlements hold only the Hardened Runtime audio-input exception")

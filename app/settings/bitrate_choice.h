@@ -197,6 +197,26 @@ inline int estimatedEncoderTargetKbps(int requestedKbps)
     return static_cast<int>(static_cast<double>(requestedKbps) * kEncoderTargetFraction);
 }
 
+// A typed or slider bitrate keeps tracking resolution, frame rate, and
+// 4:4:4 only when it is still the default for the current display. Any
+// other number is the user's choice and must survive the next display change.
+inline bool tracksDisplayAfterBitrateChoice(int chosenKbps, int defaultForCurrentDisplayKbps)
+{
+    return chosenKbps == defaultForCurrentDisplayKbps;
+}
+
+// autoAdjustBitrate defaults to on. The v2 bitrate field used to leave it
+// on after a custom number, so the next resolution change replaced that
+// number. A stored custom number does not track. An explicit off stays off
+// even when the number happens to be the current default.
+inline bool autoAdjustAfterLoad(bool savedAutoAdjust, int savedBitrateKbps, int defaultForDisplayKbps)
+{
+    if (!savedAutoAdjust) {
+        return false;
+    }
+    return savedBitrateKbps == defaultForDisplayKbps;
+}
+
 // User bitrate, capped at the host's 500000 kbps /bitrate limit.
 inline int adaptiveBitrateCeilingKbps(int userKbps)
 {
