@@ -209,6 +209,7 @@ public:
     Q_PROPERTY(QString lastSelectedHostUuid READ lastSelectedHostUuid WRITE setLastSelectedHostUuid NOTIFY lastSelectedHostUuidChanged)
     Q_PROPERTY(bool enableHdr MEMBER enableHdr NOTIFY enableHdrChanged)
     Q_PROPERTY(bool enableYUV444 MEMBER enableYUV444 NOTIFY enableYUV444Changed)
+    Q_PROPERTY(bool enableMetalFxUpscaling MEMBER enableMetalFxUpscaling NOTIFY enableMetalFxUpscalingChanged)
     Q_PROPERTY(VideoDecoderSelection videoDecoderSelection MEMBER videoDecoderSelection NOTIFY videoDecoderSelectionChanged)
     Q_PROPERTY(RendererSelection rendererSelection MEMBER rendererSelection NOTIFY rendererSelectionChanged)
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
@@ -286,6 +287,7 @@ public:
     VideoCodecConfig videoCodecConfig;
     bool enableHdr;
     bool enableYUV444;
+    bool enableMetalFxUpscaling;
     VideoDecoderSelection videoDecoderSelection;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
@@ -325,6 +327,7 @@ signals:
     void coreHidMouseChanged();
     void enableHdrChanged();
     void enableYUV444Changed();
+    void enableMetalFxUpscalingChanged();
     void videoDecoderSelectionChanged();
     void uiDisplayModeChanged();
     void windowModeChanged();

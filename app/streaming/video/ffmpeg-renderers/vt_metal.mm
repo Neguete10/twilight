@@ -33,6 +33,7 @@
 #import <dispatch/dispatch.h>
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
+#import <MetalFX/MetalFX.h>
 
 extern "C" {
     #include <libavutil/pixdesc.h>
@@ -146,6 +147,7 @@ public:
         int maxFramesInFlight = std::clamp(SDL_min(prefs->vtMetalFramesInFlight, MAX_FRAMES_IN_FLIGHT), 2, 3);
         m_MaxFramesInFlight.store(maxFramesInFlight);
         m_PresentState = std::make_shared<PresentCallbackState>();
+        m_MetalFxRequested = prefs->enableMetalFxUpscaling;
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Metal renderer using MaxFramesInFlight=%d", maxFramesInFlight);
    }
@@ -190,6 +192,10 @@ public:
         if (m_VideoPipelineState != nullptr) {
             [m_VideoPipelineState release];
         }
+
+        releaseMetalFxResources();
+        [m_MetalFxPresentPipelineState release];
+        [m_MetalFxPassDescriptor release];
 
         for (int i = 0; i < Overlay::OverlayMax; i++) {
             if (m_OverlayTextures[i] != nullptr) {
@@ -333,6 +339,8 @@ public:
             return false;
         }
 
+        m_VideoRegionWidth = dst.w;
+        m_VideoRegionHeight = dst.h;
         m_LastFrameWidth = frame->width;
         m_LastFrameHeight = frame->height;
         m_LastDrawableWidth = drawableWidth;
@@ -530,6 +538,20 @@ public:
             return false;
         }
 
+        if (m_MetalFxRequested) {
+            pipelineDesc = [[MTLRenderPipelineDescriptor new] autorelease];
+            pipelineDesc.vertexFunction = [[m_ShaderLibrary newFunctionWithName:@"vs_draw"] autorelease];
+            pipelineDesc.fragmentFunction = [[m_ShaderLibrary newFunctionWithName:@"ps_draw_upscaled"] autorelease];
+            pipelineDesc.colorAttachments[0].pixelFormat = m_MetalLayer.pixelFormat;
+            [m_MetalFxPresentPipelineState release];
+            m_MetalFxPresentPipelineState = [m_MetalLayer.device newRenderPipelineStateWithDescriptor:pipelineDesc error:&error];
+            if (!m_MetalFxPresentPipelineState) {
+                // Upscaling is optional. The bilinear path still works.
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Failed to create MetalFX present pipeline state: %s", error.localizedDescription.UTF8String);
+            }
+        }
+
         m_HdrMetadataChanged = false;
         return true;
     }
@@ -691,6 +713,165 @@ public:
         return true;
     }}
 
+    void releaseMetalFxResources()
+    {
+        [m_MetalFxScaler release];
+        m_MetalFxScaler = nil;
+        [m_MetalFxInputTexture release];
+        m_MetalFxInputTexture = nil;
+        [m_MetalFxOutputTexture release];
+        m_MetalFxOutputTexture = nil;
+    }
+
+    // Creates the scaler for this size and format. A failed configuration is
+    // remembered, so it is logged and attempted once rather than on every frame.
+    bool prepareMetalFx(int inputWidth, int inputHeight, int outputWidth, int outputHeight)
+    {
+        if (!m_MetalFxRequested || !m_MetalFxPresentPipelineState ||
+                outputWidth <= inputWidth || outputHeight <= inputHeight) {
+            return false;
+        }
+
+        MTLPixelFormat format = m_MetalLayer.pixelFormat;
+        if (inputWidth == m_MetalFxInputWidth && inputHeight == m_MetalFxInputHeight &&
+                outputWidth == m_MetalFxOutputWidth && outputHeight == m_MetalFxOutputHeight &&
+                format == m_MetalFxFormat) {
+            return m_MetalFxScaler != nil;
+        }
+
+        releaseMetalFxResources();
+        m_MetalFxInputWidth = inputWidth;
+        m_MetalFxInputHeight = inputHeight;
+        m_MetalFxOutputWidth = outputWidth;
+        m_MetalFxOutputHeight = outputHeight;
+        m_MetalFxFormat = format;
+
+        id<MTLDevice> device = m_MetalLayer.device;
+        if (![MTLFXSpatialScalerDescriptor supportsDevice:device]) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "MetalFX spatial scaling is not supported on this GPU");
+            return false;
+        }
+
+        auto scalerDesc = [[MTLFXSpatialScalerDescriptor new] autorelease];
+        scalerDesc.inputWidth = inputWidth;
+        scalerDesc.inputHeight = inputHeight;
+        scalerDesc.outputWidth = outputWidth;
+        scalerDesc.outputHeight = outputHeight;
+        scalerDesc.colorTextureFormat = format;
+        scalerDesc.outputTextureFormat = format;
+        // RGBA16Float carries linear EDR values. The 8-bit SDR and 10-bit PQ
+        // formats are both perceptually encoded.
+        scalerDesc.colorProcessingMode = format == MTLPixelFormatRGBA16Float
+            ? MTLFXSpatialScalerColorProcessingModeHDR
+            : MTLFXSpatialScalerColorProcessingModePerceptual;
+
+        m_MetalFxScaler = [scalerDesc newSpatialScalerWithDevice:device];
+        if (!m_MetalFxScaler) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create MetalFX spatial scaler");
+            return false;
+        }
+
+        auto textureDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
+                                                                              width:inputWidth
+                                                                             height:inputHeight
+                                                                          mipmapped:NO];
+        textureDesc.storageMode = MTLStorageModePrivate;
+        textureDesc.usage = m_MetalFxScaler.colorTextureUsage | MTLTextureUsageRenderTarget;
+        m_MetalFxInputTexture = [device newTextureWithDescriptor:textureDesc];
+
+        textureDesc.width = outputWidth;
+        textureDesc.height = outputHeight;
+        textureDesc.usage = m_MetalFxScaler.outputTextureUsage | MTLTextureUsageShaderRead;
+        m_MetalFxOutputTexture = [device newTextureWithDescriptor:textureDesc];
+
+        if (!m_MetalFxInputTexture || !m_MetalFxOutputTexture) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate MetalFX textures");
+            releaseMetalFxResources();
+            return false;
+        }
+
+        m_MetalFxScaler.colorTexture = m_MetalFxInputTexture;
+        m_MetalFxScaler.outputTexture = m_MetalFxOutputTexture;
+        m_MetalFxScaler.inputContentWidth = inputWidth;
+        m_MetalFxScaler.inputContentHeight = inputHeight;
+
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "MetalFX spatial upscaling active: %dx%d -> %dx%d",
+                    inputWidth, inputHeight, outputWidth, outputHeight);
+        return true;
+    }
+
+    // Binds the decoded planes and draws them with the encoder's current vertex data
+    bool drawVideoPlanes(id<MTLRenderCommandEncoder> encoder, id<MTLCommandBuffer> commandBuffer, AVFrame* frame, size_t planes)
+    {
+        [encoder setRenderPipelineState:m_VideoPipelineState];
+        if (auto textures = getMetalVideoFrame(frame)) {
+            // Keep the pool slot occupied until GPU sampling completes. The shared
+            // owner also frees the reference if an uncommitted buffer is discarded.
+            __block auto owner = std::shared_ptr<AVBufferRef>(av_buffer_ref(frame->buf[0]),
+                [](AVBufferRef* buffer) { av_buffer_unref(&buffer); });
+            if (!owner) {
+                return false;
+            }
+            [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer>) { owner.reset(); }];
+            for (size_t i = 0; i < planes; i++) {
+                [encoder setFragmentTexture:textures->planes[i] atIndex:i];
+            }
+        }
+        else if (frame->format == AV_PIX_FMT_VIDEOTOOLBOX) {
+            for (size_t i = 0; i < planes; i++) {
+                [encoder setFragmentTexture:CVMetalTextureGetTexture(m_CVMetalTextures[m_CurrentBuffer][i]) atIndex:i];
+            }
+        }
+        else {
+            for (size_t i = 0; i < planes; i++) {
+                [encoder setFragmentTexture:mapPlaneForSoftwareFrame(frame, i) atIndex:i];
+            }
+        }
+        if (m_MetalLayer.pixelFormat == MTLPixelFormatRGBA16Float) {
+            float currentEDR = m_CurrentEDR.load();
+            [encoder setFragmentBytes:&currentEDR length:sizeof(float) atIndex:1];
+            [encoder setFragmentBytes:&m_ReferenceWhite length:sizeof(float) atIndex:2];
+            [encoder setFragmentBytes:&m_MaxNits length:sizeof(float) atIndex:3];
+        }
+        [encoder setFragmentBuffer:m_CscParamsBuffer offset:0 atIndex:0];
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        return true;
+    }
+
+    // Converts the frame to RGB at stream resolution, then upscales it into m_MetalFxOutputTexture
+    bool encodeMetalFxUpscale(id<MTLCommandBuffer> commandBuffer, AVFrame* frame, size_t planes)
+    {
+        static const Vertex fullFrameQuad[] =
+        {
+            { { -1.0f, -1.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+            { { -1.0f,  1.0f, 0.0f, 1.0f }, { 0.0f, 0.0f } },
+            { {  1.0f, -1.0f, 0.0f, 1.0f }, { 1.0f, 1.0f } },
+            { {  1.0f,  1.0f, 0.0f, 1.0f }, { 1.0f, 0.0f } },
+        };
+
+        if (!m_MetalFxPassDescriptor) {
+            m_MetalFxPassDescriptor = [[MTLRenderPassDescriptor alloc] init];
+            m_MetalFxPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+            m_MetalFxPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+        }
+        m_MetalFxPassDescriptor.colorAttachments[0].texture = m_MetalFxInputTexture;
+
+        auto encoder = [commandBuffer renderCommandEncoderWithDescriptor:m_MetalFxPassDescriptor];
+        if (!encoder) {
+            return false;
+        }
+        [encoder setVertexBytes:fullFrameQuad length:sizeof(fullFrameQuad) atIndex:0];
+        bool drawn = drawVideoPlanes(encoder, commandBuffer, frame, planes);
+        [encoder endEncoding];
+        if (!drawn) {
+            return false;
+        }
+
+        [m_MetalFxScaler encodeToCommandBuffer:commandBuffer];
+        return true;
+    }
+
     // Caller frees frame after we return
     virtual void renderFrameIntoDrawable(AVFrame* frame, id<CAMetalDrawable> drawable)
     { @autoreleasepool {
@@ -703,50 +884,31 @@ public:
             }
         }
 
-        m_RenderPassDescriptor.colorAttachments[0].texture = drawable.texture;
         auto commandBuffer = getCommandBuffer();
+
+        // This has to finish before the drawable's render pass begins
+        bool upscaled = prepareMetalFx(frame->width, frame->height, m_VideoRegionWidth, m_VideoRegionHeight) &&
+                        encodeMetalFxUpscale(commandBuffer, frame, planes);
+
+        m_RenderPassDescriptor.colorAttachments[0].texture = drawable.texture;
         auto renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:m_RenderPassDescriptor];
         if (!renderEncoder) {
             m_RenderPassDescriptor.colorAttachments[0].texture = nil;
             return;
         }
 
-        // Bind textures and buffers then draw the video region
-        [renderEncoder setRenderPipelineState:m_VideoPipelineState];
-        if (auto textures = getMetalVideoFrame(frame)) {
-            // Keep the pool slot occupied until GPU sampling completes. The shared
-            // owner also frees the reference if an uncommitted buffer is discarded.
-            __block auto owner = std::shared_ptr<AVBufferRef>(av_buffer_ref(frame->buf[0]),
-                [](AVBufferRef* buffer) { av_buffer_unref(&buffer); });
-            if (!owner) {
-                [renderEncoder endEncoding];
-                m_RenderPassDescriptor.colorAttachments[0].texture = nil;
-                return;
-            }
-            [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer>) { owner.reset(); }];
-            for (size_t i = 0; i < planes; i++) {
-                [renderEncoder setFragmentTexture:textures->planes[i] atIndex:i];
-            }
-        }
-        else if (frame->format == AV_PIX_FMT_VIDEOTOOLBOX) {
-            for (size_t i = 0; i < planes; i++) {
-                [renderEncoder setFragmentTexture:CVMetalTextureGetTexture(m_CVMetalTextures[m_CurrentBuffer][i]) atIndex:i];
-            }
-        }
-        else {
-            for (size_t i = 0; i < planes; i++) {
-                [renderEncoder setFragmentTexture:mapPlaneForSoftwareFrame(frame, i) atIndex:i];
-            }
-        }
+        // Draw the video region
         [renderEncoder setVertexBuffer:m_VideoVertexBuffer offset:0 atIndex:0];
-        if (m_MetalLayer.pixelFormat == MTLPixelFormatRGBA16Float) {
-            float currentEDR = m_CurrentEDR.load();
-            [renderEncoder setFragmentBytes:&currentEDR length:sizeof(float) atIndex:1];
-            [renderEncoder setFragmentBytes:&m_ReferenceWhite length:sizeof(float) atIndex:2];
-            [renderEncoder setFragmentBytes:&m_MaxNits length:sizeof(float) atIndex:3];
+        if (upscaled) {
+            [renderEncoder setRenderPipelineState:m_MetalFxPresentPipelineState];
+            [renderEncoder setFragmentTexture:m_MetalFxOutputTexture atIndex:0];
+            [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
         }
-        [renderEncoder setFragmentBuffer:m_CscParamsBuffer offset:0 atIndex:0];
-        [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        else if (!drawVideoPlanes(renderEncoder, commandBuffer, frame, planes)) {
+            [renderEncoder endEncoding];
+            m_RenderPassDescriptor.colorAttachments[0].texture = nil;
+            return;
+        }
 
         // Now draw any overlays that are enabled
         for (int i = 0; i < Overlay::OverlayMax; i++) {
@@ -1848,6 +2010,19 @@ private:
     uint32_t m_CurrentBuffer;
     id<MTLTexture> m_SwMappingTextures[MAX_FRAMES_IN_FLIGHT][MAX_VIDEO_PLANES];
     SDL_MetalView m_MetalView;
+    bool m_MetalFxRequested = false;
+    id<MTLFXSpatialScaler> m_MetalFxScaler = nil;
+    id<MTLTexture> m_MetalFxInputTexture = nil;
+    id<MTLTexture> m_MetalFxOutputTexture = nil;
+    id<MTLRenderPipelineState> m_MetalFxPresentPipelineState = nil;
+    MTLRenderPassDescriptor* m_MetalFxPassDescriptor = nil;
+    int m_MetalFxInputWidth = 0;
+    int m_MetalFxInputHeight = 0;
+    int m_MetalFxOutputWidth = 0;
+    int m_MetalFxOutputHeight = 0;
+    MTLPixelFormat m_MetalFxFormat = MTLPixelFormatInvalid;
+    int m_VideoRegionWidth = 0;
+    int m_VideoRegionHeight = 0;
     int m_LastFrameWidth;
     int m_LastFrameHeight;
     int m_LastDrawableWidth;

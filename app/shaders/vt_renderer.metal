@@ -62,6 +62,13 @@ fragment half4 ps_draw_rgb(Vertex v [[ stage_in ]],
     return rgbTexture.sample(s, v.texCoords);
 }
 
+// The scaler's output alpha is not meaningful and the layer must stay opaque.
+fragment half4 ps_draw_upscaled(Vertex v [[ stage_in ]],
+                                texture2d<half> upscaledTexture [[ texture(0) ]])
+{
+    return half4(upscaledTexture.sample(s, v.texCoords).rgb, 1.0h);
+}
+
 /// Linear shaders
 
 // PQ (SMPTE ST 2084) constants for inverse EOTF
