@@ -717,10 +717,17 @@ public:
     {
         [m_MetalFxScaler release];
         m_MetalFxScaler = nil;
-        [m_MetalFxInputTexture release];
-        m_MetalFxInputTexture = nil;
-        [m_MetalFxOutputTexture release];
-        m_MetalFxOutputTexture = nil;
+        // Drop the descriptor's retain so a retired pair can die with the
+        // command buffer that still references it, rather than with the descriptor.
+        if (m_MetalFxPassDescriptor) {
+            m_MetalFxPassDescriptor.colorAttachments[0].texture = nil;
+        }
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            [m_MetalFxInputTextures[i] release];
+            m_MetalFxInputTextures[i] = nil;
+            [m_MetalFxOutputTextures[i] release];
+            m_MetalFxOutputTextures[i] = nil;
+        }
     }
 
     // Creates the scaler for this size and format. A failed configuration is
@@ -771,27 +778,37 @@ public:
             return false;
         }
 
+        // One input/output pair per in-flight frame. A single shared pair is
+        // hazard-tracked, so the next frame cannot write it until the previous
+        // frame finishes sampling it, which serializes the upscale. The ring is
+        // allocated here and reused until the size or format changes.
         auto textureDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
                                                                               width:inputWidth
                                                                              height:inputHeight
                                                                           mipmapped:NO];
         textureDesc.storageMode = MTLStorageModePrivate;
         textureDesc.usage = m_MetalFxScaler.colorTextureUsage | MTLTextureUsageRenderTarget;
-        m_MetalFxInputTexture = [device newTextureWithDescriptor:textureDesc];
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            m_MetalFxInputTextures[i] = [device newTextureWithDescriptor:textureDesc];
+            if (!m_MetalFxInputTextures[i]) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate MetalFX textures");
+                releaseMetalFxResources();
+                return false;
+            }
+        }
 
         textureDesc.width = outputWidth;
         textureDesc.height = outputHeight;
         textureDesc.usage = m_MetalFxScaler.outputTextureUsage | MTLTextureUsageShaderRead;
-        m_MetalFxOutputTexture = [device newTextureWithDescriptor:textureDesc];
-
-        if (!m_MetalFxInputTexture || !m_MetalFxOutputTexture) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate MetalFX textures");
-            releaseMetalFxResources();
-            return false;
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            m_MetalFxOutputTextures[i] = [device newTextureWithDescriptor:textureDesc];
+            if (!m_MetalFxOutputTextures[i]) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate MetalFX textures");
+                releaseMetalFxResources();
+                return false;
+            }
         }
 
-        m_MetalFxScaler.colorTexture = m_MetalFxInputTexture;
-        m_MetalFxScaler.outputTexture = m_MetalFxOutputTexture;
         m_MetalFxScaler.inputContentWidth = inputWidth;
         m_MetalFxScaler.inputContentHeight = inputHeight;
 
@@ -839,7 +856,8 @@ public:
         return true;
     }
 
-    // Converts the frame to RGB at stream resolution, then upscales it into m_MetalFxOutputTexture
+    // Converts the frame to RGB at stream resolution, then upscales it into this
+    // frame's MetalFX output texture.
     bool encodeMetalFxUpscale(id<MTLCommandBuffer> commandBuffer, AVFrame* frame, size_t planes)
     {
         static const Vertex fullFrameQuad[] =
@@ -850,12 +868,20 @@ public:
             { {  1.0f,  1.0f, 0.0f, 1.0f }, { 1.0f, 0.0f } },
         };
 
+        // m_CurrentBuffer is the same slot the CVMetal and software-mapping
+        // textures use, and it is not reused until that frame's drawable is done.
+        id<MTLTexture> inputTexture = m_MetalFxInputTextures[m_CurrentBuffer];
+        id<MTLTexture> outputTexture = m_MetalFxOutputTextures[m_CurrentBuffer];
+        if (!m_MetalFxScaler || !inputTexture || !outputTexture) {
+            return false;
+        }
+
         if (!m_MetalFxPassDescriptor) {
             m_MetalFxPassDescriptor = [[MTLRenderPassDescriptor alloc] init];
             m_MetalFxPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionDontCare;
             m_MetalFxPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
         }
-        m_MetalFxPassDescriptor.colorAttachments[0].texture = m_MetalFxInputTexture;
+        m_MetalFxPassDescriptor.colorAttachments[0].texture = inputTexture;
 
         auto encoder = [commandBuffer renderCommandEncoderWithDescriptor:m_MetalFxPassDescriptor];
         if (!encoder) {
@@ -868,6 +894,12 @@ public:
             return false;
         }
 
+        // Captured by encodeToCommandBuffer. The next frame binds its own pair
+        // while this command buffer is still in flight.
+        m_MetalFxScaler.colorTexture = inputTexture;
+        m_MetalFxScaler.outputTexture = outputTexture;
+        m_MetalFxScaler.inputContentWidth = m_MetalFxInputWidth;
+        m_MetalFxScaler.inputContentHeight = m_MetalFxInputHeight;
         [m_MetalFxScaler encodeToCommandBuffer:commandBuffer];
         return true;
     }
@@ -886,9 +918,12 @@ public:
 
         auto commandBuffer = getCommandBuffer();
 
-        // This has to finish before the drawable's render pass begins
-        bool upscaled = prepareMetalFx(frame->width, frame->height, m_VideoRegionWidth, m_VideoRegionHeight) &&
-                        encodeMetalFxUpscale(commandBuffer, frame, planes);
+        // This has to finish before the drawable's render pass begins.
+        id<MTLTexture> upscaledTexture = nil;
+        if (prepareMetalFx(frame->width, frame->height, m_VideoRegionWidth, m_VideoRegionHeight) &&
+                encodeMetalFxUpscale(commandBuffer, frame, planes)) {
+            upscaledTexture = m_MetalFxOutputTextures[m_CurrentBuffer];
+        }
 
         m_RenderPassDescriptor.colorAttachments[0].texture = drawable.texture;
         auto renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:m_RenderPassDescriptor];
@@ -899,9 +934,9 @@ public:
 
         // Draw the video region
         [renderEncoder setVertexBuffer:m_VideoVertexBuffer offset:0 atIndex:0];
-        if (upscaled) {
+        if (upscaledTexture) {
             [renderEncoder setRenderPipelineState:m_MetalFxPresentPipelineState];
-            [renderEncoder setFragmentTexture:m_MetalFxOutputTexture atIndex:0];
+            [renderEncoder setFragmentTexture:upscaledTexture atIndex:0];
             [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
         }
         else if (!drawVideoPlanes(renderEncoder, commandBuffer, frame, planes)) {
@@ -2012,8 +2047,9 @@ private:
     SDL_MetalView m_MetalView;
     bool m_MetalFxRequested = false;
     id<MTLFXSpatialScaler> m_MetalFxScaler = nil;
-    id<MTLTexture> m_MetalFxInputTexture = nil;
-    id<MTLTexture> m_MetalFxOutputTexture = nil;
+    // Indexed by m_CurrentBuffer. Not allocated unless upscaling is prepared.
+    id<MTLTexture> m_MetalFxInputTextures[MAX_FRAMES_IN_FLIGHT] = {};
+    id<MTLTexture> m_MetalFxOutputTextures[MAX_FRAMES_IN_FLIGHT] = {};
     id<MTLRenderPipelineState> m_MetalFxPresentPipelineState = nil;
     MTLRenderPassDescriptor* m_MetalFxPassDescriptor = nil;
     int m_MetalFxInputWidth = 0;
