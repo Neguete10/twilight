@@ -51,3 +51,35 @@ Developer ID signing and notarization are hooks only. They do not run unless you
 The version in this tree is `7.2.0`. That number is not a published release.
 
 7.2.0 adds optional MetalFX spatial upscaling on macOS. It is off until the video setting is turned on. 7.1.1 keeps a saved V-Sync choice across relaunch. A custom bitrate is no longer replaced when resolution, frame rate, or 4:4:4 changes.
+
+## Tests
+
+Headless checks, from the repo root. No Mac, no GPU, and no host:
+
+```sh
+bash scripts/run-tests.sh
+```
+
+That runs the Python checks, the C++ logic tests (codec offer, bitrate, V-Sync, update comparison), and the Qt Test binary. The Qt binary needs `qmake6`, Qt Quick, and Qt Test. It loads the real v2 shell offscreen, toggles settings, and fails if QML reports a warning. CI runs this as the `headless-tests` job, separate from the packaging jobs.
+
+A fake GameStream HTTP server, still with no video:
+
+```sh
+python3 tests/mock_host_test.py
+python3 tests/mock_host.py --port 47989
+```
+
+It answers `/serverinfo`, `/applist`, `/launch`, and `/cancel`. Pairing crypto and the video stream are not implemented.
+
+On the Mac that will actually stream, against a paired host:
+
+```sh
+python3 scripts/e2e/stream_matrix.py \
+  --app /path/to/Twilight.app \
+  --host 192.168.1.20 \
+  --game Desktop
+```
+
+The `.app` must be the build product. The script refuses a path under `/Applications`. It exports `com.moonlight-stream.Moonlight` first and imports that plist again when it finishes. Each case starts `stream`, waits until the log contains `Video stream is`, holds the stream for `--seconds` (default 8), takes a screenshot, then runs `quit` (or sends SIGTERM for that case). Reports land in `build/e2e-report/`. MetalFX is written into preferences for the cases that need it, because the stream command has no MetalFX flag. Pass `--host-end-command` (or `TWILIGHT_HOST_END_COMMAND`) with a shell command that makes the host end the stream; without it that case is skipped.
+
+Still needs a person: whether the picture looks sharp, HDR brightness, VRR smoothness, controller rumble and adaptive triggers, and whether microphone audio sounds right on the host. The script only checks that the stream started, the logged codec and renderer match, MetalFX logged itself when requested, the process exited, and no new crash report appeared.

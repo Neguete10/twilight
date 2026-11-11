@@ -149,6 +149,6 @@ Item {
 
     Connections {
         target: StreamHudStats
-        onHudConfirmExpired: chips.confirming = false
+        function onHudConfirmExpired() { chips.confirming = false }
     }
 }

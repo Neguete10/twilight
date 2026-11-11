@@ -1,5 +1,7 @@
 #include "nvaddress.h"
 
+#include <QUrl>
+
 #include <QHostAddress>
 
 NvAddress::NvAddress()
@@ -48,6 +50,32 @@ void NvAddress::setAddress(QHostAddress addr)
 bool NvAddress::isNull() const
 {
     return m_Address.isEmpty();
+}
+
+bool NvAddress::parseManualHost(const QString& address, QString* hostOut, uint16_t* portOut)
+{
+    const QUrl url = QUrl::fromUserInput(QStringLiteral("moonlight://") + address);
+    if (url.isValid() && !url.host().isEmpty() && url.scheme() == QLatin1String("moonlight")) {
+        if (hostOut) {
+            *hostOut = url.host();
+        }
+        if (portOut) {
+            *portOut = static_cast<uint16_t>(url.port(DEFAULT_HTTP_PORT));
+        }
+        return true;
+    }
+
+    if (QHostAddress(address).protocol() == QAbstractSocket::IPv6Protocol) {
+        if (hostOut) {
+            *hostOut = address;
+        }
+        if (portOut) {
+            *portOut = DEFAULT_HTTP_PORT;
+        }
+        return true;
+    }
+
+    return false;
 }
 
 QString NvAddress::toString() const

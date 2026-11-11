@@ -928,7 +928,9 @@ Item {
 
                             Connections {
                                 target: StreamingPreferences
-                                onBitrateChanged: bitrateInput.text = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
+                                function onBitrateChanged() {
+                                    bitrateInput.text = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)
+                                }
                             }
                         }
                         TwTextV2 {
@@ -959,9 +961,10 @@ Item {
                                       : qsTr("Turn off for lower latency. You may see tearing.")
                             SwitchV2 {
                                 id: vsyncSwitch
+                                objectName: "vsyncSwitch"
                                 theme: sheet.theme
                                 checked: StreamingPreferences.enableVsync
-                                onToggled: StreamingPreferences.enableVsync = next
+                                onToggled: function(next) { StreamingPreferences.enableVsync = next }
                             }
                         }
                         SettingRowV2 {
@@ -1030,9 +1033,10 @@ Item {
                             subtitle: qsTr("Sharpens a lower stream resolution on this display. Takes effect on the next stream.")
                             SwitchV2 {
                                 id: metalFxSwitch
+                                objectName: "metalFxSwitch"
                                 theme: sheet.theme
                                 checked: StreamingPreferences.enableMetalFxUpscaling
-                                onToggled: StreamingPreferences.enableMetalFxUpscaling = next
+                                onToggled: function(next) { StreamingPreferences.enableMetalFxUpscaling = next }
                             }
                         }
                     }
@@ -1423,9 +1427,10 @@ Item {
                             subtitle: qsTr("Unsaved progress on the host will be lost.")
                             SwitchV2 {
                                 id: quitAfterSwitch
+                                objectName: "quitAfterSwitch"
                                 theme: sheet.theme
                                 checked: StreamingPreferences.quitAppAfter
-                                onToggled: {
+                                onToggled: function(next) {
                                     StreamingPreferences.quitAppAfter = next
                                     StreamingPreferences.save()
                                 }

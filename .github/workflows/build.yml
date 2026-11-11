@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - master
+      - main
 
 concurrency:
   group: build-${{ github.ref }}
@@ -75,3 +76,22 @@ jobs:
           /tmp/hud_parse_test
           python3 tests/stream_quit_teardown_test.py
           python3 tests/preference_persistence_test.py
+
+  headless-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+      - name: Install Qt 6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qt6-base-dev qt6-base-dev-tools \
+            qt6-declarative-dev qt6-declarative-dev-tools \
+            qml6-module-qtquick qml6-module-qtquick-window \
+            qml6-module-qtquick-templates qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtqml \
+            qml6-module-qtqml-models qml6-module-qtqml-workerscript \
+            libgl1-mesa-dev g++ make
+      - name: Run headless tests
+        run: bash scripts/run-tests.sh

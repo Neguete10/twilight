@@ -113,10 +113,12 @@ def test_app_grid_follows_pair_state():
 
 
 def test_automatic_codec():
+    offer = read("app/streaming/codec_offer.h")
     session = read("app/streaming/session.cpp")
-    auto = session.split("case StreamingPreferences::VCC_AUTO:", 1)[1].split("case StreamingPreferences::", 1)[0]
-    expect("PYROWAVE" not in auto, "Automatic never offers PyroWave")
-    expect("VCC_FORCE_PYROWAVE" in session and "VIDEO_FORMAT_PYROWAVE" in session, "explicit PyroWave remains a selection")
+    auto = offer.split("if (request.codec == Auto)", 1)[1].split("else if (request.codec == ForceH264)", 1)[0]
+    expect("PyroWave" not in auto, "Automatic never offers PyroWave")
+    expect("ForcePyroWave" in offer and "formats.push_back(PyroWave)" in offer, "explicit PyroWave remains a selection")
+    expect("CodecOffer::build" in session, "the session offers the tested codec list")
 
 
 def main():

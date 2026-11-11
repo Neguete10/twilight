@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/gui/ui/v2">
+        <file alias="StreamHudV2.qml">../app/gui/ui/v2/StreamHudV2.qml</file>
+        <file alias="HudChipsV2.qml">../app/gui/ui/v2/HudChipsV2.qml</file>
+    </qresource>
+</RCC>

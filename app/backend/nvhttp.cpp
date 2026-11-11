@@ -1,4 +1,5 @@
 #include "nvcomputer.h"
+#include "nvhttp_xml.h"
 #include "settings/bitrate_choice.h"
 #include "streaming/adaptive_bitrate.h"
 #include <Limelight.h>
@@ -118,18 +119,7 @@ NvHTTP::parseQuad(QString quad)
 int
 NvHTTP::getCurrentGame(QString serverInfo)
 {
-    // GFE 2.8 started keeping currentgame set to the last game played. As a result, it no longer
-    // has the semantics that its name would indicate. To contain the effects of this change as much
-    // as possible, we'll force the current game to zero if the server isn't in a streaming session.
-    QString serverState = getXmlString(serverInfo, "state");
-    if (serverState.endsWith("_SERVER_BUSY"))
-    {
-        return getXmlString(serverInfo, "currentgame").toInt();
-    }
-    else
-    {
-        return 0;
-    }
+    return nvCurrentGameId(serverInfo);
 }
 
 QString
@@ -459,22 +449,7 @@ QString
 NvHTTP::getXmlString(QString xml,
                      QString tagName)
 {
-    QXmlStreamReader xmlReader(xml);
-
-    while (!xmlReader.atEnd())
-    {
-        if (xmlReader.readNext() != QXmlStreamReader::StartElement)
-        {
-            continue;
-        }
-
-        if (xmlReader.name() == tagName)
-        {
-            return xmlReader.readElementText();
-        }
-    }
-
-    return QString();
+    return nvXmlTagText(xml, tagName);
 }
 
 void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
