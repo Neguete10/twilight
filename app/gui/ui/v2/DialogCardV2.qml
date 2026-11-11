@@ -214,7 +214,7 @@ Item {
                         verticalAlignment: TextInput.AlignVCenter
                         clip: true
                         color: dialog.theme ? dialog.theme.ink : "white"
-                        font.family: dialog.theme ? dialog.theme.fontFamily : ""
+                        Binding on font.family { when: dialog.theme && dialog.theme.fontFamily !== ""; value: dialog.theme.fontFamily }
                         font.pixelSize: 14
                         selectByMouse: true
                         inputMethodHints: dialog.digitsOnly ? Qt.ImhDigitsOnly : Qt.ImhNone
@@ -259,7 +259,7 @@ Item {
                         verticalAlignment: TextInput.AlignVCenter
                         clip: true
                         color: dialog.theme ? dialog.theme.ink : "white"
-                        font.family: dialog.theme ? dialog.theme.fontFamily : ""
+                        Binding on font.family { when: dialog.theme && dialog.theme.fontFamily !== ""; value: dialog.theme.fontFamily }
                         font.pixelSize: 14
                         selectByMouse: true
                         inputMethodHints: dialog.digitsOnly ? Qt.ImhDigitsOnly : Qt.ImhNone

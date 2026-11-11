@@ -764,6 +764,13 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
 
 #ifdef Q_OS_DARWIN
+    // Qt's default family on macOS is the generic alias "Sans Serif", which
+    // is not an installed face. The first lookup warns. Helvetica Neue is
+    // on every Mac and is what text uses when the theme does not name one.
+    app.setFont(QFont(QStringLiteral("Helvetica Neue")));
+#endif
+
+#ifdef Q_OS_DARWIN
     // The ICD path has to be set before anything opens libvulkan. The library
     // itself is loaded from StreamUtils after SDL video init. Doing it here
     // makes SDL report that the video subsystem has not been initialized.

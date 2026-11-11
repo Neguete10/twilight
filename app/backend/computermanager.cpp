@@ -790,14 +790,10 @@ void ComputerManager::stopPollingAsync()
 
 void ComputerManager::addNewHostManually(QString address)
 {
-    QUrl url = QUrl::fromUserInput("moonlight://" + address);
-    if (url.isValid() && !url.host().isEmpty() && url.scheme() == "moonlight") {
-        // If there wasn't a port specified, use the default
-        addNewHost(NvAddress(url.host(), url.port(DEFAULT_HTTP_PORT)), false);
-    }
-    else if (QHostAddress(address).protocol() == QAbstractSocket::IPv6Protocol) {
-        // The user specified an IPv6 literal without URL escaping, so use the default port
-        addNewHost(NvAddress(address, DEFAULT_HTTP_PORT), false);
+    QString host;
+    uint16_t port = 0;
+    if (NvAddress::parseManualHost(address, &host, &port)) {
+        addNewHost(NvAddress(host, port), false);
     }
     else {
         emit computerAddCompleted(false, false);

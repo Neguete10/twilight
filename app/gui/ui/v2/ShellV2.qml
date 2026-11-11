@@ -13,6 +13,7 @@ import SdlGamepadKeyNavigation 1.0
 
 Item {
     id: shell
+    objectName: "shell"
     anchors.fill: parent
     focus: true
 
@@ -731,22 +732,23 @@ Item {
 
     ComputerModel {
         id: computerModel
+        objectName: "computerModel"
         Component.onCompleted: initialize(ComputerManager)
     }
 
     Connections {
         target: computerModel
-        onModelReset: shell.noteComputersChanged()
-        onRowsInserted: shell.noteComputersChanged()
-        onRowsRemoved: shell.noteComputersChanged()
-        onDataChanged: shell.hostRevision = shell.hostRevision + 1
+        function onModelReset() { shell.noteComputersChanged() }
+        function onRowsInserted() { shell.noteComputersChanged() }
+        function onRowsRemoved() { shell.noteComputersChanged() }
+        function onDataChanged() { shell.hostRevision = shell.hostRevision + 1 }
     }
 
     // Stays for the life of the shell. Connecting shell.afterQuit from the
     // dialog did not keep the slot, so Quit never left "Quitting…".
     Connections {
         target: ComputerManager
-        onQuitAppCompleted: shell.afterQuit(error)
+        function onQuitAppCompleted(error) { shell.afterQuit(error) }
     }
 
     Component.onCompleted: {
@@ -776,17 +778,17 @@ Item {
     // settings sheet closes and when the window closes.
 
     Shortcut {
-        sequence: StandardKey.Preferences
+        sequences: [StandardKey.Preferences]
         enabled: !shell.modalOpen
         onActivated: shell.settingsOpen = true
     }
     Shortcut {
-        sequence: "Escape"
+        sequences: ["Escape"]
         enabled: !shell.modalOpen
         onActivated: shell.leaveOpen = true
     }
     Shortcut {
-        sequence: StandardKey.New
+        sequences: [StandardKey.New]
         enabled: !shell.modalOpen
         onActivated: shell.addOpen = true
     }
@@ -1247,7 +1249,7 @@ Item {
                             anchors.rightMargin: 12
                             verticalAlignment: TextInput.AlignVCenter
                             color: theme.ink
-                            font.family: theme.fontFamily
+                            Binding on font.family { when: theme.fontFamily !== ""; value: theme.fontFamily }
                             font.pixelSize: 14
                             clip: true
                             selectByMouse: true
@@ -1302,6 +1304,7 @@ Item {
                             spacing: 16
 
                             Rectangle {
+                                objectName: "desktopCard"
                                 visible: shell.desktopShown
                                 width: parent.width
                                 height: visible ? 148 : 0
@@ -1330,7 +1333,7 @@ Item {
                                 Column {
                                     anchors.left: parent.left
                                     anchors.leftMargin: 244
-                                    anchors.right: streamButton.left
+                                    anchors.right: desktopActions.left
                                     anchors.rightMargin: 16
                                     anchors.verticalCenter: parent.verticalCenter
                                     spacing: 6
@@ -1350,6 +1353,7 @@ Item {
                                     }
                                 }
                                 Column {
+                                    id: desktopActions
                                     anchors.right: parent.right
                                     anchors.rightMargin: 20
                                     anchors.verticalCenter: parent.verticalCenter
@@ -1673,6 +1677,7 @@ Item {
 
     SettingsSheetV2 {
         id: settingsSheet
+        objectName: "settingsSheet"
         theme: shell.theme
         escapeEnabled: !shell.updateDialogOpen
         open: shell.settingsOpen

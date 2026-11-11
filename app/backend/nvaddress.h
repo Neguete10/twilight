@@ -22,6 +22,10 @@ public:
     bool isNull() const;
     QString toString() const;
 
+    // "host", "host:47989", or a raw IPv6 literal. False when the text is not a host.
+    // A missing port becomes DEFAULT_HTTP_PORT. Used by add-by-address.
+    static bool parseManualHost(const QString& address, QString* hostOut, uint16_t* portOut);
+
     bool operator==(const NvAddress& other) const
     {
         return m_Address == other.m_Address &&

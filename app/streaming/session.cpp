@@ -1,5 +1,13 @@
 #include "session.h"
+#include "streaming/codec_offer.h"
 #include "gui/streamhudstats.h"
+
+static_assert(static_cast<int>(StreamingPreferences::VCC_AUTO) == CodecOffer::Auto, "Auto codec value");
+static_assert(static_cast<int>(StreamingPreferences::VCC_FORCE_H264) == CodecOffer::ForceH264, "H.264 codec value");
+static_assert(static_cast<int>(StreamingPreferences::VCC_FORCE_HEVC) == CodecOffer::ForceHevc, "HEVC codec value");
+static_assert(static_cast<int>(StreamingPreferences::VCC_FORCE_HEVC_HDR_DEPRECATED) == CodecOffer::ForceHevcHdrDeprecated, "deprecated HEVC+HDR codec value");
+static_assert(static_cast<int>(StreamingPreferences::VCC_FORCE_AV1) == CodecOffer::ForceAv1, "AV1 codec value");
+static_assert(static_cast<int>(StreamingPreferences::VCC_FORCE_PYROWAVE) == CodecOffer::ForcePyroWave, "PyroWave codec value");
 #include "settings/bitrate_choice.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/adaptive_bitrate.h"
@@ -12,6 +20,13 @@
 #include "imgui/devui.h"
 
 #include <Limelight.h>
+static_assert(VIDEO_FORMAT_H264 == CodecOffer::H264, "H.264 format");
+static_assert(VIDEO_FORMAT_H265 == CodecOffer::H265, "HEVC format");
+static_assert(VIDEO_FORMAT_AV1_MAIN8 == CodecOffer::Av1Main8, "AV1 format");
+static_assert(VIDEO_FORMAT_PYROWAVE == CodecOffer::PyroWave, "PyroWave format");
+static_assert(VIDEO_FORMAT_MASK_10BIT == CodecOffer::Mask10Bit, "10-bit mask");
+static_assert(VIDEO_FORMAT_MASK_YUV444 == CodecOffer::MaskYuv444, "4:4:4 mask");
+static_assert(VIDEO_FORMAT_MASK_PYROWAVE == CodecOffer::MaskPyroWave, "PyroWave mask");
 #include "SDL_compat.h"
 #include "path.h"
 #include "utils.h"
@@ -915,175 +930,47 @@ bool Session::initialize(QQuickWindow* qtWindow)
                 "Audio channel mask: %X",
                 CHANNEL_MASK_FROM_AUDIO_CONFIGURATION(m_StreamConfig.audioConfiguration));
 
-    // Start with all codecs and profiles in priority order
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_HIGH10_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_MAIN10);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_H265_REXT10_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_H265_MAIN10);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_HIGH8_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_MAIN8);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_H265_REXT8_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_H265);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_H264_HIGH8_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_H264);
+    // DecoderAvailability is private. These checks live in a member function
+    // so the enum stays private and the app target still compiles.
+    static_assert(static_cast<int>(DecoderAvailability::None) == CodecOffer::DecodeNone, "decoder none");
+    static_assert(static_cast<int>(DecoderAvailability::Software) == CodecOffer::DecodeSoftware, "decoder software");
+    static_assert(static_cast<int>(DecoderAvailability::Hardware) == CodecOffer::DecodeHardware, "decoder hardware");
 
-    switch (m_Preferences->videoCodecConfig)
-    {
-    case StreamingPreferences::VCC_AUTO:
-    {
-        // Codecs are checked in order of ascending decode complexity to ensure
-        // the the deprioritized list prefers lighter codecs for software decoding
-
-        // H.264 is already the lowest priority codec, so we don't need to do
-        // any probing for deprioritization for it here.
-
-        auto hevcDA = getDecoderAvailability(testWindow,
-                                             m_Preferences->videoDecoderSelection,
-                                             m_Preferences->enableYUV444 ?
-                                                 (m_Preferences->enableHdr ? VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_REXT8_444) :
-                                                 (m_Preferences->enableHdr ? VIDEO_FORMAT_H265_MAIN10 : VIDEO_FORMAT_H265),
-                                             m_StreamConfig.width,
-                                             m_StreamConfig.height,
-                                             m_StreamConfig.fps);
-        if (hevcDA == DecoderAvailability::None && m_Preferences->enableHdr) {
-            // Remove all 10-bit HEVC profiles
-            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_H265 & VIDEO_FORMAT_MASK_10BIT);
-
-            // Check if we have 10-bit AV1 support
-            auto av1DA = getDecoderAvailability(testWindow,
-                                                m_Preferences->videoDecoderSelection,
-                                                m_Preferences->enableYUV444 ? VIDEO_FORMAT_AV1_HIGH10_444 : VIDEO_FORMAT_AV1_MAIN10,
-                                                m_StreamConfig.width,
-                                                m_StreamConfig.height,
-                                                m_StreamConfig.fps);
-            if (av1DA == DecoderAvailability::None) {
-                // Remove all 10-bit AV1 profiles
-                m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_AV1 & VIDEO_FORMAT_MASK_10BIT);
-
-                // There are no available 10-bit profiles, so reprobe for 8-bit HEVC
-                // and we'll proceed as normal for an SDR streaming scenario.
-                SDL_assert(!(m_SupportedVideoFormats & VIDEO_FORMAT_MASK_10BIT));
-                hevcDA = getDecoderAvailability(testWindow,
-                                                m_Preferences->videoDecoderSelection,
-                                                m_Preferences->enableYUV444 ? VIDEO_FORMAT_H265_REXT8_444 : VIDEO_FORMAT_H265,
-                                                m_StreamConfig.width,
-                                                m_StreamConfig.height,
-                                                m_StreamConfig.fps);
-            }
-        }
-
-        if (hevcDA != DecoderAvailability::Hardware) {
-            // Deprioritize HEVC unless the user forced software decoding and enabled HDR.
-            // We need HEVC in that case because we cannot support 10-bit content with H.264,
-            // which would ordinarily be prioritized for software decoding performance.
-            if (m_Preferences->videoDecoderSelection != StreamingPreferences::VDS_FORCE_SOFTWARE || !m_Preferences->enableHdr) {
-                m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_H265);
-            }
-        }
-
-        // Deprioritize AV1 unless we can't hardware decode HEVC, and have HDR enabled
-        // or we're on Windows or a non-x86 Linux/BSD.
-        //
-        // Normally, we'd assume hardware that can't decode HEVC definitely can't decode
-        // AV1 either, and we wouldn't even bother probing for AV1 support. However, some
-        // Windows business systems have HEVC support disabled in firmware from the factory,
-        // yet they can still decode AV1 in hardware. To avoid falling back to H.264 on
-        // these systems, we don't deprioritize AV1. This firmware-based HEVC licensing
-        // behavior seems to be unique to Windows, and Linux on the same system is able
-        // to decode HEVC in hardware normally using VAAPI.
-        // https://www.reddit.com/r/GeForceNOW/comments/1omsckt/psa_be_wary_of_purchasing_dell_computers_with/
-        //
-        // Some embedded Linux platforms have incomplete V4L2 decoding support which can
-        // lead to unusual cases where a system might support H.264 and AV1 but not HEVC,
-        // even if the underlying hardware supports all three. RK3588 is an example of
-        // such a SoC. To handle this situation, we will also probe for AV1 if we're on
-        // a non-x86 non-macOS UNIX system.
-        //
-        // We want to keep AV1 at the top of the list for HDR with software decoding
-        // because dav1d is higher performance than FFmpeg's HEVC software decoder.
-        if (hevcDA == DecoderAvailability::Hardware
-#if !defined(Q_OS_WIN32) && (!(defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN)) || defined(Q_PROCESSOR_X86))
-            || !m_Preferences->enableHdr
-#endif
-            ) {
-            m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_AV1);
-        }
-        else if (!m_Preferences->enableHdr &&
-                   getDecoderAvailability(testWindow,
-                                          m_Preferences->videoDecoderSelection,
-                                          m_Preferences->enableYUV444 ? VIDEO_FORMAT_AV1_HIGH8_444 : VIDEO_FORMAT_AV1_MAIN8,
-                                          m_StreamConfig.width,
-                                          m_StreamConfig.height,
-                                          m_StreamConfig.fps) != DecoderAvailability::Hardware) {
-            m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_AV1);
-        }
-
+    CodecOffer::Request offerRequest;
+    offerRequest.codec = static_cast<int>(m_Preferences->videoCodecConfig);
+    offerRequest.hdr = m_Preferences->enableHdr;
+    offerRequest.yuv444 = m_Preferences->enableYUV444;
+    offerRequest.forceSoftware = m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE;
 #ifdef Q_OS_DARWIN
-        {
-            // Prior to GFE 3.11, GFE did not allow us to constrain
-            // the number of reference frames, so we have to fixup the SPS
-            // to allow decoding via VideoToolbox on macOS. Since we don't
-            // have fixup code for HEVC, just avoid it if GFE is too old.
-            QVector<int> gfeVersion = NvHTTP::parseQuad(m_Computer->gfeVersion);
-            if (gfeVersion.isEmpty() || // Very old versions don't have GfeVersion at all
-                    gfeVersion[0] < 3 ||
-                    (gfeVersion[0] == 3 && gfeVersion[1] < 11)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Disabling HEVC on macOS due to old GFE version");
-                m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_H265);
-            }
+    offerRequest.darwin = true;
+    {
+        // Prior to GFE 3.11, GFE did not allow us to constrain
+        // the number of reference frames, so we have to fixup the SPS
+        // to allow decoding via VideoToolbox on macOS. Since we don't
+        // have fixup code for HEVC, just avoid it if GFE is too old.
+        QVector<int> gfeVersion = NvHTTP::parseQuad(m_Computer->gfeVersion);
+        offerRequest.oldGfe = gfeVersion.isEmpty() ||
+                gfeVersion[0] < 3 ||
+                (gfeVersion[0] == 3 && gfeVersion[1] < 11);
+        if (offerRequest.oldGfe && m_Preferences->videoCodecConfig == StreamingPreferences::VCC_AUTO) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Disabling HEVC on macOS due to old GFE version");
         }
+    }
 #endif
-        break;
-    }
-    case StreamingPreferences::VCC_FORCE_H264:
-        m_SupportedVideoFormats.removeByMask(~VIDEO_FORMAT_MASK_H264);
-        break;
-    case StreamingPreferences::VCC_FORCE_HEVC:
-    case StreamingPreferences::VCC_FORCE_HEVC_HDR_DEPRECATED:
-        m_SupportedVideoFormats.removeByMask(~VIDEO_FORMAT_MASK_H265);
-        break;
-    case StreamingPreferences::VCC_FORCE_AV1:
-        // We'll try to fall back to HEVC first if AV1 fails. We'd rather not fall back
-        // straight to H.264 if the user asked for AV1 and the host doesn't support it.
-        m_SupportedVideoFormats.removeByMask(~(VIDEO_FORMAT_MASK_AV1 | VIDEO_FORMAT_MASK_H265));
-        break;
-    case StreamingPreferences::VCC_FORCE_PYROWAVE:
-        // PyroWave is opt-in; bit depth and chroma preferences are applied below.
-        m_SupportedVideoFormats.clear();
-        m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_444);
-        m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE10_420);
-        m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE_444);
-        m_SupportedVideoFormats.append(VIDEO_FORMAT_PYROWAVE);
-        break;
-    }
-
-    // NB: Since deprioritization puts codecs in reverse order (at the bottom of the list),
-    // we want to deprioritize for the most critical attributes last to ensure they are the
-    // lowest priority codecs during server negotiation. Here we do that with YUV 4:4:4 and
-    // HDR to ensure we never pick a codec profile that doesn't meet the user's requirement
-    // if we can avoid it.
-
-    // Mask off YUV 4:4:4 codecs if the option is not enabled
-    if (!m_Preferences->enableYUV444) {
-        m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_YUV444);
-    }
-    else {
-        // Deprioritize YUV 4:2:0 codecs if the user wants YUV 4:4:4
-        //
-        // NB: Since this happens first before deprioritizing HDR, we will
-        // pick a YUV 4:4:4 profile instead of a 10-bit profile if they
-        // aren't both available together for any codec.
-        m_SupportedVideoFormats.deprioritizeByMask(~VIDEO_FORMAT_MASK_YUV444);
-    }
-
-    // Mask off 10-bit codecs if HDR is not enabled
-    if (!m_Preferences->enableHdr) {
-        m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_10BIT);
-    }
-    else {
-        // Deprioritize 8-bit codecs if HDR is enabled
-        m_SupportedVideoFormats.deprioritizeByMask(~VIDEO_FORMAT_MASK_10BIT);
+#if !defined(Q_OS_WIN32) && (!(defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN)) || defined(Q_PROCESSOR_X86))
+    offerRequest.sdrDeprioritizesAv1 = true;
+#endif
+    const auto offered = CodecOffer::build(offerRequest, [&](int videoFormat) {
+        return static_cast<int>(getDecoderAvailability(testWindow,
+                                                       m_Preferences->videoDecoderSelection,
+                                                       videoFormat,
+                                                       m_StreamConfig.width,
+                                                       m_StreamConfig.height,
+                                                       m_StreamConfig.fps));
+    });
+    for (int format : offered) {
+        m_SupportedVideoFormats.append(format);
     }
 
     switch (m_Preferences->windowMode)

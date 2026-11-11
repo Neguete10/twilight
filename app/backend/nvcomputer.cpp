@@ -1,4 +1,5 @@
 #include "nvcomputer.h"
+#include "nvhttp_xml.h"
 #include "wake_notice.h"
 #include "nvapp.h"
 #include "settings/compatfetcher.h"
@@ -202,7 +203,7 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     // some assumptions about Nvidia hardware that don't apply to Sunshine hosts.
     this->isNvidiaServerSoftware = NvHTTP::getXmlString(serverInfo, "state").contains("MJOLNIR");
 
-    this->pairState = NvHTTP::getXmlString(serverInfo, "PairStatus") == "1" ?
+    this->pairState = nvPairStatusIsPaired(serverInfo) ?
                 PS_PAIRED : PS_NOT_PAIRED;
     this->currentGameId = NvHTTP::getCurrentGame(serverInfo);
     this->appVersion = NvHTTP::getXmlString(serverInfo, "appversion");
