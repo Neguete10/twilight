@@ -881,7 +881,7 @@ Item {
                                     clip: true
                                     selectByMouse: true
                                     color: sheet.theme.ink
-                                    font.family: sheet.theme.fontFamily
+                                    Binding on font.family { when: sheet.theme.fontFamily !== ""; value: sheet.theme.fontFamily }
                                     font.pixelSize: 14
                                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                                     Component.onCompleted: text = StreamingPreferences.bitrateMbpsText(StreamingPreferences.bitrateKbps)

@@ -75,7 +75,7 @@ Window {
                     text: qsTr("Stream")
                     color: chips.mute
                     font.pixelSize: 12
-                    font.family: chips.uiFont
+                    Binding on font.family { when: chips.uiFont !== ""; value: chips.uiFont }
                 }
                 Rectangle {
                     width: parent.width
@@ -87,7 +87,7 @@ Window {
                         text: qsTr("End Stream")
                         color: "#FFFFFF"
                         font.pixelSize: 14
-                        font.family: chips.uiFont
+                        Binding on font.family { when: chips.uiFont !== ""; value: chips.uiFont }
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -107,7 +107,7 @@ Window {
                         text: qsTr("Close")
                         color: chips.ink
                         font.pixelSize: 14
-                        font.family: chips.uiFont
+                        Binding on font.family { when: chips.uiFont !== ""; value: chips.uiFont }
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -121,7 +121,7 @@ Window {
                     text: qsTr("Esc or Select+Start closes this. A ends the stream.")
                     color: chips.mute
                     font.pixelSize: 11
-                    font.family: chips.uiFont
+                    Binding on font.family { when: chips.uiFont !== ""; value: chips.uiFont }
                 }
             }
         }
@@ -132,7 +132,7 @@ Window {
             text: StreamHudStats.codecText
             color: chips.mute
             font.pixelSize: 11
-            font.family: chips.uiFont
+            Binding on font.family { when: chips.uiFont !== ""; value: chips.uiFont }
         }
     }
 }

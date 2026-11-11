@@ -18,10 +18,12 @@ Item {
     readonly property real luminance: pal.window.r * 0.2126 + pal.window.g * 0.7152 + pal.window.b * 0.0722
     readonly property bool dark: luminance < 0.45
 
+    // A specific family only. Qt 6.11 warns when a family is the generic alias
+    // "Sans Serif". On macOS the default text font is already the system UI
+    // font, and assigning .AppleSystemUIFont is reported as that alias, so
+    // this stays empty and TwTextV2 leaves font.family alone.
     readonly property string fontFamily: {
         var os = Qt.platform.os
-        if (os === "osx" || os === "macos")
-            return ".AppleSystemUIFont"
         if (os === "windows")
             return "Segoe UI"
         return ""

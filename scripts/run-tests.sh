@@ -44,14 +44,48 @@ g++ -std=c++17 -Wall -Wextra -Werror \
 /tmp/update_version_test
 
 echo "== qt =="
-if ! command -v qmake6 >/dev/null 2>&1; then
-  echo "qmake6 is not installed. Install Qt 6 (qmake6, Qt Quick, Qt Test) and run this again." >&2
+# Official Qt puts qmake at ~/Qt/6.11.2/macos/bin/qmake (no qmake6 name).
+# QTDIR may point at that prefix or at the macos directory.
+find_qmake() {
+  if [ -n "${QTDIR:-}" ]; then
+    for bin in "$QTDIR/bin/qmake6" "$QTDIR/bin/qmake" "$QTDIR/macos/bin/qmake6" "$QTDIR/macos/bin/qmake"; do
+      if [ -x "$bin" ]; then
+        printf '%s\n' "$bin"
+        return 0
+      fi
+    done
+  fi
+  if command -v qmake6 >/dev/null 2>&1; then
+    command -v qmake6
+    return 0
+  fi
+  if command -v qmake >/dev/null 2>&1; then
+    ver=$(qmake -query QT_VERSION 2>/dev/null || true)
+    case "$ver" in
+      6.*)
+        command -v qmake
+        return 0
+        ;;
+    esac
+  fi
+  for bin in "$HOME"/Qt/*/macos/bin/qmake6 "$HOME"/Qt/*/macos/bin/qmake "$HOME"/Qt/*/bin/qmake6 "$HOME"/Qt/*/bin/qmake; do
+    if [ -x "$bin" ]; then
+      printf '%s\n' "$bin"
+      return 0
+    fi
+  done
+  return 1
+}
+QMAKE=$(find_qmake) || {
+  echo "Qt 6 qmake was not found. Install Qt 6, put qmake6 on PATH, or set QTDIR to ~/Qt/6.11.2/macos." >&2
   exit 1
-fi
+}
+echo "Using $QMAKE"
+export PATH="$(dirname "$QMAKE"):$PATH"
 mkdir -p build/headless-tests
 (
   cd build/headless-tests
-  qmake6 ../../tests/twilight_qt_tests.pro
+  "$QMAKE" ../../tests/twilight_qt_tests.pro
   make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 )
 if [ -x build/headless-tests/twilight_qt_tests ]; then

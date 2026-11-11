@@ -778,17 +778,17 @@ Item {
     // settings sheet closes and when the window closes.
 
     Shortcut {
-        sequence: StandardKey.Preferences
+        sequences: [StandardKey.Preferences]
         enabled: !shell.modalOpen
         onActivated: shell.settingsOpen = true
     }
     Shortcut {
-        sequence: "Escape"
+        sequences: ["Escape"]
         enabled: !shell.modalOpen
         onActivated: shell.leaveOpen = true
     }
     Shortcut {
-        sequence: StandardKey.New
+        sequences: [StandardKey.New]
         enabled: !shell.modalOpen
         onActivated: shell.addOpen = true
     }
@@ -1249,7 +1249,7 @@ Item {
                             anchors.rightMargin: 12
                             verticalAlignment: TextInput.AlignVCenter
                             color: theme.ink
-                            font.family: theme.fontFamily
+                            Binding on font.family { when: theme.fontFamily !== ""; value: theme.fontFamily }
                             font.pixelSize: 14
                             clip: true
                             selectByMouse: true

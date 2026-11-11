@@ -15,10 +15,9 @@ Item {
     readonly property color glass: dark ? Qt.rgba(0.08, 0.09, 0.12, 0.62) : Qt.rgba(1, 1, 1, 0.72)
     readonly property color edge: dark ? Qt.rgba(1, 1, 1, 0.18) : Qt.rgba(0, 0, 0, 0.08)
     readonly property color danger: dark ? "#FF6961" : "#D70015"
+    // See ThemeV2.fontFamily. An empty name means "do not assign font.family".
     readonly property string uiFont: {
         var os = Qt.platform.os
-        if (os === "osx" || os === "macos")
-            return ".AppleSystemUIFont"
         if (os === "windows")
             return "Segoe UI"
         return ""
@@ -87,7 +86,7 @@ Item {
                             color: chips.mute
                             font.pixelSize: 10
                             font.weight: Font.DemiBold
-                            font.family: chips.uiFont
+                            Binding on font.family { when: chips.uiFont !== ""; value: chips.uiFont }
                             font.letterSpacing: 0.6
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -96,7 +95,7 @@ Item {
                             color: chips.ink
                             font.pixelSize: 13
                             font.weight: Font.DemiBold
-                            font.family: chips.uiFont
+                            Binding on font.family { when: chips.uiFont !== ""; value: chips.uiFont }
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
@@ -116,7 +115,7 @@ Item {
                     color: chips.confirming ? "#FFFFFF" : chips.ink
                     font.pixelSize: 13
                     font.weight: Font.DemiBold
-                    font.family: chips.uiFont
+                    Binding on font.family { when: chips.uiFont !== ""; value: chips.uiFont }
                 }
                 MouseArea {
                     anchors.fill: parent

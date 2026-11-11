@@ -60,7 +60,7 @@ Headless checks, from the repo root. No Mac, no GPU, and no host:
 bash scripts/run-tests.sh
 ```
 
-That runs the Python checks, the C++ logic tests (codec offer, bitrate, V-Sync, update comparison), and the Qt Test binary. The Qt binary needs `qmake6`, Qt Quick, and Qt Test. It loads the real v2 shell offscreen, toggles settings, and fails if QML reports a warning. CI runs this as the `headless-tests` job, separate from the packaging jobs.
+That runs the Python checks, the C++ logic tests (codec offer, bitrate, V-Sync, update comparison), and the Qt Test binary. The script looks for Qt 6 `qmake6` on `PATH`, then `qmake` if it reports Qt 6, then `QTDIR` (`$QTDIR/bin` or `$QTDIR/macos/bin`), then `~/Qt/*/macos/bin`. Official Qt 6.11.2 is `~/Qt/6.11.2/macos/bin/qmake`. The binary loads the real v2 shell offscreen, toggles settings, and fails if QML reports a warning. CI runs this as the `headless-tests` job. The macOS packaging job compiles the app, including the session codec checks.
 
 A fake GameStream HTTP server, still with no video:
 
@@ -80,6 +80,6 @@ python3 scripts/e2e/stream_matrix.py \
   --game Desktop
 ```
 
-The `.app` must be the build product. The script refuses a path under `/Applications`. It exports `com.moonlight-stream.Moonlight` first and imports that plist again when it finishes. Each case starts `stream`, waits until the log contains `Video stream is`, holds the stream for `--seconds` (default 8), takes a screenshot, then runs `quit` (or sends SIGTERM for that case). Reports land in `build/e2e-report/`. MetalFX is written into preferences for the cases that need it, because the stream command has no MetalFX flag. Pass `--host-end-command` (or `TWILIGHT_HOST_END_COMMAND`) with a shell command that makes the host end the stream; without it that case is skipped.
+The `.app` must be the build product. The script refuses a path under `/Applications` and refuses to start if a Twilight process is already running. `--host` must answer TCP 47989 or 47984 before any preference is written. It exports `com.moonlight-stream.Moonlight` first and aborts without changes if that export fails. It never deletes the preferences domain. After the run it imports the backup, checks the live plist matches, and leaves the backup file in the report directory. Each case starts `stream`, waits until the log contains `Video stream is`, holds the stream for `--seconds` (default 8), screenshots the Twilight window, then runs `quit` (or sends SIGTERM for that case). Reports land in `build/e2e-report/`. MetalFX is required in the log only when the stream size is smaller than the main display in both dimensions. Pass `--host-end-command` (or `TWILIGHT_HOST_END_COMMAND`) with a shell command that makes the host end the stream; without it that case is skipped.
 
 Still needs a person: whether the picture looks sharp, HDR brightness, VRR smoothness, controller rumble and adaptive triggers, and whether microphone audio sounds right on the host. The script only checks that the stream started, the logged codec and renderer match, MetalFX logged itself when requested, the process exited, and no new crash report appeared.

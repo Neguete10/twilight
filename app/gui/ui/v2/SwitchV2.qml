@@ -4,7 +4,7 @@ Item {
     id: root
     property var theme
     property bool checked: false
-    property bool enabled: true
+    // Item already has enabled. A second property of the same name makes Qt 6.11 warn.
     property bool keyed: false
     signal toggled(bool next)
 

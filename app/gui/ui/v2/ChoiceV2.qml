@@ -5,7 +5,7 @@ Flow {
     property var theme
     property var options: []
     property var current: undefined
-    property bool enabled: true
+    // Item already has enabled. A second property of the same name makes Qt 6.11 warn.
     signal picked(variant value)
 
     // keyIndex < 0 means the selected chip is the couch cursor.

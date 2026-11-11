@@ -91,6 +91,77 @@ def stop_process(process):
             process.wait(timeout=5)
 
 
+def running_twilight_pids():
+    result = subprocess.run(["pgrep", "-x", "Twilight"], capture_output=True, text=True)
+    return [int(part) for part in result.stdout.split() if part.isdigit()]
+
+
+def host_port_open(host):
+    import socket
+    for port in (47989, 47984):
+        try:
+            with socket.create_connection((host, port), timeout=3):
+                return port
+        except OSError:
+            continue
+    return None
+
+
+def main_display_pixels():
+    source = """
+import AppKit
+guard let screen = NSScreen.main else { exit(1) }
+let scale = screen.backingScaleFactor
+print(Int((screen.frame.width * scale).rounded()))
+print(Int((screen.frame.height * scale).rounded()))
+"""
+    result = subprocess.run(["swift", "-e", source], capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        return None
+    numbers = [int(line) for line in result.stdout.split() if line.isdigit()]
+    if len(numbers) < 2:
+        return None
+    return numbers[0], numbers[1]
+
+
+def window_id_for_pid(pid):
+    source = """
+import CoreGraphics
+let pid = Int32(%d)
+let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]
+var best = 0
+var bestArea = 0
+for window in info {
+    guard let owner = window[kCGWindowOwnerPID as String] as? Int32, owner == pid else { continue }
+    let bounds = window[kCGWindowBounds as String] as? [String: CGFloat] ?? [:]
+    let width = bounds["Width"] ?? 0
+    let height = bounds["Height"] ?? 0
+    let area = Int(width * height)
+    let number = window[kCGWindowNumber as String] as? Int ?? 0
+    if area > bestArea && number != 0 {
+        bestArea = area
+        best = number
+    }
+}
+if best == 0 { exit(1) }
+print(best)
+""" % pid
+    result = subprocess.run(["swift", "-e", source], capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        return None
+    token = result.stdout.strip().split()
+    if not token or not token[-1].isdigit():
+        return None
+    return int(token[-1])
+
+
+def plist_xml(path):
+    result = subprocess.run(
+        ["plutil", "-convert", "xml1", "-o", "-", str(path)],
+        check=True, capture_output=True)
+    return result.stdout
+
+
 class Matrix:
     def __init__(self, args):
         self.args = args
@@ -99,7 +170,9 @@ class Matrix:
         self.report_dir = Path(args.report).resolve()
         self.results = []
         self.backup = None
-        self.had_prefs = False
+        self.backup_xml = None
+        self.prefs_changed = False
+        self.screen = None
 
     def check_app(self):
         if sys.platform != "darwin":
@@ -110,41 +183,88 @@ class Matrix:
         if not self.binary.is_file():
             fail("missing executable %s" % self.binary)
 
+    def check_not_running(self):
+        pids = running_twilight_pids()
+        if pids:
+            fail("Twilight is already running (pid %s). Quit it before this matrix so two copies do not share one preferences file." % ", ".join(str(pid) for pid in pids))
+
+    def check_host(self):
+        port = host_port_open(self.args.host)
+        if port is None:
+            fail("Cannot reach %s on TCP 47989 or 47984. Those are the GameStream ports. Preferences were not changed." % self.args.host)
+        print("Host %s accepts TCP %d" % (self.args.host, port))
+
     def save_prefs(self):
         self.report_dir.mkdir(parents=True, exist_ok=True)
         self.backup = self.report_dir / "preferences-backup.plist"
         exported = subprocess.run(
             ["defaults", "export", DOMAIN, str(self.backup)],
             text=True, capture_output=True)
-        self.had_prefs = exported.returncode == 0
-        if not self.had_prefs and self.backup.exists():
-            self.backup.unlink()
+        if exported.returncode != 0 or not self.backup.is_file() or self.backup.stat().st_size == 0:
+            if self.backup.exists():
+                self.backup.unlink()
+            self.backup = None
+            fail("Could not export %s. Preferences were not changed.\n%s" % (DOMAIN, exported.stderr.strip()))
+        subprocess.run(["plutil", "-lint", str(self.backup)], check=True)
+        self.backup_xml = plist_xml(self.backup)
+        print("Preference backup kept at %s" % self.backup)
 
     def restore_prefs(self):
-        if self.had_prefs and self.backup and self.backup.exists():
-            subprocess.run(["defaults", "import", DOMAIN, str(self.backup)], check=False)
-        elif not self.had_prefs:
-            subprocess.run(["defaults", "delete", DOMAIN], check=False)
+        if not self.prefs_changed:
+            return
+        if self.backup is None or not self.backup.is_file() or self.backup_xml is None:
+            fail("Preferences were changed but there is no verified backup. %s was not deleted." % DOMAIN)
+        if plist_xml(self.backup) != self.backup_xml:
+            fail("The backup at %s no longer matches what was exported. %s was not imported or deleted." % (self.backup, DOMAIN))
+        subprocess.run(["defaults", "import", DOMAIN, str(self.backup)], check=True)
+        restored = self.report_dir / "preferences-restored.plist"
+        subprocess.run(["defaults", "export", DOMAIN, str(restored)], check=True)
+        if plist_xml(restored) != self.backup_xml:
+            fail("Restored preferences do not match %s. That backup file was left on disk." % self.backup)
+        print("Preferences restored from %s" % self.backup)
 
     def write_metal_fx(self, enabled):
+        self.prefs_changed = True
         subprocess.run(
             ["defaults", "write", DOMAIN, "metalfxupscaling", "-bool", "true" if enabled else "false"],
             check=True)
 
     def cases(self):
+        metal = {
+            "name": "hevc-sdr-metalfx",
+            "args": ["--720", "--video-codec", "HEVC", "--no-vsync", "--no-hdr"],
+            "metalfx": True,
+            "need": ["format 0x100", "Using Metal renderer"],
+            "forbid": ["MetalFX spatial upscaling active"],
+            "note": "display size was not detected; MetalFX activation is not required",
+        }
+        if self.screen:
+            width, height = self.screen
+            stream_w = (width * 2 // 3) // 2 * 2
+            stream_h = (height * 2 // 3) // 2 * 2
+            if stream_w >= 640 and stream_h >= 360 and stream_w < width and stream_h < height:
+                metal["args"] = ["--resolution", "%dx%d" % (stream_w, stream_h), "--video-codec", "HEVC", "--no-vsync", "--no-hdr"]
+                metal["need"] = ["format 0x100", "Using Metal renderer", "MetalFX spatial upscaling active"]
+                metal["forbid"] = []
+                metal["note"] = "stream %dx%d is smaller than the %dx%d display" % (stream_w, stream_h, width, height)
+            else:
+                metal["note"] = "display %dx%d is not larger than a usable stream in both dimensions" % (width, height)
         return [
-            {"name": "hevc-sdr-vsync", "args": ["--1080", "--video-codec", "HEVC", "--vsync", "--no-hdr"], "metalfx": False, "need": ["format 0x100", "Using Metal renderer"]},
-            {"name": "hevc-sdr-metalfx-720", "args": ["--720", "--video-codec", "HEVC", "--no-vsync", "--no-hdr"], "metalfx": True, "need": ["format 0x100", "Using Metal renderer", "MetalFX spatial upscaling active"]},
-            {"name": "hevc-hdr", "args": ["--1080", "--video-codec", "HEVC", "--hdr", "--vsync"], "metalfx": False, "need": ["format 0x200", "Using Metal renderer"]},
-            {"name": "h264-sdr", "args": ["--1080", "--video-codec", "H.264", "--no-hdr"], "metalfx": False, "need": ["format 0x1", "Using Metal renderer"]},
-            {"name": "av1-sdr", "args": ["--1080", "--video-codec", "AV1", "--no-hdr"], "metalfx": False, "need": ["format 0x1000"]},
-            {"name": "quit-app-on-host", "args": ["--1080", "--video-codec", "HEVC", "--quit-after", "--no-hdr"], "metalfx": False, "need": ["Video stream is "]},
-            {"name": "sigterm", "args": ["--1080", "--video-codec", "HEVC", "--no-hdr"], "metalfx": False, "need": ["Video stream is "], "sigterm": True},
+            {"name": "hevc-sdr-vsync", "args": ["--1080", "--video-codec", "HEVC", "--vsync", "--no-hdr"], "metalfx": False, "need": ["format 0x100", "Using Metal renderer"], "forbid": ["MetalFX spatial upscaling active"]},
+            metal,
+            {"name": "hevc-hdr", "args": ["--1080", "--video-codec", "HEVC", "--hdr", "--vsync"], "metalfx": False, "need": ["format 0x200", "Using Metal renderer"], "forbid": ["MetalFX spatial upscaling active"]},
+            {"name": "h264-sdr", "args": ["--1080", "--video-codec", "H.264", "--no-hdr"], "metalfx": False, "need": ["format 0x1", "Using Metal renderer"], "forbid": ["MetalFX spatial upscaling active"]},
+            {"name": "av1-sdr", "args": ["--1080", "--video-codec", "AV1", "--no-hdr"], "metalfx": False, "need": ["format 0x1000"], "forbid": ["MetalFX spatial upscaling active"]},
+            {"name": "quit-app-on-host", "args": ["--1080", "--video-codec", "HEVC", "--quit-after", "--no-hdr"], "metalfx": False, "need": ["Video stream is "], "forbid": []},
+            {"name": "sigterm", "args": ["--1080", "--video-codec", "HEVC", "--no-hdr"], "metalfx": False, "need": ["Video stream is "], "forbid": [], "sigterm": True},
         ]
 
     def finish(self, process, case, log_path, started):
         shot = self.report_dir / ("%s.png" % case["name"])
-        subprocess.run(["screencapture", "-x", str(shot)], check=False)
+        window_id = window_id_for_pid(process.pid)
+        if window_id is None:
+            fail("Could not find the Twilight window to screenshot")
+        subprocess.run(["screencapture", "-x", "-l", str(window_id), str(shot)], check=True)
         if case.get("sigterm"):
             process.send_signal(signal.SIGTERM)
         elif case.get("host_end"):
@@ -158,10 +278,13 @@ class Matrix:
             process.wait(timeout=5)
             fail("stream process did not exit")
         text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
-        missing = [token for token in case["need"] if token not in text]
+        missing = [token for token in case.get("need", []) if token not in text]
+        forbidden = [token for token in case.get("forbid", []) if token in text]
         crashes = crash_reports_since(started)
         if missing:
             fail("log missing: %s" % ", ".join(missing))
+        if forbidden:
+            fail("log should not contain: %s" % ", ".join(forbidden))
         if crashes:
             fail("crash reports: %s" % ", ".join(crashes))
         if not case.get("sigterm") and code != 0:
@@ -171,7 +294,7 @@ class Matrix:
             if "bitrate" in line.lower() or "GPU" in line or "MetalFX" in line or "Video stream is" in line
         )
         (self.report_dir / ("%s.log.txt" % case["name"])).write_text(perf, encoding="utf-8")
-        return {"name": case["name"], "status": "pass", "exit": code, "screenshot": str(shot)}
+        return {"name": case["name"], "status": "pass", "exit": code, "screenshot": str(shot), "note": case.get("note", "")}
 
     def one(self, case):
         started = time.time()
@@ -204,6 +327,11 @@ class Matrix:
 
     def execute(self):
         self.check_app()
+        self.check_not_running()
+        self.check_host()
+        self.screen = main_display_pixels()
+        if self.screen:
+            print("Main display %dx%d" % self.screen)
         self.save_prefs()
         try:
             for case in self.cases():

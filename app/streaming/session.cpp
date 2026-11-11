@@ -8,9 +8,6 @@ static_assert(static_cast<int>(StreamingPreferences::VCC_FORCE_HEVC) == CodecOff
 static_assert(static_cast<int>(StreamingPreferences::VCC_FORCE_HEVC_HDR_DEPRECATED) == CodecOffer::ForceHevcHdrDeprecated, "deprecated HEVC+HDR codec value");
 static_assert(static_cast<int>(StreamingPreferences::VCC_FORCE_AV1) == CodecOffer::ForceAv1, "AV1 codec value");
 static_assert(static_cast<int>(StreamingPreferences::VCC_FORCE_PYROWAVE) == CodecOffer::ForcePyroWave, "PyroWave codec value");
-static_assert(static_cast<int>(Session::DecoderAvailability::None) == CodecOffer::DecodeNone, "decoder none");
-static_assert(static_cast<int>(Session::DecoderAvailability::Software) == CodecOffer::DecodeSoftware, "decoder software");
-static_assert(static_cast<int>(Session::DecoderAvailability::Hardware) == CodecOffer::DecodeHardware, "decoder hardware");
 #include "settings/bitrate_choice.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/adaptive_bitrate.h"
@@ -932,6 +929,12 @@ bool Session::initialize(QQuickWindow* qtWindow)
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Audio channel mask: %X",
                 CHANNEL_MASK_FROM_AUDIO_CONFIGURATION(m_StreamConfig.audioConfiguration));
+
+    // DecoderAvailability is private. These checks live in a member function
+    // so the enum stays private and the app target still compiles.
+    static_assert(static_cast<int>(DecoderAvailability::None) == CodecOffer::DecodeNone, "decoder none");
+    static_assert(static_cast<int>(DecoderAvailability::Software) == CodecOffer::DecodeSoftware, "decoder software");
+    static_assert(static_cast<int>(DecoderAvailability::Hardware) == CodecOffer::DecodeHardware, "decoder hardware");
 
     CodecOffer::Request offerRequest;
     offerRequest.codec = static_cast<int>(m_Preferences->videoCodecConfig);

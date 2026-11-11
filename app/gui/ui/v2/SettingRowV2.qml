@@ -5,7 +5,7 @@ Item {
     property var theme
     property string title
     property string subtitle: ""
-    property bool enabled: true
+    // Item already has enabled. A second property of the same name makes Qt 6.11 warn.
     property bool divider: true
 
     // Implementation items are assigned to `frame`, not the default property,

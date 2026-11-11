@@ -40,9 +40,7 @@ jobs:
 
       - name: Install create-dmg (macOS)
         if: runner.os == 'macOS'
-        run: |
-          brew install node
-          npm install --global create-dmg
+        run: brew install create-dmg
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4

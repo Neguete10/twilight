@@ -133,9 +133,47 @@ dsymutil "$APP_BUNDLE/Contents/MacOS/Twilight" -o Twilight-$VERSION.dsym || fail
 cp -R Twilight-$VERSION.dsym $INSTALLER_FOLDER || fail "dSYM copy failed!"
 popd
 
-echo Hiding libmimer
-if [ -d "$QTDIR" ]; then
-  mv "$QTDIR/macos/plugins/sqldrivers/libqsqlmimer.dylib" "$QTDIR/macos/plugins/sqldrivers/libqsqlmimer.dylib.hide"
+# Twilight does not use Qt SQL. The official Qt macOS package still ships
+# sqldrivers whose install names point at libmimerapi, libiodbc, and libpq.
+# macdeployqt runs otool on every plugin it finds, and those dylibs are not
+# on a CI runner (or on a Mac that never installed Mimer, iODBC, or Postgres).
+# Move the whole plugin directory aside, then put it back so the Qt install
+# is unchanged. The bundle copy is deleted below with the other unused plugins.
+qt_sqldrivers_dir()
+{
+  if [ -n "${QTDIR:-}" ] && [ -d "$QTDIR/macos/plugins/sqldrivers" ]; then
+    printf '%s\n' "$QTDIR/macos/plugins/sqldrivers"
+    return
+  fi
+  if command -v qmake >/dev/null 2>&1; then
+    local plugins
+    plugins=$(qmake -query QT_INSTALL_PLUGINS 2>/dev/null || true)
+    if [ -n "$plugins" ] && [ -d "$plugins/sqldrivers" ]; then
+      printf '%s\n' "$plugins/sqldrivers"
+    fi
+  fi
+}
+
+SQL_PLUGINS=$(qt_sqldrivers_dir || true)
+SQL_HIDDEN=
+restore_sql_plugins()
+{
+  if [ -n "${SQL_HIDDEN:-}" ] && [ -d "$SQL_HIDDEN" ]; then
+    rm -rf "$SQL_PLUGINS"
+    mv "$SQL_HIDDEN" "$SQL_PLUGINS"
+    SQL_HIDDEN=
+  fi
+}
+trap restore_sql_plugins EXIT
+
+echo Hiding Qt SQL drivers from macdeployqt
+if [ -n "$SQL_PLUGINS" ]; then
+  SQL_HIDDEN="${SQL_PLUGINS}.twilight-hidden"
+  rm -rf "$SQL_HIDDEN"
+  mv "$SQL_PLUGINS" "$SQL_HIDDEN"
+  echo "Moved $SQL_PLUGINS aside"
+else
+  echo "No Qt sqldrivers directory found"
 fi
 
 echo Creating app bundle
@@ -145,10 +183,7 @@ echo Extra deployment arguments: $EXTRA_ARGS
 # Sign after deployment so Developer ID gets its entitlements plist
 # (only the Hardened Runtime audio-input exception) explicitly. App Sandbox entitlements broke launch in 7.0.1.
 macdeployqt "$APP_BUNDLE" $EXTRA_ARGS -qmldir=$SOURCE_ROOT/app/gui -no-codesign || fail "macdeployqt failed!"
-
-if [ -d "$QTDIR" ]; then
-  mv "$QTDIR/macos/plugins/sqldrivers/libqsqlmimer.dylib.hide" "$QTDIR/macos/plugins/sqldrivers/libqsqlmimer.dylib"
-fi
+restore_sql_plugins
 
 echo Removing unused Qt cruft
 for plugin in geometryloaders multimedia sqldrivers; do

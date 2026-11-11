@@ -1,4 +1,10 @@
 include(../globaldefs.pri)
+# debug_and_release (from globaldefs.pri) writes a top-level Makefile that
+# runs build/headless-tests/rcc_wrapper.sh while qmake only creates that
+# wrapper inside the release/ subdirectory. One release makefile keeps the
+# wrapper next to the rule that executes it.
+CONFIG -= debug_and_release debug_and_release_target
+CONFIG += release
 
 QT += core gui qml quick testlib network
 CONFIG += console c++17 testcase warn_on
