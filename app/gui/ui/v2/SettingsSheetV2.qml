@@ -1011,7 +1011,7 @@ Item {
                         SettingRowV2 {
                             width: parent.width
                             theme: sheet.theme
-                            divider: false
+                            divider: Qt.platform.os === "osx"
                             title: qsTr("YUV 4:4:4")
                             subtitle: qsTr("Sharper text and desktop. Not ideal for fast games.")
                             SwitchV2 {
@@ -1019,6 +1019,20 @@ Item {
                                 theme: sheet.theme
                                 checked: StreamingPreferences.enableYUV444
                                 onToggled: sheet.applyYuv(next)
+                            }
+                        }
+                        SettingRowV2 {
+                            width: parent.width
+                            theme: sheet.theme
+                            divider: false
+                            visible: Qt.platform.os === "osx"
+                            title: qsTr("MetalFX upscaling")
+                            subtitle: qsTr("Sharpens a lower stream resolution on this display. Takes effect on the next stream.")
+                            SwitchV2 {
+                                id: metalFxSwitch
+                                theme: sheet.theme
+                                checked: StreamingPreferences.enableMetalFxUpscaling
+                                onToggled: StreamingPreferences.enableMetalFxUpscaling = next
                             }
                         }
                     }

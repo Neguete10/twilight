@@ -33,6 +33,7 @@
 #define SER_VIDEOCFG "videocfg"
 #define SER_HDR "hdr"
 #define SER_YUV444 "yuv444"
+#define SER_METALFX_UPSCALING "metalfxupscaling"
 #define SER_VIDEODEC "videodec"
 #define SER_WINDOWMODE "windowmode"
 #define SER_MDNS "mdns"
@@ -148,6 +149,7 @@ void StreamingPreferences::reload()
     height = settings.value(SER_HEIGHT, 1080).toInt();
     fps = settings.value(SER_FPS, 60).toInt();
     enableYUV444 = settings.value(SER_YUV444, false).toBool();
+    enableMetalFxUpscaling = settings.value(SER_METALFX_UPSCALING, false).toBool();
     {
         const int defaultBitrate = getDefaultBitrate(width, height, fps, enableYUV444);
         // A stored 500000, or the word "unlimited", loads as 500000. A stale
@@ -467,6 +469,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_SPATIALAUDIOCFG, static_cast<int>(spatialAudioConfig));
     settings.setValue(SER_HDR, enableHdr);
     settings.setValue(SER_YUV444, enableYUV444);
+    settings.setValue(SER_METALFX_UPSCALING, enableMetalFxUpscaling);
     settings.setValue(SER_VIDEOCFG, static_cast<int>(videoCodecConfig));
     settings.setValue(SER_VIDEODEC, static_cast<int>(videoDecoderSelection));
     settings.setValue(SER_RENDERER, static_cast<int>(rendererSelection));

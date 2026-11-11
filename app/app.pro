@@ -191,7 +191,8 @@ macx {
         -framework MetalKit \
         -framework QuartzCore \
         -framework Security \
-        -framework VideoToolbox
+        -framework VideoToolbox \
+        -weak_framework MetalFX
     CONFIG += ffmpeg
 }
 
