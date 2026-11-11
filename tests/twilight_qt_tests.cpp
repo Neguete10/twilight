@@ -6,6 +6,7 @@
 #include "backend/updateversion.h"
 
 #include <QAbstractListModel>
+#include <QFont>
 #include <QGuiApplication>
 #include <QImage>
 #include <QQmlComponent>
@@ -701,6 +702,10 @@ int main(int argc, char** argv)
     QCoreApplication::setApplicationName(QStringLiteral("TwilightTests"));
 
     QGuiApplication app(argc, argv);
+#ifdef Q_OS_DARWIN
+    // Same reason as main: the default family "Sans Serif" is not installed.
+    app.setFont(QFont(QStringLiteral("Helvetica Neue")));
+#endif
     AppLogicTests logic;
     int status = QTest::qExec(&logic, argc, argv);
     ShellSmokeTests shell;

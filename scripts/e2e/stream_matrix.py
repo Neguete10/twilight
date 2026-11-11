@@ -3,7 +3,14 @@
 
 This does not build Twilight and it does not touch /Applications. Preferences
 in com.moonlight-stream.Moonlight are exported before the run and imported
-again afterwards, including when a case fails.
+again afterwards, including when a case fails. A failed export aborts before
+any preference is written, and the domain is never deleted.
+
+The stream is ended with SIGTERM. During the stream loop that signal is the
+client's own quit and the process should exit 0. `Twilight quit` is a second
+process that tells the host to cancel; the stream then logs
+"Connection terminated: -1" and the CLI exits 1. That is a host drop, not a
+client disconnect, so this script does not use it while the stream is up.
 
     python3 scripts/e2e/stream_matrix.py \\
         --app build/Twilight.app \\
@@ -32,8 +39,15 @@ DOMAIN = "com.moonlight-stream.Moonlight"
 CRASH_DIR = Path.home() / "Library" / "Logs" / "DiagnosticReports"
 
 
-def fail(message):
-    raise RuntimeError(message)
+class CaseFailure(RuntimeError):
+    def __init__(self, message, screenshot="", exit_code=None):
+        super().__init__(message)
+        self.screenshot = screenshot or ""
+        self.exit_code = exit_code
+
+
+def fail(message, screenshot="", exit_code=None):
+    raise CaseFailure(message, screenshot, exit_code)
 
 
 def crash_reports_since(started):
@@ -91,9 +105,22 @@ def stop_process(process):
             process.wait(timeout=5)
 
 
-def running_twilight_pids():
-    result = subprocess.run(["pgrep", "-x", "Twilight"], capture_output=True, text=True)
-    return [int(part) for part in result.stdout.split() if part.isdigit()]
+def running_twilight():
+    """Return (pid, executable path) for each Twilight binary already running."""
+    result = subprocess.run(["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True)
+    found = []
+    for line in result.stdout.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        pid, _, command = text.partition(" ")
+        command = command.strip()
+        if not pid.isdigit() or not command:
+            continue
+        executable = command.split()[0]
+        if executable.rsplit("/", 1)[-1] == "Twilight":
+            found.append((int(pid), executable))
+    return found
 
 
 def host_port_open(host):
@@ -184,15 +211,21 @@ class Matrix:
             fail("missing executable %s" % self.binary)
 
     def check_not_running(self):
-        pids = running_twilight_pids()
-        if pids:
-            fail("Twilight is already running (pid %s). Quit it before this matrix so two copies do not share one preferences file." % ", ".join(str(pid) for pid in pids))
+        running = running_twilight()
+        if running:
+            details = ", ".join("pid %d %s" % (pid, path) for pid, path in running)
+            fail("Twilight is already running (%s). Quit it before this matrix so two copies do not share one preferences file." % details)
 
     def check_host(self):
-        port = host_port_open(self.args.host)
-        if port is None:
-            fail("Cannot reach %s on TCP 47989 or 47984. Those are the GameStream ports. Preferences were not changed." % self.args.host)
-        print("Host %s accepts TCP %d" % (self.args.host, port))
+        for attempt in range(1, 4):
+            port = host_port_open(self.args.host)
+            if port is not None:
+                print("Host %s accepts TCP %d" % (self.args.host, port))
+                return
+            if attempt < 3:
+                print("Host %s did not accept TCP 47989 or 47984 (try %d of 3). Retrying in 10s." % (self.args.host, attempt))
+                time.sleep(10)
+        fail("Cannot reach %s on TCP 47989 or 47984 after 3 tries. Those are the GameStream ports. Preferences were not changed." % self.args.host)
 
     def save_prefs(self):
         self.report_dir.mkdir(parents=True, exist_ok=True)
@@ -235,7 +268,7 @@ class Matrix:
             "args": ["--720", "--video-codec", "HEVC", "--no-vsync", "--no-hdr"],
             "metalfx": True,
             "need": ["format 0x100", "Using Metal renderer"],
-            "forbid": ["MetalFX spatial upscaling active"],
+            "forbid": ["MetalFX spatial upscaling active", "Connection terminated:"],
             "note": "display size was not detected; MetalFX activation is not required",
         }
         if self.screen:
@@ -245,56 +278,95 @@ class Matrix:
             if stream_w >= 640 and stream_h >= 360 and stream_w < width and stream_h < height:
                 metal["args"] = ["--resolution", "%dx%d" % (stream_w, stream_h), "--video-codec", "HEVC", "--no-vsync", "--no-hdr"]
                 metal["need"] = ["format 0x100", "Using Metal renderer", "MetalFX spatial upscaling active"]
-                metal["forbid"] = []
+                metal["forbid"] = ["Connection terminated:"]
                 metal["note"] = "stream %dx%d is smaller than the %dx%d display" % (stream_w, stream_h, width, height)
             else:
                 metal["note"] = "display %dx%d is not larger than a usable stream in both dimensions" % (width, height)
         return [
-            {"name": "hevc-sdr-vsync", "args": ["--1080", "--video-codec", "HEVC", "--vsync", "--no-hdr"], "metalfx": False, "need": ["format 0x100", "Using Metal renderer"], "forbid": ["MetalFX spatial upscaling active"]},
+            {"name": "hevc-sdr-vsync", "args": ["--1080", "--video-codec", "HEVC", "--vsync", "--no-hdr"], "metalfx": False, "need": ["format 0x100", "Using Metal renderer"], "forbid": ["MetalFX spatial upscaling active", "Connection terminated:"]},
             metal,
-            {"name": "hevc-hdr", "args": ["--1080", "--video-codec", "HEVC", "--hdr", "--vsync"], "metalfx": False, "need": ["format 0x200", "Using Metal renderer"], "forbid": ["MetalFX spatial upscaling active"]},
-            {"name": "h264-sdr", "args": ["--1080", "--video-codec", "H.264", "--no-hdr"], "metalfx": False, "need": ["format 0x1", "Using Metal renderer"], "forbid": ["MetalFX spatial upscaling active"]},
-            {"name": "av1-sdr", "args": ["--1080", "--video-codec", "AV1", "--no-hdr"], "metalfx": False, "need": ["format 0x1000"], "forbid": ["MetalFX spatial upscaling active"]},
-            {"name": "quit-app-on-host", "args": ["--1080", "--video-codec", "HEVC", "--quit-after", "--no-hdr"], "metalfx": False, "need": ["Video stream is "], "forbid": []},
-            {"name": "sigterm", "args": ["--1080", "--video-codec", "HEVC", "--no-hdr"], "metalfx": False, "need": ["Video stream is "], "forbid": [], "sigterm": True},
+            {"name": "hevc-hdr", "args": ["--1080", "--video-codec", "HEVC", "--hdr", "--vsync"], "metalfx": False, "need": ["format 0x200", "Using Metal renderer"], "forbid": ["MetalFX spatial upscaling active", "Connection terminated:"]},
+            {"name": "h264-sdr", "args": ["--1080", "--video-codec", "H.264", "--no-hdr"], "metalfx": False, "need": ["format 0x1", "Using Metal renderer"], "forbid": ["MetalFX spatial upscaling active", "Connection terminated:"]},
+            {"name": "av1-sdr", "args": ["--1080", "--video-codec", "AV1", "--no-hdr"], "metalfx": False, "need": ["format 0x1000"], "forbid": ["MetalFX spatial upscaling active", "Connection terminated:"]},
+            {"name": "quit-app-on-host", "args": ["--1080", "--video-codec", "HEVC", "--quit-after", "--no-hdr"], "metalfx": False, "need": ["Video stream is ", "Quit response:"], "forbid": ["Connection terminated:"], "quit_host": True},
+            {"name": "sigterm", "args": ["--1080", "--video-codec", "HEVC", "--no-hdr"], "metalfx": False, "need": ["Video stream is "], "forbid": ["Connection terminated:"]},
         ]
+
+    def host_running_game(self):
+        result = subprocess.run(
+            [str(self.binary), "list", self.args.host],
+            capture_output=True, text=True, timeout=40)
+        if result.returncode != 0:
+            fail("list exited %s\n%s" % (result.returncode, result.stderr.strip()))
+        for line in result.stdout.splitlines():
+            if line.startswith("Running:"):
+                return line.split(":", 1)[1].strip()
+        fail("list did not print a Running: line")
+
+    def stop_host_app(self):
+        # The stream process has already exited. This only clears the host
+        # app so the next case is a fresh launch.
+        result = subprocess.run(
+            [str(self.binary), "quit", self.args.host],
+            capture_output=True, text=True, timeout=40)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            fail("Twilight quit exited %s after the stream process had already ended.\n%s" % (result.returncode, detail))
 
     def finish(self, process, case, log_path, started):
         shot = self.report_dir / ("%s.png" % case["name"])
-        window_id = window_id_for_pid(process.pid)
-        if window_id is None:
-            fail("Could not find the Twilight window to screenshot")
-        subprocess.run(["screencapture", "-x", "-l", str(window_id), str(shot)], check=True)
-        if case.get("sigterm"):
-            process.send_signal(signal.SIGTERM)
-        elif case.get("host_end"):
-            subprocess.run(self.args.host_end_command, shell=True, check=True, timeout=30)
-        else:
-            subprocess.run([str(self.binary), "quit", self.args.host], check=False, timeout=30)
+        shot_path = ""
+        code = None
         try:
-            code = process.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
-            fail("stream process did not exit")
-        text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
-        missing = [token for token in case.get("need", []) if token not in text]
-        forbidden = [token for token in case.get("forbid", []) if token in text]
-        crashes = crash_reports_since(started)
-        if missing:
-            fail("log missing: %s" % ", ".join(missing))
-        if forbidden:
-            fail("log should not contain: %s" % ", ".join(forbidden))
-        if crashes:
-            fail("crash reports: %s" % ", ".join(crashes))
-        if not case.get("sigterm") and code != 0:
-            fail("exit code %s" % code)
-        perf = "\n".join(
-            line for line in text.splitlines()
-            if "bitrate" in line.lower() or "GPU" in line or "MetalFX" in line or "Video stream is" in line
-        )
-        (self.report_dir / ("%s.log.txt" % case["name"])).write_text(perf, encoding="utf-8")
-        return {"name": case["name"], "status": "pass", "exit": code, "screenshot": str(shot), "note": case.get("note", "")}
+            window_id = window_id_for_pid(process.pid)
+            if window_id is None:
+                fail("Could not find the Twilight window to screenshot")
+            subprocess.run(["screencapture", "-x", "-l", str(window_id), str(shot)], check=True)
+            shot_path = str(shot)
+            if case.get("host_end"):
+                subprocess.run(self.args.host_end_command, shell=True, check=True, timeout=30)
+            else:
+                # SIGTERM during the stream loop posts SDL_QUIT. That is the
+                # client's own quit, so the CLI should exit 0. Twilight quit
+                # while this process is still connected cancels the host
+                # session instead, and the client exits 1.
+                process.send_signal(signal.SIGTERM)
+            try:
+                code = process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+                fail("stream process did not exit", screenshot=shot_path)
+            text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+            missing = [token for token in case.get("need", []) if token not in text]
+            forbidden = [token for token in case.get("forbid", []) if token in text]
+            crashes = crash_reports_since(started)
+            if missing:
+                fail("log missing: %s" % ", ".join(missing), screenshot=shot_path, exit_code=code)
+            if forbidden:
+                fail("log should not contain: %s" % ", ".join(forbidden), screenshot=shot_path, exit_code=code)
+            if crashes:
+                fail("crash reports: %s" % ", ".join(crashes), screenshot=shot_path, exit_code=code)
+            if not case.get("host_end") and code != 0:
+                fail("exit code %s" % code, screenshot=shot_path, exit_code=code)
+            if case.get("quit_host"):
+                running = self.host_running_game()
+                if running != "none":
+                    fail("host app list still shows a running game: %s" % running, screenshot=shot_path, exit_code=code)
+            else:
+                self.stop_host_app()
+            perf = "\n".join(
+                line for line in text.splitlines()
+                if "bitrate" in line.lower() or "GPU" in line or "MetalFX" in line or "Video stream is" in line or "Quit response:" in line
+            )
+            (self.report_dir / ("%s.log.txt" % case["name"])).write_text(perf, encoding="utf-8")
+            return {"name": case["name"], "status": "pass", "exit": code, "screenshot": shot_path, "note": case.get("note", "")}
+        except CaseFailure as error:
+            if not error.screenshot:
+                error.screenshot = shot_path
+            if error.exit_code is None:
+                error.exit_code = code
+            raise
 
     def one(self, case):
         started = time.time()
@@ -315,6 +387,8 @@ class Matrix:
                 "name": "host-ended",
                 "status": "skip",
                 "note": "pass --host-end-command to stop the stream from the host",
+                "exit": None,
+                "screenshot": "",
             }
         case = {
             "name": "host-ended",
@@ -339,14 +413,14 @@ class Matrix:
                     self.results.append(self.one(case))
                     print("PASS", case["name"])
                 except Exception as error:
-                    self.results.append({"name": case["name"], "status": "fail", "note": str(error)})
+                    self.results.append(self.failure_row(case["name"], error))
                     print("FAIL", case["name"], error)
             try:
                 result = self.host_ended()
                 self.results.append(result)
                 print(result["status"].upper(), result["name"], result.get("note", ""))
             except Exception as error:
-                self.results.append({"name": "host-ended", "status": "fail", "note": str(error)})
+                self.results.append(self.failure_row("host-ended", error))
                 print("FAIL host-ended", error)
         finally:
             self.restore_prefs()
@@ -369,11 +443,25 @@ class Matrix:
             sum(1 for result in self.results if result["status"] == "skip")))
         return 1 if failed else 0
 
+    def failure_row(self, name, error):
+        screenshot = ""
+        exit_code = None
+        if isinstance(error, CaseFailure):
+            screenshot = error.screenshot
+            exit_code = error.exit_code
+        return {
+            "name": name,
+            "status": "fail",
+            "note": str(error),
+            "exit": exit_code,
+            "screenshot": screenshot,
+        }
+
 
 def main(argv):
     parser = argparse.ArgumentParser(description="Run a Twilight stream matrix against a LAN host")
     parser.add_argument("--app", required=True, help="Path to Twilight.app (not under /Applications)")
-    parser.add_argument("--host", required=True, help="Host name, UUID, or IP already paired on this Mac")
+    parser.add_argument("--host", required=True, help="Paired host name or IP that accepts TCP 47989 or 47984")
     parser.add_argument("--game", default="Desktop", help="App name on the host")
     parser.add_argument("--seconds", type=int, default=8, help="How long to leave each stream up")
     parser.add_argument("--start-timeout", type=int, default=45, dest="start_timeout")

@@ -46,6 +46,32 @@ g++ -std=c++17 -Wall -Wextra -Werror \
 echo "== qt =="
 # Official Qt puts qmake at ~/Qt/6.11.2/macos/bin/qmake (no qmake6 name).
 # QTDIR may point at that prefix or at the macos directory.
+qmake_version_of() {
+  dir=$(dirname "$1")
+  dir=$(dirname "$dir")
+  base=$(basename "$dir")
+  if [ "$base" = "macos" ]; then
+    dir=$(dirname "$dir")
+    base=$(basename "$dir")
+  fi
+  printf '%s\n' "$base"
+}
+
+qmake_version_gt() {
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    n = split(a, A, ".")
+    m = split(b, B, ".")
+    if (m > n) n = m
+    for (i = 1; i <= n; i++) {
+      av = A[i] + 0
+      bv = B[i] + 0
+      if (av > bv) exit 0
+      if (av < bv) exit 1
+    }
+    exit 1
+  }'
+}
+
 find_qmake() {
   if [ -n "${QTDIR:-}" ]; then
     for bin in "$QTDIR/bin/qmake6" "$QTDIR/bin/qmake" "$QTDIR/macos/bin/qmake6" "$QTDIR/macos/bin/qmake"; do
@@ -68,12 +94,35 @@ find_qmake() {
         ;;
     esac
   fi
-  for bin in "$HOME"/Qt/*/macos/bin/qmake6 "$HOME"/Qt/*/macos/bin/qmake "$HOME"/Qt/*/bin/qmake6 "$HOME"/Qt/*/bin/qmake; do
-    if [ -x "$bin" ]; then
-      printf '%s\n' "$bin"
-      return 0
+  # Official layout is ~/Qt/<version>/macos/bin. Also accept a Qt tree a few
+  # directories down, such as ~/Developer/twilight-builds/Qt/6.11.2/macos/bin.
+  # The highest version wins when more than one is installed.
+  newest=
+  newest_ver=
+  for candidate in \
+    "$HOME"/Qt/*/macos/bin/qmake6 \
+    "$HOME"/Qt/*/macos/bin/qmake \
+    "$HOME"/Qt/*/bin/qmake6 \
+    "$HOME"/Qt/*/bin/qmake \
+    "$HOME"/*/Qt/*/macos/bin/qmake6 \
+    "$HOME"/*/Qt/*/macos/bin/qmake \
+    "$HOME"/*/*/Qt/*/macos/bin/qmake6 \
+    "$HOME"/*/*/Qt/*/macos/bin/qmake \
+    "$HOME"/*/*/*/Qt/*/macos/bin/qmake6 \
+    "$HOME"/*/*/*/Qt/*/macos/bin/qmake
+  do
+    if [ -x "$candidate" ]; then
+      ver=$(qmake_version_of "$candidate")
+      if [ -z "$newest" ] || qmake_version_gt "$ver" "$newest_ver"; then
+        newest=$candidate
+        newest_ver=$ver
+      fi
     fi
   done
+  if [ -n "$newest" ]; then
+    printf '%s\n' "$newest"
+    return 0
+  fi
   return 1
 }
 QMAKE=$(find_qmake) || {

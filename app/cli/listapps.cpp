@@ -3,6 +3,7 @@
 #include "backend/boxartmanager.h"
 #include "backend/computermanager.h"
 #include "backend/computerseeker.h"
+#include "backend/nvhttp.h"
 
 #include <QCoreApplication>
 
@@ -97,6 +98,20 @@ public:
 
                         const auto appList = http.getAppList();
                         m_Arguments.isPrintCSV() ? printAppsCSV(appList) : printApps(appList);
+                        if (!m_Arguments.isPrintCSV()) {
+                            QString running = QStringLiteral("none");
+                            const int gameId = NvHTTP::getCurrentGame(http.getServerInfo(NvHTTP::NVLL_ERROR));
+                            if (gameId != 0) {
+                                running = QString::number(gameId);
+                                for (const NvApp& app : appList) {
+                                    if (app.id == gameId) {
+                                        running = app.name;
+                                        break;
+                                    }
+                                }
+                            }
+                            fprintf(stdout, "Running: %s\n", qPrintable(running));
+                        }
 
                         QCoreApplication::exit(0);
                     } catch (std::exception& exception) {
